@@ -44,7 +44,11 @@ func (b *BlobCache) NewImageSource(ctx context.Context, sys *types.SystemContext
 		return nil, fmt.Errorf("error creating new image source %q: %w", transports.ImageName(b.reference), err)
 	}
 	logrus.Debugf("starting to read from image %q using blob cache in %q (compression=%v)", transports.ImageName(b.reference), b.directory, b.compress)
-	s := &blobCacheSource{reference: b, source: imagesource.FromPublic(src), sys: *sys}
+	var sys_ types.SystemContext
+	if sys != nil {
+		sys_ = *sys
+	}
+	s := &blobCacheSource{reference: b, source: imagesource.FromPublic(src), sys: sys_}
 	s.Compat = impl.AddCompat(s)
 	return s, nil
 }
