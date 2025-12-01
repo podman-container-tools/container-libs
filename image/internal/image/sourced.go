@@ -18,8 +18,12 @@ import (
 //
 // The caller must call .Close() on the returned ImageCloser.
 //
-// NOTE: If any kind of signature verification should happen, build an UnparsedImage from the value returned by NewImageSource,
-// verify that UnparsedImage, and convert it into a real Image via image.FromUnparsedImage instead of calling this function.
+// NOTE: This exists only for conveniently implementing types.ImageReference.NewImage()
+// in transports, and should not be called in any other new code:
+//
+//   - If any kind of signature verification should happen, build an UnparsedImage from the value returned by NewImageSource,
+//     verify that UnparsedImage, and convert it into a real Image via image.FromUnparsedImage instead of calling this function.
+//   - Also, this does not expose NewImageSourceOptions. (That could be changed, but most callers need a different structure anyway.)
 func FromReference(ctx context.Context, sys *types.SystemContext, ref types.ImageReference) (types.ImageCloser, error) {
 	src, err := imagesource.NewImageSource(ctx, ref, private.NewImageSourceOptions{
 		Sys:     sys,
@@ -58,7 +62,7 @@ type imageCloser struct {
 // NOTE: If any kind of signature verification should happen, build an UnparsedImage from the value returned by NewImageSource,
 // verify that UnparsedImage, and convert it into a real Image via image.FromUnparsedImage instead of calling this function.
 //
-// Most callers can use either FromUnparsedImage or FromReference instead.
+// Internal callers should use FromUnparsedImage instead, except within an implementation of types.ImageReference.NewImage.
 //
 // A public-interface variant of this is publicly visible as c/image/image.FromSource.
 func FromSource(ctx context.Context, sys *types.SystemContext, src private.ImageSource) (types.ImageCloser, error) {
