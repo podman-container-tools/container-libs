@@ -73,7 +73,7 @@ func (r *tarballReference) NewImage(ctx context.Context, sys *types.SystemContex
 // NewImageSourceWithOptions returns a private.ImageSource for this reference.
 // The caller must call .Close() on the returned ImageSource.
 func (r *tarballReference) NewImageSourceWithOptions(ctx context.Context, options private.NewImageSourceOptions) (private.ImageSource, error) {
-	return r.newImageSource()
+	return r.newImageSource(options)
 }
 
 // NewImageSource returns a types.ImageSource for this reference.
