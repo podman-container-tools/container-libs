@@ -42,7 +42,7 @@ type blobCacheSource struct {
 // NewImageSourceWithOptions returns a private.ImageSource for this reference.
 // The caller must call .Close() on the returned ImageSource.
 func (b *BlobCache) NewImageSourceWithOptions(ctx context.Context, options private.NewImageSourceOptions) (private.ImageSource, error) {
-	src, err := b.reference.NewImageSource(ctx, options.Sys)
+	src, err := imagesource.NewImageSource(ctx, b.reference, options)
 	if err != nil {
 		return nil, fmt.Errorf("error creating new image source %q: %w", transports.ImageName(b.reference), err)
 	}
@@ -51,7 +51,7 @@ func (b *BlobCache) NewImageSourceWithOptions(ctx context.Context, options priva
 	if options.Sys != nil {
 		sys = *options.Sys
 	}
-	s := &blobCacheSource{reference: b, source: imagesource.FromPublic(src), sys: sys}
+	s := &blobCacheSource{reference: b, source: src, sys: sys}
 	s.Compat = impl.AddCompat(s)
 	return s, nil
 }
