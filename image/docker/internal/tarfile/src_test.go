@@ -9,6 +9,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.podman.io/image/v5/internal/digests"
+	"go.podman.io/image/v5/internal/private"
 	"go.podman.io/image/v5/manifest"
 	"go.podman.io/image/v5/pkg/blobinfocache/memory"
 	"go.podman.io/image/v5/types"
@@ -47,7 +49,9 @@ func TestSourcePrepareLayerData(t *testing.T) {
 
 		reader, err := NewReaderFromStream(nil, &tarfileBuffer)
 		require.NoError(t, err, c.config)
-		src := NewSource(reader, true, "transport name", nil, -1)
+		src := NewSource(reader, true, "transport name", nil, -1, private.NewImageSourceOptions{
+			Digests: digests.CanonicalDefault(),
+		})
 		require.NoError(t, err, c.config)
 		defer src.Close()
 		configStream, _, err := src.GetBlob(ctx, types.BlobInfo{

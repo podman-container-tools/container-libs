@@ -27,7 +27,7 @@ func newImageSource(ref archiveReference, options private.NewImageSourceOptions)
 		archive = a
 		closeArchive = true
 	}
-	src := tarfile.NewSource(archive, closeArchive, ref.Transport().Name(), ref.ref, ref.sourceIndex)
+	src := tarfile.NewSource(archive, closeArchive, ref.Transport().Name(), ref.ref, ref.sourceIndex, options)
 	return &archiveImageSource{
 		Source: src,
 		ref:    ref,
