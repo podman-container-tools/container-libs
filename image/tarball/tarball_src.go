@@ -17,6 +17,7 @@ import (
 	imgspecv1 "github.com/opencontainers/image-spec/specs-go/v1"
 	"go.podman.io/image/v5/internal/imagesource/impl"
 	"go.podman.io/image/v5/internal/imagesource/stubs"
+	"go.podman.io/image/v5/internal/private"
 	"go.podman.io/image/v5/pkg/compression"
 	compressionTypes "go.podman.io/image/v5/pkg/compression/types"
 	"go.podman.io/image/v5/types"
@@ -41,7 +42,7 @@ type tarballBlob struct {
 	size     int64
 }
 
-func (r *tarballReference) NewImageSource(ctx context.Context, sys *types.SystemContext) (types.ImageSource, error) {
+func (r *tarballReference) newImageSource() (private.ImageSource, error) {
 	// Pick up the layer comment from the configuration's history list, if one is set.
 	comment := "imported from tarball"
 	if len(r.config.History) > 0 && r.config.History[0].Comment != "" {

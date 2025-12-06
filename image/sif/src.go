@@ -64,7 +64,7 @@ func getBlobInfo(path string) (digest.Digest, int64, error) {
 
 // newImageSource returns an ImageSource for reading from an existing directory.
 // newImageSource extracts SIF objects and saves them in a temp directory.
-func newImageSource(ctx context.Context, sys *types.SystemContext, ref sifReference) (private.ImageSource, error) {
+func newImageSource(ctx context.Context, ref sifReference, options private.NewImageSourceOptions) (private.ImageSource, error) {
 	sifImg, err := sif.LoadContainerFromPath(ref.file, sif.OptLoadWithFlag(os.O_RDONLY))
 	if err != nil {
 		return nil, fmt.Errorf("loading SIF file: %w", err)
@@ -73,7 +73,7 @@ func newImageSource(ctx context.Context, sys *types.SystemContext, ref sifRefere
 		_ = sifImg.UnloadContainer()
 	}()
 
-	workDir, err := tmpdir.MkDirBigFileTemp(sys, "sif")
+	workDir, err := tmpdir.MkDirBigFileTemp(options.Sys, "sif")
 	if err != nil {
 		return nil, fmt.Errorf("creating temp directory: %w", err)
 	}

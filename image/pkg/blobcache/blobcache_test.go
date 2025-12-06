@@ -30,6 +30,7 @@ import (
 
 var (
 	_ types.ImageReference     = &BlobCache{}
+	_ private.ImageReference   = &BlobCache{}
 	_ types.ImageSource        = &blobCacheSource{}
 	_ private.ImageSource      = (*blobCacheSource)(nil)
 	_ types.ImageDestination   = &blobCacheDestination{}
