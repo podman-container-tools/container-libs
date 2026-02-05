@@ -32,6 +32,7 @@ import (
 	"go.podman.io/storage/pkg/idtools"
 	"go.podman.io/storage/pkg/ioutils"
 	"go.podman.io/storage/pkg/lockfile"
+	"go.podman.io/storage/pkg/splitfdstream"
 	"go.podman.io/storage/pkg/stringutils"
 	"go.podman.io/storage/pkg/system"
 	"go.podman.io/storage/types"
@@ -618,6 +619,15 @@ type Store interface {
 	Dedup(DedupArgs) (drivers.DedupResult, error)
 }
 
+// SplitFDStreamStore extends the Store interface with splitfdstream capabilities.
+// This API is experimental and can be changed without bumping the major version number.
+type SplitFDStreamStore interface {
+	Store
+
+	// SplitFDStreamSocket returns a socket for splitfdstream operations.
+	SplitFDStreamSocket() (*os.File, error)
+}
+
 // AdditionalLayer represents a layer that is contained in the additional layer store
 // This API is experimental and can be changed without bumping the major version number.
 type AdditionalLayer interface {
@@ -789,9 +799,14 @@ type store struct {
 	layerStoreUseGetters    rwLayerStore   // Almost all users should use the provided accessors instead of accessing this field directly.
 	roLayerStoresUseGetters []roLayerStore // Almost all users should use the provided accessors instead of accessing this field directly.
 
-	// FIXME: The following fields need locking, and don’t have it.
+	// FIXME: The following fields need locking, and don't have it.
 	additionalUIDs *idSet // Set by getAvailableIDs()
 	additionalGIDs *idSet // Set by getAvailableIDs()
+
+	// jsonRPCServer manages the JSON-RPC server for storage operations.
+	// This API is experimental and can be changed without bumping the major version number.
+	// Protected by graphLock (via startUsingGraphDriver).
+	jsonRPCServer *splitfdstream.JSONRPCServer
 }
 
 // GetStore attempts to find an already-created Store object matching the
@@ -3885,7 +3900,10 @@ func (s *store) Shutdown(force bool) ([]string, error) {
 		// Do the Cleanup() only after we are sure that the change was recorded with RecordWrite(), so that
 		// the next user picks it.
 		if err == nil {
-			err = s.graphDriver.Cleanup()
+			if s.jsonRPCServer != nil {
+				err = s.jsonRPCServer.Stop()
+			}
+			err = errors.Join(err, s.graphDriver.Cleanup())
 		}
 	}
 	return mounted, err
@@ -4118,4 +4136,50 @@ func (s *store) Dedup(req DedupArgs) (drivers.DedupResult, error) {
 		}
 		return rlstore.dedup(r)
 	})
+}
+
+// SplitFDStreamSocket returns a UNIX socket file descriptor for split FD stream operations.
+// JSON-RPC requests for split FD stream operations are sent over this socket.
+// The caller is responsible for closing the returned file when done.
+// This API is experimental and can be changed without bumping the major version number.
+func (s *store) SplitFDStreamSocket() (*os.File, error) {
+	if err := s.startUsingGraphDriver(); err != nil {
+		return nil, err
+	}
+	defer s.stopUsingGraphDriver()
+
+	// Check if driver supports splitfdstream operations
+	if _, ok := s.graphDriver.(splitfdstream.SplitFDStreamDriver); !ok {
+		return nil, fmt.Errorf("driver %s does not support split FD stream operations: %w", s.graphDriver.String(), drivers.ErrNotSupported)
+	}
+
+	// Create socket pair - one end for the caller, one end for the server
+	clientConn, serverConn, err := splitfdstream.CreateSocketPair()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create socket pair: %w", err)
+	}
+
+	// Get file descriptor from client connection before starting
+	// the server goroutine, so cleanup is straightforward on error.
+	clientFile, err := clientConn.File()
+	if err != nil {
+		clientConn.Close()
+		serverConn.Close()
+		return nil, fmt.Errorf("failed to get file from connection: %w", err)
+	}
+	clientConn.Close()
+
+	// Initialize server if not already created
+	if s.jsonRPCServer == nil {
+		s.jsonRPCServer = splitfdstream.NewJSONRPCServer(func() (splitfdstream.SplitFDStreamDriver, func(), error) {
+			if err := s.startUsingGraphDriver(); err != nil {
+				return nil, nil, err
+			}
+			return s.graphDriver.(splitfdstream.SplitFDStreamDriver), s.stopUsingGraphDriver, nil
+		}, s)
+	}
+
+	s.jsonRPCServer.HandleConnection(serverConn)
+
+	return clientFile, nil
 }
