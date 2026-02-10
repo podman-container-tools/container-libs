@@ -3,6 +3,7 @@ package sysregistriesv2
 import (
 	"fmt"
 	"maps"
+	"net/url"
 	"reflect"
 	"slices"
 	"sort"
@@ -44,6 +45,8 @@ type Endpoint struct {
 	// If true, certs verification will be skipped and HTTP (non-TLS)
 	// connections will be allowed.
 	Insecure bool `toml:"insecure,omitempty"`
+	// The forwarding proxy to be used for accessing this endpoint.
+	Proxy string `toml:"proxy,omitempty"`
 	// PullFromMirror is used for adding restrictions to image pull through the mirror.
 	// Set to "all", "digest-only", or "tag-only".
 	// If "digest-only"， mirrors will only be used for digest pulls. Pulling images by
@@ -327,6 +330,32 @@ func parseLocation(input string) (string, error) {
 	return trimmed, nil
 }
 
+// ParseProxy parses the input string for a proxy configuration.
+// Errors if a scheme is unsupported or unspecified, or if the input is not a valid URL.
+func ParseProxy(input string) (*url.URL, error) {
+	if input == "" {
+		return nil, nil
+	}
+
+	var hasSupportedScheme bool
+	for _, scheme := range []string{"http://", "https://", "socks5://", "socks5h://"} {
+		if strings.HasPrefix(input, scheme) {
+			hasSupportedScheme = true
+			break
+		}
+	}
+	if !hasSupportedScheme {
+		return nil, &InvalidRegistries{s: "invalid proxy: proxy URL must specify one of the supported schemes: http://, https://, socks5://, socks5h://"}
+	}
+
+	parsed, err := url.Parse(input)
+	if err != nil {
+		return nil, fmt.Errorf("parsing proxy URL %q: %w", input, err)
+	}
+
+	return parsed, nil
+}
+
 // ConvertToV2 returns a v2 config corresponding to a v1 one.
 func (config *V1RegistriesConf) ConvertToV2() (*V2RegistriesConf, error) {
 	regMap := make(map[string]*Registry)
@@ -395,6 +424,10 @@ func (config *V2RegistriesConf) postProcessRegistries() error {
 			return err
 		}
 
+		if _, err = ParseProxy(reg.Proxy); err != nil {
+			return err
+		}
+
 		if reg.Prefix == "" {
 			if reg.Location == "" {
 				return &InvalidRegistries{s: "invalid condition: both location and prefix are unset"}
@@ -421,6 +454,10 @@ func (config *V2RegistriesConf) postProcessRegistries() error {
 			mir := &reg.Mirrors[j]
 			mir.Location, err = parseLocation(mir.Location)
 			if err != nil {
+				return err
+			}
+
+			if _, err = ParseProxy(mir.Proxy); err != nil {
 				return err
 			}
 
@@ -466,6 +503,11 @@ func (config *V2RegistriesConf) postProcessRegistries() error {
 		for _, other := range others {
 			if reg.Insecure != other.Insecure {
 				msg := fmt.Sprintf("registry '%s' is defined multiple times with conflicting 'insecure' setting", reg.Location)
+				return &InvalidRegistries{s: msg}
+			}
+
+			if reg.Proxy != other.Proxy {
+				msg := fmt.Sprintf("registry '%s' is defined multiple times with conflicting 'proxy' setting", reg.Location)
 				return &InvalidRegistries{s: msg}
 			}
 

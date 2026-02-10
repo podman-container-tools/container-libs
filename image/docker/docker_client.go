@@ -102,6 +102,10 @@ type dockerClient struct {
 	// tlsClientConfig is setup by newDockerClient and will be used and updated
 	// by detectProperties(). Callers can edit tlsClientConfig.InsecureSkipVerify in the meantime.
 	tlsClientConfig *tls.Config
+	// registryProxy is the proxy URL from the registry configuration, if any.
+	// It has the lowest priority and can be overridden by either DockerProxyURL or environment variables.
+	// When pulling, this value could be overwritten by a mirror-specific proxy. See docker_client_src.go.
+	registryProxy *url.URL
 	// The following members are not set by newDockerClient and must be set by callers if needed.
 	auth                   types.DockerAuthConfig
 	registryToken          string
@@ -270,18 +274,24 @@ func newDockerClient(sys *types.SystemContext, registry, reference string) (*doc
 		}
 	}
 
-	// Check if TLS verification shall be skipped (default=false) which can
-	// be specified in the sysregistriesv2 configuration.
-	skipVerify := false
+	// Fetch and load sysregistriesv2 configurations.
 	reg, err := sysregistriesv2.FindRegistry(sys, reference)
 	if err != nil {
 		return nil, fmt.Errorf("loading registries: %w", err)
 	}
+	skipVerify := false
+	var registryProxy *url.URL
 	if reg != nil {
 		if reg.Blocked {
 			return nil, fmt.Errorf("registry %s is blocked in one of %s", reg.Prefix, sysregistriesv2.ConfigurationSourceDescription(sys))
 		}
+		// Check if TLS verification shall be skipped (default=false).
 		skipVerify = reg.Insecure
+		// Set registry proxy.
+		registryProxy, err = sysregistriesv2.ParseProxy(reg.Proxy)
+		if err != nil {
+			return nil, err
+		}
 	}
 	tlsClientConfig.InsecureSkipVerify = skipVerify
 
@@ -295,6 +305,7 @@ func newDockerClient(sys *types.SystemContext, registry, reference string) (*doc
 		registry:         registry,
 		userAgent:        userAgent,
 		tlsClientConfig:  tlsClientConfig,
+		registryProxy:    registryProxy,
 		tokenCache:       map[string]*bearerToken{},
 		reportedWarnings: set.New[string](),
 	}, nil
@@ -976,6 +987,15 @@ func (c *dockerClient) detectPropertiesHelper(ctx context.Context) error {
 	}
 	tr := tlsclientconfig.NewTransport()
 	tr.TLSClientConfig = c.tlsClientConfig
+	// Set registry-specific proxy with lowest priority, which can be overridden by environment variables.
+	if c.registryProxy != nil {
+		tr.Proxy = func(req *http.Request) (*url.URL, error) {
+			if envProxy, err := http.ProxyFromEnvironment(req); err != nil || envProxy != nil {
+				return envProxy, err
+			}
+			return c.registryProxy, nil
+		}
+	}
 	// if set DockerProxyURL explicitly, use the DockerProxyURL instead of system proxy
 	if c.sys != nil && c.sys.DockerProxyURL != nil {
 		tr.Proxy = http.ProxyURL(c.sys.DockerProxyURL)
