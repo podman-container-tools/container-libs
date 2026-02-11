@@ -482,3 +482,49 @@ func TestIsManifestUnknownError(t *testing.T) {
 		assert.True(t, res, "%s: %#v", c.name, err)
 	}
 }
+
+// Helper function to test that the selected proxy for a registry matches expected.
+func testProxyForRegistry(t *testing.T, ctx context.Context, sys *types.SystemContext, registry string, expectedProxy string) {
+	t.Run(fmt.Sprintf(`Expecting proxy "%s" for registry "%s"`, expectedProxy, registry), func(t *testing.T) {
+		req, err := http.NewRequest("GET", fmt.Sprintf("http://%s/v2/", registry), nil)
+		require.NoError(t, err)
+
+		// Proxy configured using environment variables have priority, so we skip if it's set.
+		envProxy, _ := http.ProxyFromEnvironment(req)
+		if envProxy != nil {
+			t.Skip("Skipping registry proxy test: proxy configured using environment variables")
+		}
+
+		client, err := newDockerClient(sys, registry, registry)
+		require.NoError(t, err)
+
+		// Ping will fail, but we only care about the side effect of setting the proxy.
+		_ = client.detectProperties(ctx)
+
+		transport, ok := client.client.Transport.(*http.Transport)
+		require.True(t, ok)
+		require.NotNil(t, transport.Proxy)
+
+		proxyURL, err := transport.Proxy(req)
+		require.NoError(t, err)
+
+		if expectedProxy == "" {
+			require.Nil(t, proxyURL)
+		} else {
+			require.NotNil(t, proxyURL)
+			assert.Equal(t, expectedProxy, proxyURL.String())
+		}
+	})
+}
+
+func TestRegistrySpecificProxy(t *testing.T) {
+	ctx := context.Background()
+	sys := &types.SystemContext{
+		SystemRegistriesConfPath:    "../pkg/sysregistriesv2/testdata/proxy.conf",
+		SystemRegistriesConfDirPath: "../pkg/sysregistriesv2/testdata/this-does-not-exist",
+		DockerInsecureSkipTLSVerify: types.OptionalBoolTrue,
+	}
+
+	testProxyForRegistry(t, ctx, sys, "registry-1.com", "")
+	testProxyForRegistry(t, ctx, sys, "registry-2.com", "https://proxy-2.example.com")
+}
