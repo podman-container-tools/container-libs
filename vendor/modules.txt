@@ -30,6 +30,9 @@ github.com/VividCortex/ewma
 # github.com/acarl005/stripansi v0.0.0-20180116102854-5a71ef0e047d
 ## explicit
 github.com/acarl005/stripansi
+# github.com/bootc-dev/jsonrpc-fdpass-go v0.0.0-20260415021005-8c14abba964b
+## explicit; go 1.25.0
+github.com/bootc-dev/jsonrpc-fdpass-go
 # github.com/cespare/xxhash/v2 v2.3.0
 ## explicit; go 1.11
 github.com/cespare/xxhash/v2
