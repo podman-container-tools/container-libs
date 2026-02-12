@@ -337,20 +337,15 @@ func ParseProxy(input string) (*url.URL, error) {
 		return nil, nil
 	}
 
-	var hasSupportedScheme bool
-	for _, scheme := range []string{"http://", "https://", "socks5://", "socks5h://"} {
-		if strings.HasPrefix(input, scheme) {
-			hasSupportedScheme = true
-			break
-		}
-	}
-	if !hasSupportedScheme {
-		return nil, &InvalidRegistries{s: "invalid proxy: proxy URL must specify one of the supported schemes: http://, https://, socks5://, socks5h://"}
-	}
-
 	parsed, err := url.Parse(input)
 	if err != nil {
 		return nil, fmt.Errorf("parsing proxy URL %q: %w", input, err)
+	}
+
+	supportedSchemes := []string{"http", "https", "socks5", "socks5h"}
+	if !slices.Contains(supportedSchemes, parsed.Scheme) {
+		msg := fmt.Sprintf(`proxy URL scheme "%s" is not supported. Supported are http, https, socks5, socks5h`, parsed.Scheme)
+		return nil, &InvalidRegistries{s: msg}
 	}
 
 	return parsed, nil
