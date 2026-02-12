@@ -500,15 +500,6 @@ func TestRegistrySpecificProxy(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(fmt.Sprintf(`Expecting proxy "%s" for registry "%s"`, c.expectedProxy, c.registry), func(t *testing.T) {
-			req, err := http.NewRequest("GET", fmt.Sprintf("http://%s/v2/", c.registry), nil)
-			require.NoError(t, err)
-
-			// Proxy configured using environment variables have priority, so we skip if it's set.
-			envProxy, _ := http.ProxyFromEnvironment(req)
-			if envProxy != nil {
-				t.Skip("Skipping registry proxy test: proxy configured using environment variables")
-			}
-
 			client, err := newDockerClient(sys, c.registry, c.registry)
 			require.NoError(t, err)
 
@@ -518,6 +509,9 @@ func TestRegistrySpecificProxy(t *testing.T) {
 			transport, ok := client.client.Transport.(*http.Transport)
 			require.True(t, ok)
 			require.NotNil(t, transport.Proxy)
+
+			req, err := http.NewRequest("GET", fmt.Sprintf("http://%s/v2/", c.registry), nil)
+			require.NoError(t, err)
 
 			proxyURL, err := transport.Proxy(req)
 			require.NoError(t, err)

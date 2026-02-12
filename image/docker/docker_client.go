@@ -986,14 +986,10 @@ func (c *dockerClient) detectPropertiesHelper(ctx context.Context) error {
 	}
 	tr := tlsclientconfig.NewTransport()
 	tr.TLSClientConfig = c.tlsClientConfig
-	// Set registry-specific proxy with lowest priority, which can be overridden by environment variables.
+	// Set registry-specific proxy.
+	// This has a narrower scope so should take precedence over globally-scoped environment variables.
 	if c.registryProxy != nil {
-		tr.Proxy = func(req *http.Request) (*url.URL, error) {
-			if envProxy, err := http.ProxyFromEnvironment(req); err != nil || envProxy != nil {
-				return envProxy, err
-			}
-			return c.registryProxy, nil
-		}
+		tr.Proxy = http.ProxyURL(c.registryProxy)
 	}
 	// if set DockerProxyURL explicitly, use the DockerProxyURL instead of system proxy
 	if c.sys != nil && c.sys.DockerProxyURL != nil {
