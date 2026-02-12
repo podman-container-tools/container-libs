@@ -115,7 +115,7 @@ func TestParseProxy(t *testing.T) {
 		"socks5://proxy.example.com",
 		"socks5h://proxy.example.com:1080",
 	} {
-		_, err := ParseProxy(valid)
+		_, err := parseProxy(valid)
 		assert.Nil(t, err, valid)
 	}
 
@@ -124,7 +124,7 @@ func TestParseProxy(t *testing.T) {
 		"ftp://bad-scheme.example.com",
 		"ssh://bad-scheme.example.com:2222",
 	} {
-		_, err := ParseProxy(invalid)
+		_, err := parseProxy(invalid)
 		assert.NotNil(t, err)
 	}
 }
@@ -971,29 +971,31 @@ func TestCredentialHelpers(t *testing.T) {
 }
 
 func TestProxyConfiguration(t *testing.T) {
-	sys := &types.SystemContext{
+	ctx := &types.SystemContext{
 		SystemRegistriesConfPath:    "testdata/proxy.conf",
 		SystemRegistriesConfDirPath: "testdata/this-does-not-exist",
 	}
 
-	registries, err := GetRegistries(sys)
+	InvalidateCache()
+	_, err := TryUpdatingCache(ctx)
 	require.NoError(t, err)
-	require.Equal(t, 2, len(registries))
 
-	reg1 := registries[0]
-	assert.Equal(t, "registry-1.test", reg1.Location)
-	assert.Equal(t, "", reg1.Proxy)
+	reg1, err := FindRegistry(ctx, "registry-1.test")
+	require.NoError(t, err)
+	require.Nil(t, reg1.Proxy)
 	require.Equal(t, 2, len(reg1.Mirrors))
 
 	mirror1 := reg1.Mirrors[0]
 	assert.Equal(t, "mirror-1.registry-1.test", mirror1.Location)
-	assert.Equal(t, "", mirror1.Proxy)
+	require.Nil(t, mirror1.Proxy)
 
 	mirror2 := reg1.Mirrors[1]
 	assert.Equal(t, "mirror-2.registry-1.test", mirror2.Location)
-	assert.Equal(t, "http://proxy-1.example.test", mirror2.Proxy)
+	require.NotNil(t, mirror2.Proxy)
+	assert.Equal(t, "http://proxy-1.example.test", mirror2.Proxy.String())
 
-	reg2 := registries[1]
-	assert.Equal(t, "registry-2.test", reg2.Location)
-	assert.Equal(t, "https://proxy-2.example.test", reg2.Proxy)
+	reg2, err := FindRegistry(ctx, "registry-2.test")
+	require.NoError(t, err)
+	require.NotNil(t, reg2.Proxy)
+	assert.Equal(t, "https://proxy-2.example.test", reg2.Proxy.String())
 }

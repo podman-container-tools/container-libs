@@ -46,7 +46,11 @@ type Endpoint struct {
 	// connections will be allowed.
 	Insecure bool `toml:"insecure,omitempty"`
 	// The forwarding proxy to be used for accessing this endpoint.
-	Proxy string `toml:"proxy,omitempty"`
+	// postProcessRegistries normalizes this field into the public Proxy field.
+	ProxyRaw string `toml:"proxy,omitempty"`
+	// The forwarding proxy to be used for accessing this endpoint.
+	// Parsed from ProxyRaw after normalization.
+	Proxy *url.URL `toml:"-"`
 	// PullFromMirror is used for adding restrictions to image pull through the mirror.
 	// Set to "all", "digest-only", or "tag-only".
 	// If "digest-only"， mirrors will only be used for digest pulls. Pulling images by
@@ -330,9 +334,9 @@ func parseLocation(input string) (string, error) {
 	return trimmed, nil
 }
 
-// ParseProxy parses the input string for a proxy configuration.
+// parseProxy parses the input string for a proxy configuration.
 // Errors if a scheme is unsupported or unspecified, or if the input is not a valid URL.
-func ParseProxy(input string) (*url.URL, error) {
+func parseProxy(input string) (*url.URL, error) {
 	if input == "" {
 		return nil, nil
 	}
@@ -419,10 +423,6 @@ func (config *V2RegistriesConf) postProcessRegistries() error {
 			return err
 		}
 
-		if _, err = ParseProxy(reg.Proxy); err != nil {
-			return err
-		}
-
 		if reg.Prefix == "" {
 			if reg.Location == "" {
 				return &InvalidRegistries{s: "invalid condition: both location and prefix are unset"}
@@ -440,6 +440,11 @@ func (config *V2RegistriesConf) postProcessRegistries() error {
 			}
 		}
 
+		reg.Proxy, err = parseProxy(reg.ProxyRaw)
+		if err != nil {
+			return err
+		}
+
 		// validate the mirror usage settings does not apply to primary registry
 		if reg.PullFromMirror != "" {
 			return fmt.Errorf("pull-from-mirror must not be set for a non-mirror registry %q", reg.Prefix)
@@ -452,15 +457,16 @@ func (config *V2RegistriesConf) postProcessRegistries() error {
 				return err
 			}
 
-			if _, err = ParseProxy(mir.Proxy); err != nil {
-				return err
-			}
-
 			// FIXME: unqualifiedSearchRegistries now also accepts empty values
 			// and shouldn't
 			// https://github.com/containers/image/pull/1191#discussion_r610623216
 			if mir.Location == "" {
 				return &InvalidRegistries{s: "invalid condition: mirror location is unset"}
+			}
+
+			mir.Proxy, err = parseProxy(mir.ProxyRaw)
+			if err != nil {
+				return err
 			}
 
 			if reg.MirrorByDigestOnly && mir.PullFromMirror != "" {
