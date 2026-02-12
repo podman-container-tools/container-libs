@@ -102,9 +102,11 @@ type dockerClient struct {
 	// tlsClientConfig is setup by newDockerClient and will be used and updated
 	// by detectProperties(). Callers can edit tlsClientConfig.InsecureSkipVerify in the meantime.
 	tlsClientConfig *tls.Config
-	// registryProxy is the proxy URL from the registry configuration, if any.
-	// It has the lowest priority and can be overridden by either DockerProxyURL or environment variables.
-	// When pulling, this value could be overwritten by a mirror-specific proxy. See docker_client_src.go.
+	// registryProxy is the forwarding proxy used for this client,
+	// read from the registry configuration and set by newDockerClient.
+	// detectProperties will set the proxy for the HTTP client using registryProxy,
+	// subject to overrides by DockerProxyURL and DockerProxy.
+	// Callers can edit this value before detectProperties is called.
 	registryProxy *url.URL
 	// The following members are not set by newDockerClient and must be set by callers if needed.
 	auth                   types.DockerAuthConfig
@@ -274,7 +276,9 @@ func newDockerClient(sys *types.SystemContext, registry, reference string) (*doc
 		}
 	}
 
-	// Fetch and load sysregistriesv2 configurations.
+	// Apply options from sysregistriesv2 configuration
+	// - Check if TLS verification shall be skipped (default=false)
+	// - Set registry-specific proxy
 	reg, err := sysregistriesv2.FindRegistry(sys, reference)
 	if err != nil {
 		return nil, fmt.Errorf("loading registries: %w", err)
@@ -285,9 +289,7 @@ func newDockerClient(sys *types.SystemContext, registry, reference string) (*doc
 		if reg.Blocked {
 			return nil, fmt.Errorf("registry %s is blocked in one of %s", reg.Prefix, sysregistriesv2.ConfigurationSourceDescription(sys))
 		}
-		// Check if TLS verification shall be skipped (default=false).
 		skipVerify = reg.Insecure
-		// Set registry proxy.
 		registryProxy, err = sysregistriesv2.ParseProxy(reg.Proxy)
 		if err != nil {
 			return nil, err
