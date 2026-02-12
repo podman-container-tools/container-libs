@@ -981,19 +981,19 @@ func TestProxyConfiguration(t *testing.T) {
 	require.Equal(t, 2, len(registries))
 
 	reg1 := registries[0]
-	assert.Equal(t, "registry-1.com", reg1.Location)
+	assert.Equal(t, "registry-1.test", reg1.Location)
 	assert.Equal(t, "", reg1.Proxy)
 	require.Equal(t, 2, len(reg1.Mirrors))
 
 	mirror1 := reg1.Mirrors[0]
-	assert.Equal(t, "mirror-1.registry-1.com", mirror1.Location)
+	assert.Equal(t, "mirror-1.registry-1.test", mirror1.Location)
 	assert.Equal(t, "", mirror1.Proxy)
 
 	mirror2 := reg1.Mirrors[1]
-	assert.Equal(t, "mirror-2.registry-1.com", mirror2.Location)
-	assert.Equal(t, "http://proxy-1.example.com", mirror2.Proxy)
+	assert.Equal(t, "mirror-2.registry-1.test", mirror2.Location)
+	assert.Equal(t, "http://proxy-1.example.test", mirror2.Proxy)
 
 	reg2 := registries[1]
-	assert.Equal(t, "registry-2.com", reg2.Location)
-	assert.Equal(t, "https://proxy-2.example.com", reg2.Proxy)
+	assert.Equal(t, "registry-2.test", reg2.Location)
+	assert.Equal(t, "https://proxy-2.example.test", reg2.Proxy)
 }

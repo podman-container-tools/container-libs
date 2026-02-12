@@ -525,6 +525,6 @@ func TestRegistrySpecificProxy(t *testing.T) {
 		DockerInsecureSkipTLSVerify: types.OptionalBoolTrue,
 	}
 
-	testProxyForRegistry(t, ctx, sys, "registry-1.com", "")
-	testProxyForRegistry(t, ctx, sys, "registry-2.com", "https://proxy-2.example.com")
+	testProxyForRegistry(t, ctx, sys, "registry-1.test", "")
+	testProxyForRegistry(t, ctx, sys, "registry-2.test", "https://proxy-2.example.test")
 }
