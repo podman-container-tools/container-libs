@@ -509,6 +509,12 @@ type Store interface {
 	// Image returns a specific image.
 	Image(id string) (*Image, error)
 
+	// ResolveImageID resolves an image reference to its actual ID and top layer ID.
+	ResolveImageID(id string) (string, string, error)
+
+	// LayerParent returns the parent layer ID for the given layer.
+	LayerParent(id string) (string, error)
+
 	// ImagesByTopLayer returns a list of images which reference the specified
 	// layer as their top layer.  They will have different IDs and names
 	// and may have different metadata, big data items, and flags.
@@ -3611,6 +3617,22 @@ func (s *store) Image(id string) (*Image, error) {
 		return res, err
 	}
 	return nil, fmt.Errorf("locating image with ID %q: %w", id, ErrImageUnknown)
+}
+
+func (s *store) ResolveImageID(id string) (string, string, error) {
+	img, err := s.Image(id)
+	if err != nil {
+		return "", "", err
+	}
+	return img.ID, img.TopLayer, nil
+}
+
+func (s *store) LayerParent(id string) (string, error) {
+	l, err := s.Layer(id)
+	if err != nil {
+		return "", err
+	}
+	return l.Parent, nil
 }
 
 func (s *store) ImagesByTopLayer(id string) ([]*Image, error) {
