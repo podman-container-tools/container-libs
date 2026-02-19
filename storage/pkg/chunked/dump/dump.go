@@ -3,6 +3,7 @@
 package dump
 
 import (
+	"archive/tar"
 	"bufio"
 	"encoding/base64"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/opencontainers/go-digest"
+	"go.podman.io/storage/pkg/archive"
 	"go.podman.io/storage/pkg/chunked/internal/minimal"
 	storagePath "go.podman.io/storage/pkg/chunked/internal/path"
 	"golang.org/x/sys/unix"
@@ -269,4 +271,63 @@ func GenerateDump(tocI any, verityDigests map[string]string) (io.Reader, error) 
 		}
 	}()
 	return pipeR, nil
+}
+
+// GenerateDumpFromTarHeaders generates a composefs dump from stdlib tar headers,
+// content digests, and verity digests.  It converts the tar headers to
+// minimal.FileMetadata entries internally and delegates to GenerateDump.
+func GenerateDumpFromTarHeaders(headers []*tar.Header, contentDigests, verityDigests map[string]string) (io.Reader, error) {
+	var entries []minimal.FileMetadata
+	for _, hdr := range headers {
+		entry, err := fileMetadataFromTarHeader(hdr)
+		if err != nil {
+			return nil, err
+		}
+		if d, ok := contentDigests[hdr.Name]; ok {
+			entry.Digest = d
+		}
+		entries = append(entries, entry)
+	}
+	toc := &minimal.TOC{Version: 1, Entries: entries}
+	return GenerateDump(toc, verityDigests)
+}
+
+// fileMetadataFromTarHeader creates a minimal.FileMetadata from a stdlib
+// tar.Header.  This mirrors minimal.NewFileMetadata (which uses the
+// tar-split tar package) including AccessTime and ChangeTime.
+func fileMetadataFromTarHeader(hdr *tar.Header) (minimal.FileMetadata, error) {
+	typ, err := minimal.GetType(hdr.Typeflag)
+	if err != nil {
+		return minimal.FileMetadata{}, err
+	}
+	xattrs := make(map[string]string)
+	for k, v := range hdr.PAXRecords {
+		xattrKey, ok := strings.CutPrefix(k, archive.PaxSchilyXattr)
+		if !ok {
+			continue
+		}
+		xattrs[xattrKey] = base64.StdEncoding.EncodeToString([]byte(v))
+	}
+	return minimal.FileMetadata{
+		Type:       typ,
+		Name:       hdr.Name,
+		Linkname:   hdr.Linkname,
+		Mode:       hdr.Mode,
+		Size:       hdr.Size,
+		UID:        hdr.Uid,
+		GID:        hdr.Gid,
+		ModTime:    timeIfNotZero(&hdr.ModTime),
+		AccessTime: timeIfNotZero(&hdr.AccessTime),
+		ChangeTime: timeIfNotZero(&hdr.ChangeTime),
+		Devmajor:   hdr.Devmajor,
+		Devminor:   hdr.Devminor,
+		Xattrs:     xattrs,
+	}, nil
+}
+
+func timeIfNotZero(t *time.Time) *time.Time {
+	if t == nil || t.IsZero() {
+		return nil
+	}
+	return t
 }
