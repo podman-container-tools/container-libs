@@ -28,9 +28,10 @@ type handler struct {
 	lock sync.Mutex
 
 	// Dependency injection functions.
-	getSystemContext func() (*types.SystemContext, error)
-	getPolicyContext func() (*signature.PolicyContext, error)
-	logger           logrus.FieldLogger
+	getSystemContext   func() (*types.SystemContext, error)
+	getPolicyContext   func() (*signature.PolicyContext, error)
+	splitFDStreamStore splitFDStreamStore
+	logger             logrus.FieldLogger
 
 	// Internal state.
 	sysctx      *types.SystemContext // non-nil is used to indicate “Initialize succeeded”
@@ -139,6 +140,12 @@ func (h *handler) openImageImpl(ctx context.Context, args []any, allowNotFound b
 			return ret, nil
 		}
 		return ret, err
+	}
+
+	if h.splitFDStreamStore == nil {
+		if sfds, ok := imgsrc.(splitFDStreamStore); ok {
+			h.splitFDStreamStore = sfds
+		}
 	}
 
 	unparsedTopLevel := image.UnparsedInstance(imgsrc, nil)
@@ -689,6 +696,31 @@ func (h *handler) FinishPipe(ctx context.Context, args []any) (replyBuf, error) 
 	return ret, err
 }
 
+// OpenJSONRPCFdPass returns a socket FD over which the client can
+// speak the jsonrpc-fdpass protocol for splitfdstream operations.
+// The json-proxy does not interpret the protocol; it just brokers the socket.
+func (h *handler) OpenJSONRPCFdPass(ctx context.Context, args []any) (replyBuf, error) {
+	h.lock.Lock()
+	defer h.lock.Unlock()
+
+	var ret replyBuf
+
+	if h.splitFDStreamStore == nil {
+		return ret, errors.New("splitfdstream store not configured")
+	}
+	if len(args) != 0 {
+		return ret, fmt.Errorf("found %d args, expecting none", len(args))
+	}
+
+	sockFile, err := h.splitFDStreamStore.SplitFDStreamSocket()
+	if err != nil {
+		return ret, err
+	}
+
+	ret.fd = sockFile
+	return ret, nil
+}
+
 // processRequest dispatches a remote request.
 // replyBuf is the result of the invocation.
 // terminate should be true if processing of requests should halt.
@@ -728,6 +760,8 @@ func (h *handler) processRequest(ctx context.Context, readBytes []byte) (rb repl
 		rb, err = h.GetLayerInfoPiped(ctx, req.Args)
 	case "FinishPipe":
 		rb, err = h.FinishPipe(ctx, req.Args)
+	case "OpenJSONRPCFdPass":
+		rb, err = h.OpenJSONRPCFdPass(ctx, req.Args)
 	case "Shutdown":
 		terminate = true
 	// NOTE: If you add a method here, you should very likely be bumping the
