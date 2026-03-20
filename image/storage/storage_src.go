@@ -509,3 +509,13 @@ func (s *storageImageSource) getSize() (int64, error) {
 func (s *storageImageSource) Size() (int64, error) {
 	return s.getSize()
 }
+
+// SplitFDStreamSocket returns a socket for splitfdstream operations,
+// if the underlying store supports it.
+func (s *storageImageSource) SplitFDStreamSocket() (*os.File, error) {
+	sfds, ok := s.imageRef.transport.store.(storage.SplitFDStreamStore)
+	if !ok {
+		return nil, fmt.Errorf("store does not support splitfdstream")
+	}
+	return sfds.SplitFDStreamSocket()
+}
