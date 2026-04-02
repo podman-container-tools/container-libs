@@ -3,6 +3,7 @@ package copy
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -16,9 +17,12 @@ import (
 	"go.podman.io/image/v5/docker/reference"
 	"go.podman.io/image/v5/internal/image"
 	internalManifest "go.podman.io/image/v5/internal/manifest"
+	"go.podman.io/image/v5/internal/private"
 	"go.podman.io/image/v5/internal/set"
 	"go.podman.io/image/v5/manifest"
 	"go.podman.io/image/v5/pkg/compression"
+	"go.podman.io/image/v5/types"
+	chunkedToc "go.podman.io/storage/pkg/chunked/toc"
 )
 
 type instanceOpKind int
@@ -28,6 +32,14 @@ const (
 	instanceOpClone
 	instanceOpDelete
 )
+
+// copiedInstanceData stores info about a successfully copied instance,
+// used for creating sentinel variants.
+type copiedInstanceData struct {
+	sourceDigest digest.Digest
+	result       copySingleImageResult
+	platform     *imgspecv1.Platform
+}
 
 type instanceOp struct {
 	op           instanceOpKind
@@ -311,6 +323,8 @@ func (c *copier) copyMultipleImages(ctx context.Context) (copiedManifest []byte,
 	if err != nil {
 		return nil, fmt.Errorf("preparing instances for copy: %w", err)
 	}
+	var copiedInstances []copiedInstanceData
+
 	c.Printf("Copying %d images generated from %d images in list\n", copyLen, len(instanceDigests))
 	copyCount := 0 // Track copy/clone operations separately from delete operations
 	for i, instance := range instanceOpList {
@@ -335,6 +349,15 @@ func (c *copier) copyMultipleImages(ctx context.Context) (copiedManifest []byte,
 				UpdateCompressionAlgorithms: updated.compressionAlgorithms,
 				UpdateMediaType:             updated.manifestMIMEType,
 			})
+			// Capture instance data for sentinel variant creation
+			instanceDetails, detailsErr := updatedList.Instance(instance.sourceDigest)
+			if detailsErr == nil {
+				copiedInstances = append(copiedInstances, copiedInstanceData{
+					sourceDigest: instance.sourceDigest,
+					result:       updated,
+					platform:     instanceDetails.ReadOnly.Platform,
+				})
+			}
 		case instanceOpClone:
 			copyCount++
 			logrus.Debugf("Replicating instance %s (%d/%d)", instance.sourceDigest, copyCount, copyLen)
@@ -367,6 +390,15 @@ func (c *copier) copyMultipleImages(ctx context.Context) (copiedManifest []byte,
 		default:
 			return nil, fmt.Errorf("copying image: invalid copy operation %d", instance.op)
 		}
+	}
+
+	// Create zstd:chunked sentinel variants for instances where any layer uses zstd:chunked.
+	if cannotModifyManifestListReason == "" {
+		sentinelEdits, err := c.createZstdChunkedSentinelVariants(ctx, copiedInstances, updatedList)
+		if err != nil {
+			return nil, fmt.Errorf("creating zstd:chunked sentinel variants: %w", err)
+		}
+		instanceEdits = append(instanceEdits, sentinelEdits...)
 	}
 
 	// Now reset the digest/size/types of the manifests in the list and remove deleted instances.
@@ -440,4 +472,249 @@ func (c *copier) copyMultipleImages(ctx context.Context) (copiedManifest []byte,
 	}
 
 	return manifestList, nil
+}
+
+// hasZstdChunkedLayers returns true if any non-empty layer in the manifest has
+// zstd:chunked TOC annotations.
+func hasZstdChunkedLayers(ociMan *manifest.OCI1) bool {
+	for _, l := range ociMan.LayerInfos() {
+		if l.EmptyLayer {
+			continue
+		}
+		d, err := chunkedToc.GetTOCDigest(l.Annotations)
+		if err == nil && d != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// pushSentinelVariant creates and pushes a sentinel variant of the given OCI manifest.
+// It prepends a sentinel layer and DiffID, creates a new config, and pushes everything
+// to the destination. Returns the serialized sentinel manifest and its digest.
+func (c *copier) pushSentinelVariant(ctx context.Context, ociMan *manifest.OCI1, ociConfig *imgspecv1.Image) ([]byte, digest.Digest, error) {
+	sentinelContent := chunkedToc.ZstdChunkedSentinelContent
+
+	// Push sentinel blob (content-addressed, so idempotent if already pushed).
+	sentinelBlobInfo := types.BlobInfo{
+		Digest: chunkedToc.ZstdChunkedSentinelDigest,
+		Size:   int64(len(sentinelContent)),
+	}
+	reused, _, err := c.dest.TryReusingBlobWithOptions(ctx, sentinelBlobInfo,
+		private.TryReusingBlobOptions{Cache: c.blobInfoCache})
+	if err != nil {
+		return nil, "", fmt.Errorf("checking sentinel blob: %w", err)
+	}
+	if !reused {
+		_, err = c.dest.PutBlobWithOptions(ctx, bytes.NewReader(sentinelContent),
+			sentinelBlobInfo, private.PutBlobOptions{Cache: c.blobInfoCache})
+		if err != nil {
+			return nil, "", fmt.Errorf("pushing sentinel blob: %w", err)
+		}
+	}
+
+	// Create new config with sentinel DiffID prepended.
+	newDiffIDs := make([]digest.Digest, 0, len(ociConfig.RootFS.DiffIDs)+1)
+	newDiffIDs = append(newDiffIDs, chunkedToc.ZstdChunkedSentinelDigest)
+	newDiffIDs = append(newDiffIDs, ociConfig.RootFS.DiffIDs...)
+	ociConfig.RootFS.DiffIDs = newDiffIDs
+	configBlob, err := json.Marshal(ociConfig)
+	if err != nil {
+		return nil, "", fmt.Errorf("marshaling sentinel config: %w", err)
+	}
+	configDigest := digest.FromBytes(configBlob)
+
+	// Push new config.
+	configBlobInfo := types.BlobInfo{
+		Digest:    configDigest,
+		Size:      int64(len(configBlob)),
+		MediaType: imgspecv1.MediaTypeImageConfig,
+	}
+	reused, _, err = c.dest.TryReusingBlobWithOptions(ctx, configBlobInfo,
+		private.TryReusingBlobOptions{Cache: c.blobInfoCache})
+	if err != nil {
+		return nil, "", fmt.Errorf("checking sentinel config: %w", err)
+	}
+	if !reused {
+		_, err = c.dest.PutBlobWithOptions(ctx, bytes.NewReader(configBlob),
+			configBlobInfo, private.PutBlobOptions{Cache: c.blobInfoCache, IsConfig: true})
+		if err != nil {
+			return nil, "", fmt.Errorf("pushing sentinel config: %w", err)
+		}
+	}
+
+	// Build sentinel manifest: sentinel layer + original layers.
+	newLayers := make([]imgspecv1.Descriptor, 0, len(ociMan.Layers)+1)
+	newLayers = append(newLayers, imgspecv1.Descriptor{
+		MediaType: chunkedToc.ZstdChunkedSentinelMediaType,
+		Digest:    chunkedToc.ZstdChunkedSentinelDigest,
+		Size:      int64(len(sentinelContent)),
+	})
+	newLayers = append(newLayers, ociMan.Layers...)
+
+	sentinelOCI := manifest.OCI1FromComponents(imgspecv1.Descriptor{
+		MediaType: imgspecv1.MediaTypeImageConfig,
+		Digest:    configDigest,
+		Size:      int64(len(configBlob)),
+	}, newLayers)
+	sentinelManifestBlob, err := sentinelOCI.Serialize()
+	if err != nil {
+		return nil, "", fmt.Errorf("serializing sentinel manifest: %w", err)
+	}
+	sentinelManifestDigest := digest.FromBytes(sentinelManifestBlob)
+
+	// Push sentinel manifest.
+	if err := c.dest.PutManifest(ctx, sentinelManifestBlob, &sentinelManifestDigest); err != nil {
+		return nil, "", fmt.Errorf("pushing sentinel manifest: %w", err)
+	}
+
+	return sentinelManifestBlob, sentinelManifestDigest, nil
+}
+
+// createZstdChunkedSentinelVariants creates sentinel variants for instances
+// where any layer uses zstd:chunked. The sentinel variant has a non-tar sentinel
+// layer prepended, signaling aware clients to skip the full-digest mitigation.
+// It returns ListEdit entries to add the sentinel variants to the manifest list.
+func (c *copier) createZstdChunkedSentinelVariants(ctx context.Context, copiedInstances []copiedInstanceData, updatedList internalManifest.List) ([]internalManifest.ListEdit, error) {
+	var edits []internalManifest.ListEdit
+
+	// Check which platforms already have a sentinel variant in the source.
+	platformsWithSentinel := set.New[platformComparable]()
+	for _, d := range updatedList.Instances() {
+		details, err := updatedList.Instance(d)
+		if err != nil {
+			continue
+		}
+		if details.ReadOnly.Annotations[internalManifest.OCI1InstanceAnnotationZstdChunkedSentinel] == internalManifest.OCI1InstanceAnnotationZstdChunkedSentinelValue {
+			platformsWithSentinel.Add(platformV1ToPlatformComparable(details.ReadOnly.Platform))
+		}
+	}
+
+	for _, ci := range copiedInstances {
+		// Only handle OCI manifests (zstd:chunked is OCI-only).
+		if ci.result.manifestMIMEType != imgspecv1.MediaTypeImageManifest {
+			continue
+		}
+
+		// Skip if this platform already has a sentinel variant.
+		if platformsWithSentinel.Contains(platformV1ToPlatformComparable(ci.platform)) {
+			continue
+		}
+
+		ociMan, err := manifest.OCI1FromManifest(ci.result.manifest)
+		if err != nil {
+			logrus.Debugf("Cannot parse manifest for sentinel variant: %v", err)
+			continue
+		}
+
+		if !hasZstdChunkedLayers(ociMan) {
+			continue
+		}
+
+		// Use the config as written to the destination (reflects any edits during copy).
+		var ociConfig imgspecv1.Image
+		if err := json.Unmarshal(ci.result.configBlob, &ociConfig); err != nil {
+			logrus.Debugf("Cannot parse config for sentinel variant: %v", err)
+			continue
+		}
+
+		sentinelManifestBlob, sentinelManifestDigest, err := c.pushSentinelVariant(ctx, ociMan, &ociConfig)
+		if err != nil {
+			return nil, err
+		}
+
+		edits = append(edits, internalManifest.ListEdit{
+			ListOperation: internalManifest.ListOpAdd,
+			AddDigest:     sentinelManifestDigest,
+			AddSize:       int64(len(sentinelManifestBlob)),
+			AddMediaType:  imgspecv1.MediaTypeImageManifest,
+			AddPlatform:   ci.platform,
+			AddAnnotations: map[string]string{
+				internalManifest.OCI1InstanceAnnotationZstdChunkedSentinel: internalManifest.OCI1InstanceAnnotationZstdChunkedSentinelValue,
+				internalManifest.OCI1InstanceAnnotationCompressionZSTD:     internalManifest.OCI1InstanceAnnotationCompressionZSTDValue,
+			},
+			AddCompressionAlgorithms: ci.result.compressionAlgorithms,
+		})
+
+		platformsWithSentinel.Add(platformV1ToPlatformComparable(ci.platform))
+	}
+
+	return edits, nil
+}
+
+// createSingleImageSentinelIndex checks if a single copied image has zstd:chunked
+// layers, and if so, creates a sentinel variant and wraps both in an OCI index.
+// Returns the serialized index manifest, or nil if no sentinel was needed.
+func (c *copier) createSingleImageSentinelIndex(ctx context.Context, single copySingleImageResult) ([]byte, error) {
+	if single.manifestMIMEType != imgspecv1.MediaTypeImageManifest {
+		return nil, nil
+	}
+
+	ociMan, err := manifest.OCI1FromManifest(single.manifest)
+	if err != nil {
+		return nil, nil
+	}
+
+	if !hasZstdChunkedLayers(ociMan) {
+		return nil, nil
+	}
+
+	// Use the config as written to the destination (reflects any edits during copy).
+	var ociConfig imgspecv1.Image
+	if err := json.Unmarshal(single.configBlob, &ociConfig); err != nil {
+		logrus.Debugf("Cannot parse config for single-image sentinel: %v", err)
+		return nil, nil
+	}
+
+	sentinelManifestBlob, sentinelManifestDigest, err := c.pushSentinelVariant(ctx, ociMan, &ociConfig)
+	if err != nil {
+		return nil, err
+	}
+
+	// Extract platform from config.
+	var platform *imgspecv1.Platform
+	if ociConfig.OS != "" || ociConfig.Architecture != "" {
+		platform = &imgspecv1.Platform{
+			OS:           ociConfig.OS,
+			Architecture: ociConfig.Architecture,
+			Variant:      ociConfig.Variant,
+			OSVersion:    ociConfig.OSVersion,
+		}
+	}
+
+	// Build OCI index with: original manifest first, sentinel variant last.
+	// Both entries get the zstd annotation so that old clients (which prefer
+	// zstd over gzip) fall through to position-based selection and pick the
+	// original at position 0 instead of the sentinel.
+	index := manifest.OCI1IndexFromComponents([]imgspecv1.Descriptor{
+		{
+			MediaType: imgspecv1.MediaTypeImageManifest,
+			Digest:    single.manifestDigest,
+			Size:      int64(len(single.manifest)),
+			Platform:  platform,
+			Annotations: map[string]string{
+				internalManifest.OCI1InstanceAnnotationCompressionZSTD: internalManifest.OCI1InstanceAnnotationCompressionZSTDValue,
+			},
+		},
+		{
+			MediaType: imgspecv1.MediaTypeImageManifest,
+			Digest:    sentinelManifestDigest,
+			Size:      int64(len(sentinelManifestBlob)),
+			Platform:  platform,
+			Annotations: map[string]string{
+				internalManifest.OCI1InstanceAnnotationZstdChunkedSentinel: internalManifest.OCI1InstanceAnnotationZstdChunkedSentinelValue,
+				internalManifest.OCI1InstanceAnnotationCompressionZSTD:     internalManifest.OCI1InstanceAnnotationCompressionZSTDValue,
+			},
+		},
+	}, nil)
+	indexBlob, err := index.Serialize()
+	if err != nil {
+		return nil, fmt.Errorf("serializing sentinel index: %w", err)
+	}
+
+	if err := c.dest.PutManifest(ctx, indexBlob, nil); err != nil {
+		return nil, fmt.Errorf("pushing sentinel index: %w", err)
+	}
+
+	return indexBlob, nil
 }
