@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -21,21 +22,36 @@ import (
 )
 
 func TestDockerCertDir(t *testing.T) {
-	const nondefaultFullPath = "/this/is/not/the/default/full/path"
-	const nondefaultPerHostDir = "/this/is/not/the/default/certs.d"
+	t.Helper()
+
+	tempRoot := t.TempDir()
+
+	nondefaultFullPath := filepath.Join(tempRoot, "nondefault", "full", "path")
+	nondefaultPerHostDir := filepath.Join(tempRoot, "nondefault", "certs.d")
 	const variableReference = "$HOME"
-	const rootPrefix = "/root/prefix"
+	rootPrefix := filepath.Join(tempRoot, "rootprefix")
 	const registryHostPort = "thishostdefinitelydoesnotexist:5000"
 
-	systemPerHostResult := filepath.Join(perHostCertDirs[len(perHostCertDirs)-1].path, registryHostPort)
+	hostDirs := []string{
+		"/etc/containers/certs.d",
+		"/etc/docker/certs.d",
+	}
+
+	// Create RootForImplicitAbsolutePaths-prefixed locations.
+	for _, d := range hostDirs {
+		require.NoError(t, os.MkdirAll(filepath.Join(rootPrefix, d, registryHostPort), 0o755))
+	}
+	// Create nondefault per-host override directory.
+	require.NoError(t, os.MkdirAll(filepath.Join(nondefaultPerHostDir, registryHostPort), 0o755))
+
 	for _, c := range []struct {
 		sys      *types.SystemContext
 		expected string
 	}{
-		// The common case
-		{nil, systemPerHostResult},
-		// There is a context, but it does not override the path.
-		{&types.SystemContext{}, systemPerHostResult},
+		// Work with nil SystemContext.
+		{nil, ""},
+		// Work with empty SystemContext.
+		{&types.SystemContext{}, ""},
 		// Full path overridden
 		{&types.SystemContext{DockerCertPath: nondefaultFullPath}, nondefaultFullPath},
 		// Per-host path overridden
@@ -54,7 +70,7 @@ func TestDockerCertDir(t *testing.T) {
 		// Root overridden
 		{
 			&types.SystemContext{RootForImplicitAbsolutePaths: rootPrefix},
-			filepath.Join(rootPrefix, systemPerHostResult),
+			filepath.Join(rootPrefix, "/etc/containers/certs.d", registryHostPort),
 		},
 		// Root and path overrides present simultaneously,
 		{

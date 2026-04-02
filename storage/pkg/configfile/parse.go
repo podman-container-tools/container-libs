@@ -31,6 +31,9 @@ var (
 	// This can be overridden at build time with the following go linker flag:
 	// -ldflags '-X go.podman.io/storage/pkg/configfile.adminOverrideConfigPath=$your_path'
 	adminOverrideConfigPath = getAdminOverrideConfigPath()
+
+	// userConfigPathForResourceDirs is a test hook for ContainersResourceDirs.
+	userConfigPathForResourceDirs = UserConfigPath
 )
 
 type File struct {
@@ -306,6 +309,98 @@ func getDropInPaths(mainPath, suffix string, uid int) []string {
 		paths = append(paths, filepath.Join(specialPath, strconv.Itoa(uid)))
 	}
 	return paths
+}
+
+type Directory struct {
+	// The base name of the config directory.
+	// Must not be empty and must not contain the path separator.
+	// The full path is then constructed by the ContainersResourceDirs function.
+	// For example, "certs" will be joined with ".d" to form "certs.d".
+	Name string
+
+	// RootForImplicitAbsolutePaths is the path to an alternate root
+	// If not "", prefixed to any absolute paths used by default in the package.
+	// NOTE: This does NOT affect paths starting by $HOME or environment variables paths.
+	RootForImplicitAbsolutePaths string
+
+	// UserId is the id of the user running this. Used to know where to search in the
+	// different "rootful" and "rootless" drop in lookup paths.
+	UserId int
+
+	// ExtraDirs is a list of additional directories to include in the search.
+	ExtraDirs []string
+}
+
+// ContainersResourceDirs returns a list of configuration directories for a
+// logical resource name (for example "registries" or "certs") using the
+// unified configfile search semantics.
+//
+// The returned slice is ordered from highest to lowest priority and contains
+// only directories that exist and can be accessed. Non‑existent or
+// permission‑denied directories are silently skipped; other filesystem errors
+// are returned to the caller.
+//
+// The search covers, where configured (listed here from lowest to highest precedence.
+// It can be extended with additional absolute directories via extraDirs (lowest precedence).
+func ContainersResourceDirs(conf *Directory) ([]string, error) {
+	candidates := make([]string, 0, 7+len(conf.ExtraDirs))
+
+	userConfig, _ := userConfigPathForResourceDirs()
+	if userConfig != "" {
+		userConfig = filepath.Join(userConfig, conf.Name)
+		candidates = append(candidates, userConfig+dropInSuffix)
+
+	}
+
+	overrideConfig := adminOverrideConfigPath
+	if overrideConfig != "" {
+		overrideConfig = filepath.Join(overrideConfig, conf.Name)
+		if conf.RootForImplicitAbsolutePaths != "" {
+			overrideConfig = filepath.Join(conf.RootForImplicitAbsolutePaths, overrideConfig)
+		}
+		overridePaths := getDropInPaths(overrideConfig, "", conf.UserId)
+		for i := len(overridePaths) - 1; i >= 0; i-- {
+			candidates = append(candidates, overridePaths[i])
+		}
+	}
+
+	for i := len(conf.ExtraDirs) - 1; i >= 0; i-- {
+		dir := conf.ExtraDirs[i]
+		if conf.RootForImplicitAbsolutePaths != "" {
+			dir = filepath.Join(conf.RootForImplicitAbsolutePaths, dir)
+		}
+		candidates = append(candidates, dir)
+	}
+
+	defaultConfig := systemConfigPath
+	if defaultConfig != "" {
+		defaultConfig = filepath.Join(defaultConfig, conf.Name)
+		if conf.RootForImplicitAbsolutePaths != "" {
+			defaultConfig = filepath.Join(conf.RootForImplicitAbsolutePaths, defaultConfig)
+		}
+		defaultPaths := getDropInPaths(defaultConfig, "", conf.UserId)
+		for i := len(defaultPaths) - 1; i >= 0; i-- {
+			candidates = append(candidates, defaultPaths[i])
+		}
+	}
+
+	dirs := make([]string, 0, len(candidates)+len(conf.ExtraDirs))
+
+	for _, dir := range candidates {
+		info, err := os.Stat(dir)
+		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) || errors.Is(err, fs.ErrPermission) {
+				continue
+			}
+			return nil, err
+		}
+		if !info.IsDir() {
+			continue
+		}
+		dirs = append(dirs, dir)
+	}
+
+	return dirs, nil
 }
 
 func moduleDirectories(defaultConfig, overrideConfig, userConfig string) []string {

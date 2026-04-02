@@ -1,6 +1,7 @@
 package configfile
 
 import (
+	"fmt"
 	"io"
 	"io/fs"
 	"iter"
@@ -576,6 +577,185 @@ func Test_Read(t *testing.T) {
 				_, _, ok = next()
 				assert.False(t, ok)
 			}
+		})
+	}
+}
+
+func Test_ContainersResourceDirs(t *testing.T) {
+	type testcase struct {
+		name string
+		arg  Directory
+		// Layout of files under usr / etc / home (see writeTestFiles).
+		files testfiles
+		// setup runs after writeTestFiles; use for directories that are not file-backed.
+		setup func(t *testing.T, root string)
+		want  func(root string) []string
+	}
+
+	tests := []testcase{
+		{
+			name: "no matching directories",
+			arg: Directory{
+				Name:   "certs",
+				UserId: 0,
+			},
+			want: func(root string) []string { return []string{} },
+		},
+		{
+			name: "system drop-in directory only",
+			arg: Directory{
+				Name:   "certs",
+				UserId: 0,
+			},
+			files: testfiles{
+				usr: map[string]string{
+					"certs.d/10-trust": "",
+				},
+			},
+			want: func(root string) []string {
+				base := filepath.Join(root, systemConfigPath, "certs")
+				return []string{base + ".d"}
+			},
+		},
+		{
+			name: "system rootful drop-in and general drop-in",
+			arg: Directory{
+				Name:   "certs",
+				UserId: 0,
+			},
+			files: testfiles{
+				usr: map[string]string{
+					"certs.d/10-a":         "",
+					"certs.rootful.d/20-b": "",
+				},
+			},
+			want: func(root string) []string {
+				base := filepath.Join(root, systemConfigPath, "certs")
+				return []string{base + ".rootful.d", base + ".d"}
+			},
+		},
+		{
+			name: "admin override before system paths in search order",
+			arg: Directory{
+				Name:   "certs",
+				UserId: 0,
+			},
+			files: testfiles{
+				usr: map[string]string{
+					"certs.d/sys": "",
+				},
+				etc: map[string]string{
+					"certs.d/etc": "",
+				},
+			},
+			want: func(root string) []string {
+				defBase := filepath.Join(root, systemConfigPath, "certs")
+				ovBase := filepath.Join(root, adminOverrideConfigPath, "certs")
+				return []string{ovBase + ".d", defBase + ".d"}
+			},
+		},
+		{
+			name: "user config drop-in before override and system",
+			arg: Directory{
+				Name:   "certs",
+				UserId: 0,
+			},
+			files: testfiles{
+				usr: map[string]string{"certs.d/s": ""},
+				etc: map[string]string{"certs.d/e": ""},
+				home: map[string]string{
+					"certs.d/h": "",
+				},
+			},
+			want: func(root string) []string {
+				defBase := filepath.Join(root, systemConfigPath, "certs")
+				ovBase := filepath.Join(root, adminOverrideConfigPath, "certs")
+				userBase := filepath.Join(root, "home", "containers", "certs")
+				return []string{userBase + ".d", ovBase + ".d", defBase + ".d"}
+			},
+		},
+		{
+			name: "rootless uid-specific drop-in directory",
+			arg: Directory{
+				Name:   "certs",
+				UserId: 500,
+			},
+			files: testfiles{
+				usr: map[string]string{
+					"certs.rootless.d/500/10-x": "",
+				},
+			},
+			want: func(root string) []string {
+				base := filepath.Join(root, systemConfigPath, "certs")
+				less := base + ".rootless.d"
+				return []string{filepath.Join(less, "500"), less}
+			},
+		},
+		{
+			name: "extra directories appended",
+			arg: Directory{
+				Name:      "certs",
+				UserId:    0,
+				ExtraDirs: []string{"/var/extra/certs"},
+			},
+			setup: func(t *testing.T, root string) {
+				p := filepath.Join(root, "var", "extra", "certs")
+				require.NoError(t, os.MkdirAll(p, 0o755))
+			},
+			want: func(root string) []string {
+				return []string{filepath.Join(root, "var", "extra", "certs")}
+			},
+		},
+		{
+			name: "non-directory path is skipped",
+			arg: Directory{
+				Name:   "certs",
+				UserId: 0,
+			},
+			files: testfiles{
+				usr: map[string]string{
+					"certs.d": "not-a-directory",
+				},
+			},
+			want: func(root string) []string { return []string{} },
+		},
+		{
+			name: "user config path resolution failure is ignored",
+			arg: Directory{
+				Name:   "certs",
+				UserId: 0,
+			},
+			files: testfiles{
+				usr: map[string]string{
+					"certs.d/sys": "",
+				},
+			},
+			setup: func(t *testing.T, root string) {
+				t.Helper()
+				old := userConfigPathForResourceDirs
+				t.Cleanup(func() { userConfigPathForResourceDirs = old })
+				userConfigPathForResourceDirs = func() (string, error) {
+					return "", fmt.Errorf("synthetic failure")
+				}
+			},
+			want: func(root string) []string {
+				defBase := filepath.Join(root, systemConfigPath, "certs")
+				return []string{defBase + ".d"}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			tt.arg.RootForImplicitAbsolutePaths = root
+			writeTestFiles(t, root, tt.files)
+			if tt.setup != nil {
+				tt.setup(t, root)
+			}
+			got, err := ContainersResourceDirs(&tt.arg)
+			require.NoError(t, err)
+			assert.Equal(t, tt.want(root), got)
 		})
 	}
 }
