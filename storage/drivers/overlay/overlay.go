@@ -2083,6 +2083,29 @@ func (d *Driver) Put(id string) error {
 		// rename(2) can be used on an empty directory, as it is the mountpoint after umount, and it retains
 		// its atomic semantic.  In this way the "merged" directory is never removed.
 		if err := unix.Rename(tmpMountpoint, mountpoint); err != nil {
+			// The rename is a non-critical optimization (atomic refresh of merged/).
+			// Get() handles an existing merged/ via MkdirAllAndChownNew.
+			// Don't fail Put() if the rename can't be done — the unmount already
+			// succeeded and that's what matters.
+			if errors.Is(err, unix.EBUSY) {
+				os.Remove(tmpMountpoint)
+				// Try to rmdir and recreate the mountpoint directory.
+				// This clears the stale DCACHE_MOUNTED flag if the kernel allows it.
+				if rmdirErr := unix.Rmdir(mountpoint); rmdirErr != nil {
+					// ENOTEMPTY: directory has contents, not safe to ignore.
+					// EBUSY: stale mountpoint flag (e.g. from a shared mount after
+					// MNT_DETACH), directory is empty but kernel won't release it.
+					if !errors.Is(rmdirErr, unix.EBUSY) {
+						return fmt.Errorf("replacing mount point %q: %w", mountpoint, err)
+					}
+					logrus.Warningf("Failed to replace mountpoint %s overlay: %s - %v (mount still held, skipping rename)", id, mountpoint, err)
+					return nil
+				}
+				if mkdirErr := idtools.MkdirAndChown(mountpoint, 0o700, idPair); mkdirErr != nil {
+					logrus.Warningf("Failed to recreate mountpoint %s overlay: %s: %v", id, mountpoint, mkdirErr)
+				}
+				return nil
+			}
 			logrus.Debugf("Failed to replace mountpoint %s overlay: %s: %v", id, mountpoint, err)
 			return fmt.Errorf("replacing mount point %q: %w", mountpoint, err)
 		}
