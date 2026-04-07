@@ -15,8 +15,9 @@ import (
 	"go.podman.io/image/v5/docker/reference"
 	"go.podman.io/image/v5/internal/rootless"
 	"go.podman.io/image/v5/types"
-	"go.podman.io/storage/pkg/fileutils"
+	"go.podman.io/storage/pkg/configfile"
 	"go.podman.io/storage/pkg/homedir"
+	"go.podman.io/storage/pkg/unshare"
 	"gopkg.in/yaml.v3"
 )
 
@@ -28,9 +29,6 @@ var systemRegistriesDirPath = builtinRegistriesDirPath
 // builtinRegistriesDirPath is the path to registries.d.
 // DO NOT change this, instead see systemRegistriesDirPath above.
 const builtinRegistriesDirPath = etcDir + "/containers/registries.d"
-
-// userRegistriesDirPath is the path to the per user registries.d.
-var userRegistriesDir = filepath.FromSlash(".config/containers/registries.d")
 
 // defaultUserDockerDir is the default lookaside directory for unprivileged user
 var defaultUserDockerDir = filepath.FromSlash(".local/share/containers/sigstore")
@@ -78,31 +76,41 @@ func SignatureStorageBaseURL(sys *types.SystemContext, ref types.ImageReference,
 
 // loadRegistryConfiguration returns a registryConfiguration appropriate for sys.
 func loadRegistryConfiguration(sys *types.SystemContext) (*registryConfiguration, error) {
-	dirPath := registriesDirPath(sys)
+	dirPath, err := registriesDirPath(sys)
+	if err != nil {
+		return nil, err
+	}
 	logrus.Debugf(`Using registries.d directory %s`, dirPath)
 	return loadAndMergeConfig(dirPath)
 }
 
 // registriesDirPath returns a path to registries.d
-func registriesDirPath(sys *types.SystemContext) string {
-	return registriesDirPathWithHomeDir(sys, homedir.Get())
-}
-
-// registriesDirPathWithHomeDir is an internal implementation detail of registriesDirPath,
-// it exists only to allow testing it with an artificial home directory.
-func registriesDirPathWithHomeDir(sys *types.SystemContext, homeDir string) string {
+func registriesDirPath(sys *types.SystemContext) (string, error) {
 	if sys != nil && sys.RegistriesDirPath != "" {
-		return sys.RegistriesDirPath
+		return sys.RegistriesDirPath, nil
 	}
-	userRegistriesDirPath := filepath.Join(homeDir, userRegistriesDir)
-	if err := fileutils.Exists(userRegistriesDirPath); err == nil {
-		return userRegistriesDirPath
+
+	conf := &configfile.Directory{
+		Name:   "registries",
+		UserId: unshare.GetRootlessUID(),
 	}
 	if sys != nil && sys.RootForImplicitAbsolutePaths != "" {
-		return filepath.Join(sys.RootForImplicitAbsolutePaths, systemRegistriesDirPath)
+		conf.RootForImplicitAbsolutePaths = sys.RootForImplicitAbsolutePaths
 	}
 
-	return systemRegistriesDirPath
+	dirs, err := configfile.ContainersResourceDirs(conf)
+	if err != nil {
+		return "", err
+	}
+	if len(dirs) > 0 {
+		return dirs[0], nil
+	}
+
+	// Preserve the historical behavior: default to the system path even if it doesn't exist.
+	if sys != nil && sys.RootForImplicitAbsolutePaths != "" {
+		return filepath.Join(sys.RootForImplicitAbsolutePaths, systemRegistriesDirPath), nil
+	}
+	return systemRegistriesDirPath, nil
 }
 
 // loadAndMergeConfig loads configuration files in dirPath

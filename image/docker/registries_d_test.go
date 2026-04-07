@@ -71,24 +71,30 @@ func TestRegistriesDirPath(t *testing.T) {
 	const variableReference = "$HOME"
 	const rootPrefix = "/root/prefix"
 	tempHome := t.TempDir()
+	t.Setenv("HOME", tempHome)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tempHome, ".config"))
 	userRegistriesDir := filepath.FromSlash(".config/containers/registries.d")
 	userRegistriesDirPath := filepath.Join(tempHome, userRegistriesDir)
 	for _, c := range []struct {
 		sys             *types.SystemContext
 		userFilePresent bool
-		expected        string
+		rooted          bool
+		setup           func(t *testing.T, root string)
+		expected        func(root string) string
 	}{
 		// The common case
-		{nil, false, systemRegistriesDirPath},
+		{nil, false, false, nil, func(string) string { return systemRegistriesDirPath }},
 		// There is a context, but it does not override the path.
-		{&types.SystemContext{}, false, systemRegistriesDirPath},
+		{&types.SystemContext{}, false, false, nil, func(string) string { return systemRegistriesDirPath }},
 		// Path overridden
-		{&types.SystemContext{RegistriesDirPath: nondefaultPath}, false, nondefaultPath},
+		{&types.SystemContext{RegistriesDirPath: nondefaultPath}, false, false, nil, func(string) string { return nondefaultPath }},
 		// Root overridden
 		{
 			&types.SystemContext{RootForImplicitAbsolutePaths: rootPrefix},
 			false,
-			filepath.Join(rootPrefix, systemRegistriesDirPath),
+			false,
+			nil,
+			func(string) string { return filepath.Join(rootPrefix, systemRegistriesDirPath) },
 		},
 		// Root and path overrides present simultaneously,
 		{
@@ -97,12 +103,14 @@ func TestRegistriesDirPath(t *testing.T) {
 				RegistriesDirPath:            nondefaultPath,
 			},
 			false,
-			nondefaultPath,
+			false,
+			nil,
+			func(string) string { return nondefaultPath },
 		},
 		// User registries.d present, not overridden
-		{&types.SystemContext{}, true, userRegistriesDirPath},
+		{&types.SystemContext{}, true, false, nil, func(string) string { return userRegistriesDirPath }},
 		// Context and user User registries.d preset simultaneously
-		{&types.SystemContext{RegistriesDirPath: nondefaultPath}, true, nondefaultPath},
+		{&types.SystemContext{RegistriesDirPath: nondefaultPath}, true, false, nil, func(string) string { return nondefaultPath }},
 		// Root and user registries.d overrides present simultaneously,
 		{
 			&types.SystemContext{
@@ -110,11 +118,75 @@ func TestRegistriesDirPath(t *testing.T) {
 				RegistriesDirPath:            nondefaultPath,
 			},
 			true,
-			nondefaultPath,
+			false,
+			nil,
+			func(string) string { return nondefaultPath },
 		},
 		// No environment expansion happens in the overridden paths
-		{&types.SystemContext{RegistriesDirPath: variableReference}, false, variableReference},
+		{&types.SystemContext{RegistriesDirPath: variableReference}, false, false, nil, func(string) string { return variableReference }},
+
+		// RootForImplicitAbsolutePaths: system dir exists
+		{
+			&types.SystemContext{},
+			false,
+			true,
+			func(t *testing.T, root string) {
+				t.Helper()
+				require.NoError(t, os.MkdirAll(filepath.Join(root, "/usr/share/containers/registries.d"), 0o755))
+			},
+			func(root string) string { return filepath.Join(root, "/usr/share/containers/registries.d") },
+		},
+		// RootForImplicitAbsolutePaths: override dir beats system dir
+		{
+			&types.SystemContext{},
+			false,
+			true,
+			func(t *testing.T, root string) {
+				t.Helper()
+				require.NoError(t, os.MkdirAll(filepath.Join(root, "/etc/containers/registries.d"), 0o755))
+				require.NoError(t, os.MkdirAll(filepath.Join(root, "/usr/share/containers/registries.d"), 0o755))
+			},
+			func(root string) string { return filepath.Join(root, "/etc/containers/registries.d") },
+		},
+		// RootForImplicitAbsolutePaths: user dir beats override+system
+		{
+			&types.SystemContext{},
+			false,
+			true,
+			func(t *testing.T, root string) {
+				t.Helper()
+				require.NoError(t, os.MkdirAll(filepath.Join(root, "/etc/containers/registries.d"), 0o755))
+				require.NoError(t, os.MkdirAll(filepath.Join(root, "/usr/share/containers/registries.d"), 0o755))
+				require.NoError(t, os.MkdirAll(userRegistriesDirPath, 0o700))
+				t.Cleanup(func() { require.NoError(t, os.RemoveAll(userRegistriesDirPath)) })
+			},
+			func(string) string { return userRegistriesDirPath },
+		},
+		// RootForImplicitAbsolutePaths: non-directory override path is skipped
+		{
+			&types.SystemContext{},
+			false,
+			true,
+			func(t *testing.T, root string) {
+				t.Helper()
+				ovPath := filepath.Join(root, "/etc/containers/registries.d")
+				require.NoError(t, os.MkdirAll(filepath.Dir(ovPath), 0o755))
+				require.NoError(t, os.WriteFile(ovPath, []byte("not a directory"), 0o600))
+				require.NoError(t, os.MkdirAll(filepath.Join(root, "/usr/share/containers/registries.d"), 0o755))
+			},
+			func(root string) string { return filepath.Join(root, "/usr/share/containers/registries.d") },
+		},
 	} {
+		root := ""
+		sys := c.sys
+		if c.rooted {
+			root = t.TempDir()
+			if sys == nil {
+				sys = &types.SystemContext{}
+			}
+			sys.RootForImplicitAbsolutePaths = root
+		}
+
 		if c.userFilePresent {
 			err := os.MkdirAll(userRegistriesDirPath, 0o700)
 			require.NoError(t, err)
@@ -122,8 +194,13 @@ func TestRegistriesDirPath(t *testing.T) {
 			err := os.RemoveAll(userRegistriesDirPath)
 			require.NoError(t, err)
 		}
-		path := registriesDirPathWithHomeDir(c.sys, tempHome)
-		assert.Equal(t, c.expected, path)
+		if c.setup != nil {
+			c.setup(t, root)
+		}
+
+		path, err := registriesDirPath(sys)
+		require.NoError(t, err)
+		assert.Equal(t, c.expected(root), path)
 	}
 }
 
