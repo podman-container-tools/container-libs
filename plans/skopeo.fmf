@@ -1,0 +1,27 @@
+discover:
+    how: fmf
+    url: https://github.com/lsm5/skopeo
+    ref: "ci-agnostic-2"
+execute:
+    how: tmt
+prepare:
+  # Ensure we're preferring packages from podman-next copr  
+  - when: initiator == packit
+    how: shell
+    script: |
+        COPR_REPO_FILE="/etc/yum.repos.d/*podman-next*.repo"
+        if compgen -G $COPR_REPO_FILE > /dev/null; then
+            sed -i -n '/^priority=/!p;$apriority=1' $COPR_REPO_FILE
+        fi
+        dnf update -y --allowerasing --best
+    order: 20
+  - name: Disable installing everything from srpm
+    how: install
+    exclude:
+      - ".*"
+    order: 25
+  - name: Install the main package
+    how: install
+    package:
+      - containers-common
+    order: 30

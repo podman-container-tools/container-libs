@@ -32,7 +32,7 @@ jobs:
       failure_comment:
         message: "Packit jobs failed. @containers/packit-build please check."
     enable_net: true
-    targets:
+    targets: &fedora_copr_targets
       - fedora-all
 
   - job: copr_build
@@ -65,6 +65,22 @@ jobs:
     owner: rhcontainerbot
     project: podman-next
     enable_net: true
+
+  # All tests specified in the `/plans/` subdir
+  # Tests for Fedora
+  - job: tests
+    trigger: pull_request
+    packages: [containers-common-fedora]
+    notifications:
+      failure_comment:
+        message: "Tests failed. @containers/packit-build please check."
+    targets: *fedora_copr_targets
+    tf_extra_params:
+      environments:
+        - artifacts:
+          - type: repository-file
+            id: https://copr.fedorainfracloud.org/coprs/rhcontainerbot/podman-next/repo/fedora-$releasever/rhcontainerbot-podman-next-fedora-$releasever.repo
+
 
   - job: propose_downstream
     trigger: release
