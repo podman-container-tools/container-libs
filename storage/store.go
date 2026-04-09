@@ -633,13 +633,39 @@ type AutoUserNsOptions = types.AutoUserNsOptions
 
 type IDMappingOptions = types.IDMappingOptions
 
+// LayerIDMappingOptions are the on-disk ID mappings for a layer.
+//
+// Unlike the caller-facing IDMappingOptions (which expresses what mapping
+// the caller wants), these record how files are actually stored.  The two
+// may differ: when the graph driver supports shifting, no chown
+// occurs so HostUIDMapping/HostGIDMapping are true and UIDMap/GIDMap
+// are empty, even though the caller requested a non-trivial mapping.
+// The caller's requested mapping is still honored at mount time via
+// the Container's UIDMap/GIDMap.
+type LayerIDMappingOptions struct {
+	// HostUIDMapping is true when files in this layer are stored with host
+	// UIDs.
+	HostUIDMapping bool
+	// HostGIDMapping is true when files in this layer are stored with host
+	// GIDs.  See HostUIDMapping for details.
+	HostGIDMapping bool
+	// UIDMap is the on-disk UID mapping: it records the chown that was
+	// applied to the layer's files at creation time.  Empty when
+	// HostUIDMapping is true.
+	UIDMap []idtools.IDMap
+	// GIDMap is the on-disk GID mapping: it records the chown that was
+	// applied to the layer's files at creation time.  Empty when
+	// HostGIDMapping is true.
+	GIDMap []idtools.IDMap
+}
+
 // LayerOptions is used for passing options to a Store's CreateLayer() and PutLayer() methods.
 type LayerOptions struct {
 	// IDMappingOptions specifies the type of ID mapping which should be
 	// used for this layer.  If nothing is specified, the layer will
 	// inherit settings from its parent layer or, if it has no parent
 	// layer, the Store object.
-	types.IDMappingOptions
+	IDMappingOptions LayerIDMappingOptions
 	// TemplateLayer is the ID of a layer whose contents will be used to
 	// initialize this layer.  If set, it should be a child of the layer
 	// which we want to use as the parent of the new layer.
@@ -1526,14 +1552,14 @@ func populateLayerOptions(s *store, rlstore rwLayerStore, rlstores []roLayerStor
 		options.BigData = slices.Clone(lOptions.BigData)
 		options.Flags = copyMapPreferringNil(lOptions.Flags)
 	}
-	if options.HostUIDMapping {
-		options.UIDMap = nil
+	if options.IDMappingOptions.HostUIDMapping {
+		options.IDMappingOptions.UIDMap = nil
 	}
-	if options.HostGIDMapping {
-		options.GIDMap = nil
+	if options.IDMappingOptions.HostGIDMapping {
+		options.IDMappingOptions.GIDMap = nil
 	}
-	uidMap := options.UIDMap
-	gidMap := options.GIDMap
+	uidMap := options.IDMappingOptions.UIDMap
+	gidMap := options.IDMappingOptions.GIDMap
 	if parent != "" {
 		var err error
 		parentLayer, unlock, err = getParentLayer(rlstore, rlstores, parent)
@@ -1554,26 +1580,26 @@ func populateLayerOptions(s *store, rlstore rwLayerStore, rlstores []roLayerStor
 				return nil, nil, unlock, ErrParentIsContainer
 			}
 		}
-		if !options.HostUIDMapping && len(options.UIDMap) == 0 {
+		if !options.IDMappingOptions.HostUIDMapping && len(options.IDMappingOptions.UIDMap) == 0 {
 			uidMap = parentLayer.UIDMap
 		}
-		if !options.HostGIDMapping && len(options.GIDMap) == 0 {
+		if !options.IDMappingOptions.HostGIDMapping && len(options.IDMappingOptions.GIDMap) == 0 {
 			gidMap = parentLayer.GIDMap
 		}
 	} else {
-		if !options.HostUIDMapping && len(options.UIDMap) == 0 {
+		if !options.IDMappingOptions.HostUIDMapping && len(options.IDMappingOptions.UIDMap) == 0 {
 			uidMap = s.uidMap
 		}
-		if !options.HostGIDMapping && len(options.GIDMap) == 0 {
+		if !options.IDMappingOptions.HostGIDMapping && len(options.IDMappingOptions.GIDMap) == 0 {
 			gidMap = s.gidMap
 		}
 	}
 	if s.canUseShifting(uidMap, gidMap) {
-		options.IDMappingOptions = types.IDMappingOptions{HostUIDMapping: true, HostGIDMapping: true, UIDMap: nil, GIDMap: nil}
+		options.IDMappingOptions = LayerIDMappingOptions{HostUIDMapping: true, HostGIDMapping: true, UIDMap: nil, GIDMap: nil}
 	} else {
-		options.IDMappingOptions = types.IDMappingOptions{
-			HostUIDMapping: options.HostUIDMapping,
-			HostGIDMapping: options.HostGIDMapping,
+		options.IDMappingOptions = LayerIDMappingOptions{
+			HostUIDMapping: options.IDMappingOptions.HostUIDMapping,
+			HostGIDMapping: options.IDMappingOptions.HostGIDMapping,
 			UIDMap:         copySlicePreferringNil(uidMap),
 			GIDMap:         copySlicePreferringNil(gidMap),
 		}
@@ -1864,14 +1890,14 @@ func (s *store) imageTopLayerForMapping(image *Image, ristore roImageStore, rlst
 	// mappings, and register it as an alternate top layer in the image.
 	var layerOptions LayerOptions
 	if s.canUseShifting(options.UIDMap, options.GIDMap) {
-		layerOptions.IDMappingOptions = types.IDMappingOptions{
+		layerOptions.IDMappingOptions = LayerIDMappingOptions{
 			HostUIDMapping: true,
 			HostGIDMapping: true,
 			UIDMap:         nil,
 			GIDMap:         nil,
 		}
 	} else {
-		layerOptions.IDMappingOptions = types.IDMappingOptions{
+		layerOptions.IDMappingOptions = LayerIDMappingOptions{
 			HostUIDMapping: options.HostUIDMapping,
 			HostGIDMapping: options.HostGIDMapping,
 			UIDMap:         copySlicePreferringNil(options.UIDMap),
@@ -2016,7 +2042,7 @@ func (s *store) CreateContainer(id string, names []string, image, layer, metadat
 		// But in transient store mode, all container layers are volatile.
 		Volatile: options.Volatile || s.transientStore,
 	}
-	layerOptions.IDMappingOptions = types.IDMappingOptions{
+	layerOptions.IDMappingOptions = LayerIDMappingOptions{
 		HostUIDMapping: idMappingsOptions.HostUIDMapping,
 		HostGIDMapping: idMappingsOptions.HostGIDMapping,
 		UIDMap:         copySlicePreferringNil(uidMap),
