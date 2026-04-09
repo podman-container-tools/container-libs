@@ -1645,6 +1645,9 @@ func (r *layerStore) create(id string, parentLayer *Layer, names []string, mount
 	}
 
 	idMappings := idtools.NewIDMappingsFromMaps(moreOptions.IDMappingOptions.UIDMap, moreOptions.IDMappingOptions.GIDMap)
+	if moreOptions.IDMappingOptions.HostUIDMapping && moreOptions.IDMappingOptions.HostGIDMapping {
+		idMappings = &idtools.IDMappings{}
+	}
 	opts := drivers.CreateOpts{
 		MountLabel: mountLabel,
 		StorageOpt: options,

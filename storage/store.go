@@ -2042,9 +2042,10 @@ func (s *store) CreateContainer(id string, names []string, image, layer, metadat
 		// But in transient store mode, all container layers are volatile.
 		Volatile: options.Volatile || s.transientStore,
 	}
+	useHostMapping := idMappingsOptions.HostUIDMapping || s.canUseShifting(uidMap, gidMap)
 	layerOptions.IDMappingOptions = LayerIDMappingOptions{
-		HostUIDMapping: idMappingsOptions.HostUIDMapping,
-		HostGIDMapping: idMappingsOptions.HostGIDMapping,
+		HostUIDMapping: useHostMapping,
+		HostGIDMapping: useHostMapping,
 		UIDMap:         copySlicePreferringNil(uidMap),
 		GIDMap:         copySlicePreferringNil(gidMap),
 	}
