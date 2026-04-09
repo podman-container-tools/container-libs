@@ -3074,10 +3074,6 @@ func (s *store) Mount(id, mountLabel string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if options.UidMaps != nil || options.GidMaps != nil {
-		options.DisableShifting = !s.canUseShifting(options.UidMaps, options.GidMaps)
-	}
-
 	if err := rlstore.startWriting(); err != nil {
 		return "", err
 	}
