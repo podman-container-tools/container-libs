@@ -975,28 +975,207 @@ load helpers
 		;;
 	esac
 
-	# Create a base layer.
-	run storage --debug=false create-layer
+	# Check if the driver supports shifting (idmapped mounts).
+	run storage --debug=false status
+	if ! grep -q "Supports shifting: true" <<< "$output" ; then
+		skip "driver does not support shifting"
+	fi
+
+	n=5
+
+	# Create some temporary files with different ownerships.
+	for i in $(seq $n) ; do
+		createrandom "$TESTDIR"/file$i
+		chown ${i}:${i} "$TESTDIR"/file$i
+	done
+
+	# Select UID/GID ranges for the container mappings.
+	for i in $(seq $n) ; do
+		uidrange[$i]=$((($RANDOM+32767)*65536))
+		gidrange[$i]=$((($RANDOM+32767)*65536))
+	done
+
+	# Create a base layer with host mappings.
+	run storage --debug=false create-layer --hostuidmap --hostgidmap
 	echo "$output"
 	[ "$status" -eq 0 ]
 	[ "$output" != "" ]
 	baselayer="$output"
-	# Create the lower layer.
-	run storage --debug=false create-layer $baselayer
+
+	# Create the lower layer with host mappings and populate it.
+	run storage --debug=false create-layer --hostuidmap --hostgidmap $baselayer
 	[ "$status" -eq 0 ]
 	[ "$output" != "" ]
 	lowerlayer="$output"
-	# Mount the layer.
+
 	run storage --debug=false mount $lowerlayer
 	[ "$status" -eq 0 ]
 	[ "$output" != "" ]
 	lowermount="$output"
-	# Put a file in the layer.
-	createrandom "$lowermount"/file
+
+	# Copy files in with their original ownership.
+	for i in $(seq $n) ; do
+		cp -p "$TESTDIR"/file$i ${lowermount}
+	done
 	storage unmount $lowerlayer
 
+	# Create an image from this layer.
 	imagename=idmappedimage-shifting
 	storage create-image --name=$imagename $lowerlayer
+
+	# Create containers with different UID/GID mappings and verify
+	# that files appear with the host-mapped ownership via idmapped mounts.
+	for i in $(seq $n) ; do
+		run storage --debug=false create-container --uidmap 0:${uidrange[$i]}:$(($n+1)) --gidmap 0:${gidrange[$i]}:$(($n+1)) $imagename
+		echo "$output"
+		[ "$status" -eq 0 ]
+		[ "$output" != "" ]
+		container=${lines[0]}
+
+		run storage --debug=false mount "$container"
+		echo "$output"
+		[ "$status" -eq 0 ]
+		[ "$output" != "" ]
+		mount="$output"
+
+		for j in $(seq $n) ; do
+			ownerids=$(stat -c %u:%g ${mount}/file$j)
+			expected=$((${uidrange[$i]}+$j)):$((${gidrange[$i]}+$j))
+			echo "file$j: on-disk IDs: $ownerids, expected IDs: $expected"
+			[ "$ownerids" = "$expected" ]
+		done
+		run storage --debug=false unmount "$container"
+		[ "$status" -eq 0 ]
+	done
+
+	# Also verify that a container with host mappings sees the original ownership.
+	run storage --debug=false create-container --hostuidmap --hostgidmap $imagename
+	[ "$status" -eq 0 ]
+	[ "$output" != "" ]
+	hostcontainer=${lines[0]}
+
+	run storage --debug=false mount "$hostcontainer"
+	[ "$status" -eq 0 ]
+	[ "$output" != "" ]
+	hostmount="$output"
+
+	for j in $(seq $n) ; do
+		ownerids=$(stat -c %u:%g ${hostmount}/file$j)
+		echo "file$j: on-disk IDs: $ownerids, expected IDs: $j:$j"
+		[ "$ownerids" = "$j:$j" ]
+	done
+	run storage --debug=false unmount "$hostcontainer"
+	[ "$status" -eq 0 ]
+}
+
+@test "idmaps-shifting-image-mount-uses-host-mappings" {
+	if [ "$OS" != "Linux" ]; then
+		skip "not supported on $OS"
+	fi
+	case "$STORAGE_DRIVER" in
+	overlay*)
+		;;
+	*)
+		skip "not supported by driver $STORAGE_DRIVER"
+		;;
+	esac
+	case "$STORAGE_OPTION" in
+	*mount_program*)
+		skip "test not supported when using mount_program"
+		;;
+	esac
+
+	# Check if the driver supports shifting (idmapped mounts).
+	run storage --debug=false status
+	if ! grep -q "Supports shifting: true" <<< "$output" ; then
+		skip "driver does not support shifting"
+	fi
+
+	n=3
+
+	# Create some temporary files with different ownerships.
+	for i in $(seq $n) ; do
+		createrandom "$TESTDIR"/file$i
+		chown ${i}:${i} "$TESTDIR"/file$i
+	done
+
+	# Build a chain of layers, each created with a different UID/GID mapping.
+	# With shifting enabled, UpdateLayerIDMap should not be called, so files
+	# remain with their original on-disk ownership.
+
+	# Layer 1 (base): host mappings, contains file1.
+	run storage --debug=false create-layer --hostuidmap --hostgidmap
+	[ "$status" -eq 0 ]
+	[ "$output" != "" ]
+	layer1="$output"
+
+	run storage --debug=false mount $layer1
+	[ "$status" -eq 0 ]
+	mount1="$output"
+	cp -p "$TESTDIR"/file1 ${mount1}
+	storage unmount $layer1
+
+	# Layer 2: different mapping, contains file2.
+	uidrange2=$((($RANDOM+32767)*65536))
+	gidrange2=$((($RANDOM+32767)*65536))
+	run storage --debug=false create-layer --uidmap 0:${uidrange2}:65536 --gidmap 0:${gidrange2}:65536 $layer1
+	[ "$status" -eq 0 ]
+	[ "$output" != "" ]
+	layer2="$output"
+
+	run storage --debug=false mount $layer2
+	[ "$status" -eq 0 ]
+	mount2="$output"
+	cp "$TESTDIR"/file2 ${mount2}
+	chown ${uidrange2}:${gidrange2} ${mount2}/file2
+	storage unmount $layer2
+
+	# Layer 3: yet another mapping, contains file3.
+	uidrange3=$((($RANDOM+32767)*65536))
+	gidrange3=$((($RANDOM+32767)*65536))
+	run storage --debug=false create-layer --uidmap 0:${uidrange3}:65536 --gidmap 0:${gidrange3}:65536 $layer2
+	[ "$status" -eq 0 ]
+	[ "$output" != "" ]
+	layer3="$output"
+
+	run storage --debug=false mount $layer3
+	[ "$status" -eq 0 ]
+	mount3="$output"
+	cp "$TESTDIR"/file3 ${mount3}
+	chown ${uidrange3}:${gidrange3} ${mount3}/file3
+	storage unmount $layer3
+
+	# Create an image from the top layer.
+	imagename=shifting-multilayer-image
+	storage create-image --name=$imagename $layer3
+
+	# Mount the image read-only and verify all files appear with host mappings.
+	# The image mount should not apply any UID/GID shifting: files must appear
+	# with their original on-disk ownership.
+	run storage --debug=false mount -r $imagename
+	[ "$status" -eq 0 ]
+	[ "$output" != "" ]
+	imgmount="$output"
+
+	# file1 was stored as 1:1 (host mapping).
+	run stat -c %u:%g ${imgmount}/file1
+	echo "file1: $output, expected 1:1"
+	[ "$output" = "1:1" ]
+
+	# file2 was stored with uidrange2 ownership on disk, which maps to
+	# container UID 0.  When mounted with host mappings, it must show
+	# the on-disk ownership.
+	run stat -c %u:%g ${imgmount}/file2
+	echo "file2: $output, expected ${uidrange2}:${gidrange2}"
+	[ "$output" = "${uidrange2}:${gidrange2}" ]
+
+	# file3 was stored with uidrange3 ownership on disk.
+	run stat -c %u:%g ${imgmount}/file3
+	echo "file3: $output, expected ${uidrange3}:${gidrange3}"
+	[ "$output" = "${uidrange3}:${gidrange3}" ]
+
+	run storage umount $imagename
+	[ "$status" -eq 0 ]
 }
 
 @test "idmaps-create-layer-from-another-image-store" {
