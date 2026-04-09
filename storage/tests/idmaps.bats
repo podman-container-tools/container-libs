@@ -23,6 +23,7 @@ load helpers
 		skip "test not supported when using mount_program"
 		;;
 	esac
+	export _CONTAINERS_OVERLAY_DISABLE_IDMAP=yes
 
 	n=5
 	host=2
@@ -137,6 +138,7 @@ load helpers
 		skip "test not supported when using mount_program"
 		;;
 	esac
+	export _CONTAINERS_OVERLAY_DISABLE_IDMAP=yes
 	n=5
 	host=2
 	# Create some temporary files.
@@ -231,6 +233,7 @@ load helpers
 		skip "test not supported when using mount_program"
 		;;
 	esac
+	export _CONTAINERS_OVERLAY_DISABLE_IDMAP=yes
 	n=5
 	host=2
 	# Create some temporary files.
@@ -375,6 +378,7 @@ load helpers
 		skip "test not supported when using mount_program"
 		;;
 	esac
+	export _CONTAINERS_OVERLAY_DISABLE_IDMAP=yes
 	n=5
 	# Create some temporary files.
 	for i in $(seq $n) ; do
@@ -440,6 +444,7 @@ load helpers
 		skip "test not supported when using mount_program"
 		;;
 	esac
+	export _CONTAINERS_OVERLAY_DISABLE_IDMAP=yes
 	n=5
 	host=2
 	# Create some temporary files.
@@ -614,6 +619,7 @@ load helpers
 		skip "test not supported when using mount_program"
 		;;
 	esac
+	export _CONTAINERS_OVERLAY_DISABLE_IDMAP=yes
 	n=5
 	host=2
 	filelist=
@@ -799,6 +805,7 @@ load helpers
 		skip "test not supported when using mount_program"
 		;;
 	esac
+	export _CONTAINERS_OVERLAY_DISABLE_IDMAP=yes
 	n=5
 	host=2
 	# Create some temporary files.
@@ -1013,6 +1020,7 @@ load helpers
 		skip "test not supported when using mount_program"
 		;;
 	esac
+	export _CONTAINERS_OVERLAY_DISABLE_IDMAP=yes
 
 	n=5
 	host=2
