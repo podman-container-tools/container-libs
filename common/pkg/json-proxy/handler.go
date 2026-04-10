@@ -127,25 +127,6 @@ func (h *handler) openImageImpl(ctx context.Context, args []any, allowNotFound b
 		return ret, err
 	}
 
-	policyContext, err := h.getPolicyContext()
-	if err != nil {
-		return ret, err
-	}
-	defer func() {
-		if err := policyContext.Destroy(); err != nil {
-			retErr = noteCloseFailure(retErr, "tearing down policy context", err)
-		}
-	}()
-
-	unparsedTopLevel := image.UnparsedInstance(imgsrc, nil)
-	allowed, err := policyContext.IsRunningImageAllowed(ctx, unparsedTopLevel)
-	if err != nil {
-		return ret, err
-	}
-	if !allowed {
-		return ret, errors.New("internal inconsistency: policy verification failed without returning an error")
-	}
-
 	// Note that we never return zero as an imageid; this code doesn't yet
 	// handle overflow though.
 	h.imageSerial++
@@ -254,10 +235,11 @@ func (h *handler) returnBytes(retval any, buf []byte) (replyBuf, error) {
 // cacheTargetManifest is invoked when GetManifest or GetConfig is invoked
 // the first time for a given image.  If the requested image is a manifest
 // list, this function resolves it to the image matching the calling process'
-// operating system and architecture.
+// operating system and architecture. The image admission against the policy
+// is done here.
 //
 // TODO: Add GetRawManifest or so that exposes manifest lists.
-func (h *handler) cacheTargetManifest(ctx context.Context, img *openImage) error {
+func (h *handler) cacheTargetManifest(ctx context.Context, img *openImage) (retErr error) {
 	if img.cachedimg != nil {
 		return nil
 	}
@@ -280,6 +262,27 @@ func (h *handler) cacheTargetManifest(ctx context.Context, img *openImage) error
 	} else {
 		target = unparsedToplevel
 	}
+
+	// check the image admission against the policy. admission is checked
+	// against the sub-manifest in case of manifest lists.
+	policyContext, err := h.getPolicyContext()
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err := policyContext.Destroy(); err != nil {
+			retErr = noteCloseFailure(retErr, "tearing down policy context", err)
+		}
+	}()
+
+	allowed, err := policyContext.IsRunningImageAllowed(ctx, target)
+	if err != nil {
+		return err
+	}
+	if !allowed {
+		return errors.New("internal inconsistency: policy verification failed without returning an error")
+	}
+
 	cachedimg, err := image.FromUnparsedImage(ctx, h.sysctx, target)
 	if err != nil {
 		return err
