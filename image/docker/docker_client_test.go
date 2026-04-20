@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -19,6 +20,56 @@ import (
 	"go.podman.io/image/v5/internal/useragent"
 	"go.podman.io/image/v5/types"
 )
+
+// TestDeadlineConnReadTimeout verifies that a stalled connection (no data
+// arriving) returns a timeout error after the configured readTimeout.
+// This is the key behavior that lets bodyReader treat it as a reconnectable
+// condition and resume the download with a Range request.
+func TestDeadlineConnReadTimeout(t *testing.T) {
+	server, client := net.Pipe()
+	defer server.Close()
+	defer client.Close()
+
+	dc := &deadlineConn{
+		Conn:        client,
+		readTimeout: 50 * time.Millisecond,
+	}
+
+	// No data is written to the server side, so the read should time out.
+	buf := make([]byte, 64)
+	_, err := dc.Read(buf)
+	require.Error(t, err)
+
+	// Verify the error satisfies net.Error and reports as a timeout, which
+	// is what isRetryableNetworkError checks.
+	var netErr net.Error
+	require.ErrorAs(t, err, &netErr)
+	assert.True(t, netErr.Timeout(), "expected a timeout error")
+}
+
+// TestDeadlineConnReadSuccess verifies that the deadline wrapper does not
+// interfere with normal reads — when data arrives promptly, it is returned
+// without error.
+func TestDeadlineConnReadSuccess(t *testing.T) {
+	server, client := net.Pipe()
+	defer server.Close()
+	defer client.Close()
+
+	dc := &deadlineConn{
+		Conn:        client,
+		readTimeout: 5 * time.Second,
+	}
+
+	expected := []byte("hello")
+	go func() {
+		_, _ = server.Write(expected)
+	}()
+
+	buf := make([]byte, 64)
+	n, err := dc.Read(buf)
+	require.NoError(t, err)
+	assert.Equal(t, expected, buf[:n])
+}
 
 func TestDockerCertDir(t *testing.T) {
 	const nondefaultFullPath = "/this/is/not/the/default/full/path"
