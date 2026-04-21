@@ -167,8 +167,11 @@ type Layer struct {
 	// Flags is arbitrary data about the layer.
 	Flags map[string]any `json:"flags,omitempty"`
 
-	// UIDMap and GIDMap are used for setting up a layer's contents
-	// for use inside of a user namespace where UID mapping is being used.
+	// UIDMap and GIDMap are the on-disk ID mappings for this layer: the
+	// chown mapping that was applied to the layer's files at creation
+	// time.  When the driver supports shifting (idmapped mounts), no
+	// chown occurs and these fields are empty.  The caller's requested
+	// mapping is applied at mount time instead (see Container.UIDMap/GIDMap).
 	UIDMap []idtools.IDMap `json:"uidmap,omitempty"`
 	GIDMap []idtools.IDMap `json:"gidmap,omitempty"`
 

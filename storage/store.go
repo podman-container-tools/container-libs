@@ -708,10 +708,18 @@ type ImageBigDataOption struct {
 
 // ContainerOptions is used for passing options to a Store's CreateContainer() method.
 type ContainerOptions struct {
-	// IDMappingOptions specifies the type of ID mapping which should be
-	// used for this container's layer.  If nothing is specified, the
-	// container's layer will inherit settings from the image's top layer
-	// or, if it is not being created based on an image, the Store object.
+	// IDMappingOptions specifies the caller's desired ID mapping for the
+	// container's user namespace.
+	//
+	// These express what the caller wants, not what ends up on disk.
+	// The store records them in the Container and uses them at mount
+	// time.  How the layer's files are stored depends on whether the
+	// driver supports shifting: if it does, no chown occurs and the
+	// mapping is applied at mount time; otherwise files are chowned at
+	// layer creation time.
+	//
+	// If nothing is specified, mappings are inherited from the image's top
+	// layer or, if no image, from the Store's defaults.
 	types.IDMappingOptions
 	LabelOpts []string
 	// Flags is a set of named flags and their values to store with the container.
