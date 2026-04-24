@@ -135,14 +135,16 @@ var _ = Describe("Config Local", func() {
 
 	It("parse default_rootless_network_cmd", func() {
 		// Given
-		config, err := newLocked(&Options{}, testConfigPath(""))
+		// Test default value (pasta)
+		config1, err := newLocked(&Options{}, testConfigPath(""))
 		gomega.Expect(err).ToNot(gomega.HaveOccurred())
-		gomega.Expect(config.Network.DefaultRootlessNetworkCmd).To(gomega.Equal("pasta"))
-		// When
+		gomega.Expect(config1.Network.DefaultRootlessNetworkCmd).To(gomega.Equal("pasta"))
+
+		// When - load from config file
 		config2, err := newLocked(&Options{}, testConfigPath("testdata/containers_default.conf"))
 		// Then
 		gomega.Expect(err).ToNot(gomega.HaveOccurred())
-		gomega.Expect(config2.Network.DefaultRootlessNetworkCmd).To(gomega.Equal("slirp4netns"))
+		gomega.Expect(config2.Network.DefaultRootlessNetworkCmd).To(gomega.Equal("this-is-not-a-valid-command"))
 	})
 
 	It("should fail on invalid device mode", func() {
