@@ -74,7 +74,6 @@ Recommends: composefs
 Recommends: crun
 Requires: (crun if fedora-release-identity-server)
 Requires: netavark >= %{netavark_epoch}:2
-Suggests: slirp4netns
 Recommends: qemu-user-static
 Requires: (qemu-user-static-aarch64 if fedora-release-identity-server)
 Requires: (qemu-user-static-arm if fedora-release-identity-server)
