@@ -45,10 +45,16 @@ Suggests: fuse-overlayfs
 URL: https://github.com/%{project}/%{repo}
 Source0: %{url}/archive/refs/tags/common/v%{version}.tar.gz
 Source1: https://raw.githubusercontent.com/containers/shortnames/refs/heads/main/shortnames.conf
-# Fetch RPM-GPG-KEY-redhat-release from the authoritative source instead of storing
-# a copy in repo or dist-git. Depending on distribution-gpg-keys rpm is also
-# not an option because that package doesn't exist on CentOS Stream.
+# Fetch Red Hat keys from the authoritative source instead of storing a copy in
+# repo or dist-git. Depending on distribution-gpg-keys is also not an option
+# because that package doesn't exist on CentOS Stream and/or it may not ship the
+# keys we need.
+# RPM-GPG-KEY-redhat-release
 Source2: https://access.redhat.com/security/data/fd431d51.txt
+# SIGSTORE-redhat-release3
+Source3: https://security.access.redhat.com/data/63405576.txt
+# REKOR-signing-key
+# Source4
 
 %description
 This package contains common configuration files and documentation for container
@@ -107,14 +113,15 @@ touch %{buildroot}%{_prefix}/lib/containers/storage/overlay-layers/layers.lock
 
 install -Dp -m0644 %{SOURCE1} %{buildroot}%{_sysconfdir}/containers/registries.conf.d/000-shortnames.conf
 install -Dp -m0644 image/default.yaml %{buildroot}%{_sysconfdir}/containers/registries.d/default.yaml
-install -Dp -m0644 image/default-policy.json %{buildroot}%{_sysconfdir}/containers/policy.json
+install -Dp -m0644 common/rpm/policy.json %{buildroot}%{_sysconfdir}/containers/policy.json
 install -Dp -m0644 image/registries.conf %{buildroot}%{_sysconfdir}/containers/registries.conf
 install -Dp -m0644 storage/storage.conf %{buildroot}%{_datadir}/containers/storage.conf
 
-# RPM-GPG-KEY-redhat-release already exists on rhel envs, install only on
+# These keys already exist on rhel envs, install only on
 # fedora and centos
 %if %{defined fedora} || %{defined centos}
 install -Dp -m0644 %{SOURCE2} %{buildroot}%{_sysconfdir}/pki/rpm-gpg/RPM-GPG-KEY-redhat-release
+install -Dp -m0644 %{SOURCE3} %{buildroot}%{_sysconfdir}/pki/sigstore/SIGSTORE-redhat-release3
 %endif
 
 install -Dp -m0644 common/contrib/redhat/registry.access.redhat.com.yaml -t %{buildroot}%{_sysconfdir}/containers/registries.d
@@ -162,6 +169,7 @@ ln -s ../../../..%{_sysconfdir}/yum.repos.d/redhat.repo %{buildroot}%{_datadir}/
 %config(noreplace) %{_sysconfdir}/containers/registries.conf.d/000-shortnames.conf
 %if 0%{?fedora} || 0%{?centos}
 %{_sysconfdir}/pki/rpm-gpg/RPM-GPG-KEY-redhat-release
+%{_sysconfdir}/pki/sigstore/SIGSTORE-redhat-release3
 %endif
 %config(noreplace) %{_sysconfdir}/containers/registries.d/default.yaml
 %config(noreplace) %{_sysconfdir}/containers/registries.d/registry.redhat.io.yaml
