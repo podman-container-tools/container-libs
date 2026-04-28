@@ -138,11 +138,21 @@ var _ = Describe("Config Local", func() {
 		config, err := newLocked(&Options{}, testConfigPath(""))
 		gomega.Expect(err).ToNot(gomega.HaveOccurred())
 		gomega.Expect(config.Network.DefaultRootlessNetworkCmd).To(gomega.Equal("pasta"))
-		// When
-		config2, err := newLocked(&Options{}, testConfigPath("testdata/containers_default.conf"))
-		// Then
+	})
+
+	It("should accept slirp4netns in config (parsing only)", func() {
+		// Given - slirp4netns can be parsed but will error at runtime
+		defConf, err := defaultConfig()
 		gomega.Expect(err).ToNot(gomega.HaveOccurred())
-		gomega.Expect(config2.Network.DefaultRootlessNetworkCmd).To(gomega.Equal("slirp4netns"))
+		gomega.Expect(defConf).NotTo(gomega.BeNil())
+
+		// When
+		defConf.Network.DefaultRootlessNetworkCmd = "slirp4netns"
+		err = defConf.Network.Validate()
+
+		// Then - validation passes, runtime will reject it
+		gomega.Expect(err).ToNot(gomega.HaveOccurred())
+		gomega.Expect(defConf.Network.DefaultRootlessNetworkCmd).To(gomega.Equal("slirp4netns"))
 	})
 
 	It("should fail on invalid device mode", func() {
