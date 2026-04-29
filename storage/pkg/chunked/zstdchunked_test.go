@@ -109,10 +109,12 @@ func TestGenerateAndParseManifest(t *testing.T) {
 	err := tsTarW.Close()
 	require.NoError(t, err)
 	var tarSplitUncompressed bytes.Buffer
-	tsReader, err := asm.NewInputTarStream(&tsTarball, storage.NewJSONPacker(&tarSplitUncompressed), storage.NewDiscardFilePutter())
+	tsReader, done, err := asm.NewInputTarStreamWithDone(&tsTarball, storage.NewJSONPacker(&tarSplitUncompressed), storage.NewDiscardFilePutter())
 	require.NoError(t, err)
 	_, err = io.Copy(io.Discard, tsReader)
 	require.NoError(t, err)
+	require.NoError(t, tsReader.Close())
+	require.NoError(t, <-done)
 
 	encoder, err := zstd.NewWriter(nil)
 	if err != nil {

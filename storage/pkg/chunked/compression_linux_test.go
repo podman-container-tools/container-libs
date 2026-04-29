@@ -36,10 +36,12 @@ func TestTarSizeFromTarSplit(t *testing.T) {
 	expectedTarSize := int64(tarball.Len())
 
 	var tarSplit bytes.Buffer
-	tsReader, err := asm.NewInputTarStream(&tarball, storage.NewJSONPacker(&tarSplit), storage.NewDiscardFilePutter())
+	tsReader, done, err := asm.NewInputTarStreamWithDone(&tarball, storage.NewJSONPacker(&tarSplit), storage.NewDiscardFilePutter())
 	require.NoError(t, err)
 	_, err = io.Copy(io.Discard, tsReader)
 	require.NoError(t, err)
+	require.NoError(t, tsReader.Close())
+	require.NoError(t, <-done)
 
 	res, err := tarSizeFromTarSplit(&tarSplit)
 	require.NoError(t, err)
