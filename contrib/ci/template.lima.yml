@@ -1,0 +1,4 @@
+
+# images is empty and should be override on the cli
+#  --set '.images=[{"location":"...", "arch": "x86_64"}]'
+images:

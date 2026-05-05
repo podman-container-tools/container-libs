@@ -1,0 +1,237 @@
+name: ci
+
+on:
+  push:
+    branches:
+      - main
+      - podman-*
+  pull_request:
+    branches:
+      - main
+      - podman-*
+
+permissions: read-all
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: "1.26.x"
+
+jobs:
+  path-filter:
+    runs-on: ubuntu-24.04
+    permissions:
+      pull-requests: read
+    outputs:
+      storage: ${{ steps.filter.outputs.storage }}
+      image: ${{ steps.filter.outputs.image }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            storage:
+              - '.github/workflows/ci.yml'
+              - 'contrib/ci/**'
+              - 'go.work'
+              - 'go.work.sum'
+              - 'storage/**'
+            image:
+              - '.github/workflows/ci.yml'
+              - 'contrib/ci/**'
+              - 'go.work'
+              - 'go.work.sum'
+              - 'storage/**'
+              - 'image/**'
+
+  storage-test:
+    needs: path-filter
+    if: github.event_name == 'push' || needs.path-filter.outputs.storage == 'true'
+    runs-on: cncf-ubuntu-8-32-x86
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        distro: [fedora-current, debian-current]
+        driver: [vfs, overlay, overlay-transient, fuse-overlay, fuse-overlay-whiteout, btrfs]
+        exclude:
+          - distro: debian-current
+            driver: overlay-transient
+    name: "Storage: ${{ matrix.distro }} ${{ matrix.driver }}"
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: lima-vm/lima-actions/setup@v1
+        with:
+          version: v2.1.1
+      - name: Run tests
+        run: ./contrib/ci/ci.sh storage ${{ matrix.distro }} ${{ matrix.driver }}
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: "journal-storage-${{ matrix.distro }}-${{ matrix.driver }}.log"
+          path: "./contrib/ci/journal.log"
+          if-no-files-found: ignore
+
+  storage-cross:
+    needs: path-filter
+    if: github.event_name == 'push' || needs.path-filter.outputs.storage == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    name: "Storage: Cross"
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: "**/go.sum"
+      - name: Cross-compile
+        working-directory: ./storage
+        run: make cross
+
+  storage-gofix:
+    needs: path-filter
+    if: github.event_name == 'push' || needs.path-filter.outputs.storage == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    name: "Storage: gofix"
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: "**/go.sum"
+      - name: Install dependencies
+        run: |
+          sudo apt-get -qq update
+          sudo apt-get -qq install -y libbtrfs-dev libgpgme-dev libdevmapper-dev
+      - name: Run go fix
+        working-directory: ./storage
+        run: go fix ./...
+      - name: Verify no changes
+        run: |
+          git diff --diff-filter=M --exit-code -- . ":(exclude)*.crt" ":(exclude)*.key" ":(exclude)*.cert"
+
+  image-cross:
+    needs: path-filter
+    if: github.event_name == 'push' || needs.path-filter.outputs.image == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    name: "Image: Cross"
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: "**/go.sum"
+      - name: Install dependencies
+        run: |
+          sudo apt-get -qq update
+          sudo apt-get -qq install -y libgpgme-dev libassuan-dev libbtrfs-dev libdevmapper-dev
+      - name: Cross-compile
+        working-directory: ./image
+        run: make cross
+
+  image-test:
+    needs: path-filter
+    if: github.event_name == 'push' || needs.path-filter.outputs.image == 'true'
+    runs-on: cncf-ubuntu-8-32-x86
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [default, openpgp, sequoia]
+    name: "Image: Test ${{ matrix.variant }}"
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: lima-vm/lima-actions/setup@v1
+        with:
+          version: v2.1.1
+      - name: Run tests
+        run: ./contrib/ci/ci.sh image fedora-current ${{ matrix.variant }}
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: "journal-image-${{ matrix.variant }}.log"
+          path: "./contrib/ci/journal.log"
+          if-no-files-found: ignore
+
+  image-test-skopeo:
+    needs: path-filter
+    if: github.event_name == 'push' || needs.path-filter.outputs.image == 'true'
+    runs-on: cncf-ubuntu-8-32-x86
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [default, openpgp, sequoia]
+    name: "Image: Skopeo ${{ matrix.variant }}"
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: lima-vm/lima-actions/setup@v1
+        with:
+          version: v2.1.1
+      - name: Run tests
+        run: ./contrib/ci/ci.sh image-skopeo fedora-current ${{ matrix.variant }}
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: "journal-image-skopeo-${{ matrix.variant }}.log"
+          path: "./contrib/ci/journal.log"
+          if-no-files-found: ignore
+
+  common-test:
+    runs-on: cncf-ubuntu-8-32-x86
+    timeout-minutes: 45
+    name: "Common: Test"
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: lima-vm/lima-actions/setup@v1
+        with:
+          version: v2.1.1
+      - name: Run tests
+        run: ./contrib/ci/ci.sh common fedora-current
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: "journal-common.log"
+          path: "./contrib/ci/journal.log"
+          if-no-files-found: ignore
+
+  # N/B: The prow merge-bot (tide) is sensitized to this exact name, DO NOT CHANGE IT.
+  # Ref: https://github.com/openshift/release/pull/49820
+  success:
+    name: "Total Success"
+    if: always()
+    needs:
+      - storage-test
+      - storage-cross
+      - storage-gofix
+      - image-cross
+      - image-test
+      - image-test-skopeo
+      - common-test
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check all required jobs
+        run: |
+          if [[ "${{ contains(needs.*.result, 'failure') }}" == "true" ]] || \
+             [[ "${{ contains(needs.*.result, 'cancelled') }}" == "true" ]]; then
+            echo "One or more required jobs failed or were cancelled"
+            exit 1
+          fi
+          echo "All required jobs passed or were skipped"
