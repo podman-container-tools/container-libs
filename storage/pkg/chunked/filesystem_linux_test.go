@@ -71,17 +71,17 @@ func TestDoHardLink(t *testing.T) {
 	defer syscall.Close(destDirFd)
 
 	destBase := "dest-file"
-	err = doHardLink(destDirFd, srcFd, destBase)
+	_, err = doHardLink(destDirFd, srcFd, destBase)
 	require.NoError(t, err)
 
 	// an existing file is unlinked first
-	err = doHardLink(destDirFd, srcFd, destBase)
+	_, err = doHardLink(destDirFd, srcFd, destBase)
 	assert.NoError(t, err)
 
-	err = doHardLink(destDirFd, -1, destBase)
+	_, err = doHardLink(destDirFd, -1, destBase)
 	assert.Error(t, err)
 
-	err = doHardLink(-1, srcFd, destBase)
+	_, err = doHardLink(-1, srcFd, destBase)
 	assert.Error(t, err)
 }
 
@@ -124,13 +124,13 @@ func TestSafeMkdir(t *testing.T) {
 		IgnoreChownErrors: true,
 	}
 
-	err = safeMkdir(rootFd, 0o755, "/", &metadata, options)
+	_, _, err = safeMkdir(rootFd, 0o755, "/", &metadata, options)
 	require.NoError(t, err)
 
-	err = safeMkdir(rootFd, 0o755, dirName, &metadata, options)
+	_, _, err = safeMkdir(rootFd, 0o755, dirName, &metadata, options)
 	require.NoError(t, err)
 
-	dir, err := openFileUnderRoot(rootFd, dirName, syscall.O_DIRECTORY|syscall.O_CLOEXEC, 0)
+	dir, _, err := openFileUnderRoot(rootFd, dirName, syscall.O_DIRECTORY|syscall.O_CLOEXEC, 0)
 	require.NoError(t, err)
 	err = dir.Close()
 	assert.NoError(t, err)
@@ -166,11 +166,11 @@ func TestSafeLink(t *testing.T) {
 		IgnoreChownErrors: true,
 	}
 
-	err = safeLink(rootFd, 0o755, &metadata, options)
+	_, err = safeLink(rootFd, 0o755, &metadata, options)
 	require.NoError(t, err)
 
 	// validate it was created
-	newFile, err := openFileUnderRoot(rootFd, linkName, syscall.O_RDONLY, 0)
+	newFile, _, err := openFileUnderRoot(rootFd, linkName, syscall.O_RDONLY, 0)
 	require.NoError(t, err)
 
 	st := syscall.Stat_t{}
@@ -214,11 +214,11 @@ func TestSafeSymlink(t *testing.T) {
 		},
 	}
 
-	err = safeSymlink(rootFd, &metadata)
+	_, err = safeSymlink(rootFd, &metadata)
 	require.NoError(t, err)
 
 	// validate it was created
-	newFile, err := openFileUnderRoot(rootFd, linkName, syscall.O_RDONLY, 0)
+	newFile, _, err := openFileUnderRoot(rootFd, linkName, syscall.O_RDONLY, 0)
 	require.NoError(t, err)
 
 	st2 := syscall.Stat_t{}
@@ -245,12 +245,12 @@ func TestOpenOrCreateDirUnderRoot(t *testing.T) {
 	rootFd := int(rootFile.Fd())
 
 	// try to create a directory outside the root
-	dir, err := openOrCreateDirUnderRoot(rootFd, "../../"+dirName, 0o755)
+	dir, _, err := openOrCreateDirUnderRoot(rootFd, "../../"+dirName, 0o755)
 	require.NoError(t, err)
 	err = dir.Close()
 	assert.NoError(t, err)
 
-	dir, err = openFileUnderRoot(rootFd, dirName, syscall.O_DIRECTORY|syscall.O_CLOEXEC, 0)
+	dir, _, err = openFileUnderRoot(rootFd, dirName, syscall.O_DIRECTORY|syscall.O_CLOEXEC, 0)
 	require.NoError(t, err)
 	err = dir.Close()
 	require.NoError(t, err)
@@ -286,7 +286,7 @@ func TestCopyFileContent(t *testing.T) {
 		},
 	}
 
-	newFile, newSize, err := copyFileContent(int(file.Fd()), &metadata, rootFd, 0o755, false)
+	newFile, newSize, _, err := copyFileContent(int(file.Fd()), &metadata, rootFd, 0o755, false)
 	require.NoError(t, err)
 
 	assert.Equal(t, size, int(newSize))
@@ -310,12 +310,12 @@ func TestCopyFileContent(t *testing.T) {
 		},
 	}
 
-	newFile, newSize, err = copyFileContent(int(file.Fd()), &metadataCopyHardLinks, rootFd, 0o755, true)
+	newFile, newSize, _, err = copyFileContent(int(file.Fd()), &metadataCopyHardLinks, rootFd, 0o755, true)
 	require.NoError(t, err)
 	assert.Nil(t, newFile)
 
 	// validate it was created as an inode
-	newFile, err = openFileUnderRoot(rootFd, metadataCopyHardLinks.FileMetadata.Name, syscall.O_RDONLY, 0)
+	newFile, _, err = openFileUnderRoot(rootFd, metadataCopyHardLinks.FileMetadata.Name, syscall.O_RDONLY, 0)
 	require.NoError(t, err)
 
 	assert.Equal(t, size, int(newSize))

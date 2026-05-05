@@ -438,24 +438,24 @@ func makeCopyBuffer() []byte {
 // name is the path to the file to copy in source.
 // dirfd is an open file descriptor to the destination root directory.
 // useHardLinks defines whether the deduplication can be performed using hard links.
-func copyFileFromOtherLayer(file *fileMetadata, source string, name string, dirfd int, useHardLinks bool) (bool, *os.File, int64, error) {
+func copyFileFromOtherLayer(file *fileMetadata, source string, name string, dirfd int, useHardLinks bool) (bool, *os.File, int64, []string, error) {
 	srcDirfd, err := unix.Open(source, unix.O_RDONLY|unix.O_CLOEXEC, 0)
 	if err != nil {
-		return false, nil, 0, &fs.PathError{Op: "open", Path: source, Err: err}
+		return false, nil, 0, nil, &fs.PathError{Op: "open", Path: source, Err: err}
 	}
 	defer unix.Close(srcDirfd)
 
-	srcFile, err := openFileUnderRoot(srcDirfd, name, unix.O_RDONLY|syscall.O_CLOEXEC, 0)
+	srcFile, _, err := openFileUnderRoot(srcDirfd, name, unix.O_RDONLY|syscall.O_CLOEXEC, 0)
 	if err != nil {
-		return false, nil, 0, err
+		return false, nil, 0, nil, err
 	}
 	defer srcFile.Close()
 
-	dstFile, written, err := copyFileContent(int(srcFile.Fd()), file, dirfd, 0, useHardLinks)
+	dstFile, written, moreImplicitDirs, err := copyFileContent(int(srcFile.Fd()), file, dirfd, 0, useHardLinks)
 	if err != nil {
-		return false, nil, 0, fmt.Errorf("copy content to %q: %w", file.Name, err)
+		return false, nil, 0, nil, fmt.Errorf("copy content to %q: %w", file.Name, err)
 	}
-	return true, dstFile, written, nil
+	return true, dstFile, written, moreImplicitDirs, nil
 }
 
 // canDedupMetadataWithHardLink says whether it is possible to deduplicate file with otherFile.
@@ -520,15 +520,15 @@ func canDedupFileWithHardLink(file *fileMetadata, fd int, s os.FileInfo) bool {
 // ostreeRepos is a list of OSTree repos.
 // dirfd is an open fd to the destination checkout.
 // useHardLinks defines whether the deduplication can be performed using hard links.
-func findFileInOSTreeRepos(file *fileMetadata, ostreeRepos []string, dirfd int, useHardLinks bool) (bool, *os.File, int64, error) {
+func findFileInOSTreeRepos(file *fileMetadata, ostreeRepos []string, dirfd int, useHardLinks bool) (bool, *os.File, int64, []string, error) {
 	digest, err := digest.Parse(file.Digest)
 	if err != nil {
 		logrus.Debugf("could not parse digest: %v", err)
-		return false, nil, 0, nil
+		return false, nil, 0, nil, nil
 	}
 	payloadLink := digest.Encoded() + ".payload-link"
 	if len(payloadLink) < 2 {
-		return false, nil, 0, nil
+		return false, nil, 0, nil, nil
 	}
 
 	for _, repo := range ostreeRepos {
@@ -543,7 +543,7 @@ func findFileInOSTreeRepos(file *fileMetadata, ostreeRepos []string, dirfd int, 
 		fd, err := unix.Open(sourceFile, unix.O_RDONLY|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
 		if err != nil {
 			logrus.Debugf("could not open sourceFile %s: %v", sourceFile, err)
-			return false, nil, 0, nil
+			return false, nil, 0, nil, nil
 		}
 		f := os.NewFile(uintptr(fd), "fd")
 		defer f.Close()
@@ -553,19 +553,19 @@ func findFileInOSTreeRepos(file *fileMetadata, ostreeRepos []string, dirfd int, 
 			continue
 		}
 
-		dstFile, written, err := copyFileContent(fd, file, dirfd, 0, useHardLinks)
+		dstFile, written, implicitDirs, err := copyFileContent(fd, file, dirfd, 0, useHardLinks)
 		if err != nil {
 			logrus.Debugf("could not copyFileContent: %v", err)
-			return false, nil, 0, nil
+			return false, nil, 0, nil, nil
 		}
-		return true, dstFile, written, nil
+		return true, dstFile, written, implicitDirs, nil
 	}
 	// If hard links deduplication was used and it has failed, try again without hard links.
 	if useHardLinks {
 		return findFileInOSTreeRepos(file, ostreeRepos, dirfd, false)
 	}
 
-	return false, nil, 0, nil
+	return false, nil, 0, nil, nil
 }
 
 // findFileInOtherLayers finds the specified file in other layers.
@@ -573,10 +573,10 @@ func findFileInOSTreeRepos(file *fileMetadata, ostreeRepos []string, dirfd int, 
 // file is the file to look for.
 // dirfd is an open file descriptor to the checkout root directory.
 // useHardLinks defines whether the deduplication can be performed using hard links.
-func findFileInOtherLayers(cache *layersCache, file *fileMetadata, dirfd int, useHardLinks bool) (bool, *os.File, int64, error) {
+func findFileInOtherLayers(cache *layersCache, file *fileMetadata, dirfd int, useHardLinks bool) (bool, *os.File, int64, []string, error) {
 	target, name, err := cache.findFileInOtherLayers(file, useHardLinks)
 	if err != nil || name == "" {
-		return false, nil, 0, err
+		return false, nil, 0, nil, err
 	}
 	return copyFileFromOtherLayer(file, target, name, dirfd, useHardLinks)
 }
@@ -651,7 +651,7 @@ func (o *originFile) OpenFile() (io.ReadCloser, error) {
 	}
 	defer unix.Close(srcDirfd)
 
-	srcFile, err := openFileUnderRoot(srcDirfd, o.Path, unix.O_RDONLY|unix.O_CLOEXEC, 0)
+	srcFile, _, err := openFileUnderRoot(srcDirfd, o.Path, unix.O_RDONLY|unix.O_CLOEXEC, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -770,10 +770,10 @@ type destinationFile struct {
 	recordFsVerity recordFsVerityFunc
 }
 
-func openDestinationFile(dirfd int, metadata *fileMetadata, options *archive.TarOptions, skipValidation bool, recordFsVerity recordFsVerityFunc) (*destinationFile, error) {
-	file, err := openFileUnderRoot(dirfd, metadata.Name, newFileFlags, 0)
+func openDestinationFile(dirfd int, metadata *fileMetadata, options *archive.TarOptions, skipValidation bool, recordFsVerity recordFsVerityFunc) (*destinationFile, []string, error) {
+	file, implicitDirs, err := openFileUnderRoot(dirfd, metadata.Name, newFileFlags, 0)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	var digester digest.Digester
@@ -798,7 +798,7 @@ func openDestinationFile(dirfd int, metadata *fileMetadata, options *archive.Tar
 		dirfd:          dirfd,
 		skipValidation: skipValidation,
 		recordFsVerity: recordFsVerity,
-	}, nil
+	}, implicitDirs, nil
 }
 
 func (d *destinationFile) Close() (Err error) {
@@ -879,8 +879,9 @@ func (c *chunkedDiffer) recordFsVerity(path string, roFile *os.File) error {
 	return nil
 }
 
-func (c *chunkedDiffer) storeMissingFiles(streams chan io.ReadCloser, errs chan error, dirfd int, missingParts []missingPart, options *archive.TarOptions) (Err error) {
+func (c *chunkedDiffer) storeMissingFiles(streams chan io.ReadCloser, errs chan error, dirfd int, missingParts []missingPart, options *archive.TarOptions) (_ []string, Err error) {
 	var destFile *destinationFile
+	var implicitDirs []string
 
 	filesToClose := make(chan *destinationFile, 3)
 	closeFilesErrors := make(chan error, 2)
@@ -906,7 +907,7 @@ func (c *chunkedDiffer) storeMissingFiles(streams chan io.ReadCloser, errs chan 
 			var err error
 			part, err = missingPart.OriginFile.OpenFile()
 			if err != nil {
-				return err
+				return nil, err
 			}
 			partCompression = fileTypeNoCompression
 			readingFromLocalFile = true
@@ -916,15 +917,15 @@ func (c *chunkedDiffer) storeMissingFiles(streams chan io.ReadCloser, errs chan 
 				part = p
 			case err := <-errs:
 				if err == nil {
-					return errors.New("not enough data returned from the server")
+					return nil, errors.New("not enough data returned from the server")
 				}
-				return err
+				return nil, err
 			}
 			if part == nil {
-				return errors.New("invalid stream returned")
+				return nil, errors.New("invalid stream returned")
 			}
 		default:
-			return errors.New("internal error: missing part misses both local and remote data stream")
+			return nil, errors.New("internal error: missing part misses both local and remote data stream")
 		}
 
 		for _, mf := range missingPart.Chunks {
@@ -983,11 +984,13 @@ func (c *chunkedDiffer) storeMissingFiles(streams chan io.ReadCloser, errs chan 
 				if c.useFsVerity == graphdriver.DifferFsVerityDisabled {
 					recordFsVerity = nil
 				}
-				destFile, err = openDestinationFile(dirfd, mf.File, options, c.skipValidation, recordFsVerity)
+				var theseImplicitDirs []string
+				destFile, theseImplicitDirs, err = openDestinationFile(dirfd, mf.File, options, c.skipValidation, recordFsVerity)
 				if err != nil {
 					Err = err
 					goto exit
 				}
+				implicitDirs = append(implicitDirs, theseImplicitDirs...)
 			}
 
 			if err := c.appendCompressedStreamToFile(compression, destFile, mf.UncompressedSize); err != nil {
@@ -1011,10 +1014,10 @@ func (c *chunkedDiffer) storeMissingFiles(streams chan io.ReadCloser, errs chan 
 	}
 
 	if destFile != nil {
-		return destFile.Close()
+		return implicitDirs, destFile.Close()
 	}
 
-	return nil
+	return implicitDirs, nil
 }
 
 func mergeMissingChunks(missingParts []missingPart, target int) []missingPart {
@@ -1106,7 +1109,7 @@ func mergeMissingChunks(missingParts []missingPart, target int) []missingPart {
 	return newMissingParts
 }
 
-func (c *chunkedDiffer) retrieveMissingFiles(stream ImageSourceSeekable, dirfd int, missingParts []missingPart, options *archive.TarOptions) error {
+func (c *chunkedDiffer) retrieveMissingFiles(stream ImageSourceSeekable, dirfd int, missingParts []missingPart, options *archive.TarOptions) ([]string, error) {
 	var chunksToRequest []ImageSourceChunk
 
 	calculateChunksToRequest := func() {
@@ -1133,20 +1136,21 @@ func (c *chunkedDiffer) retrieveMissingFiles(stream ImageSourceSeekable, dirfd i
 
 		if _, ok := err.(ErrBadRequest); ok {
 			if len(chunksToRequest) == 1 {
-				return err
+				return nil, err
 			}
 			// Merge more chunks to request
 			missingParts = mergeMissingChunks(missingParts, len(chunksToRequest)/2)
 			calculateChunksToRequest()
 			continue
 		}
-		return err
+		return nil, err
 	}
 
-	if err := c.storeMissingFiles(streams, errs, dirfd, missingParts, options); err != nil {
-		return err
+	implicitDirs, err := c.storeMissingFiles(streams, errs, dirfd, missingParts, options)
+	if err != nil {
+		return nil, err
 	}
-	return nil
+	return implicitDirs, nil
 }
 
 type hardLinkToCreate struct {
@@ -1171,7 +1175,7 @@ func reopenFileReadOnly(f *os.File) (*os.File, error) {
 	return os.NewFile(uintptr(fd), f.Name()), nil
 }
 
-func (c *chunkedDiffer) findAndCopyFile(dirfd int, r *fileMetadata, copyOptions *findAndCopyFileOptions, mode os.FileMode) (bool, error) {
+func (c *chunkedDiffer) findAndCopyFile(dirfd int, r *fileMetadata, copyOptions *findAndCopyFileOptions, mode os.FileMode) (bool, []string, error) {
 	finalizeFile := func(dstFile *os.File) error {
 		if dstFile == nil {
 			return nil
@@ -1197,29 +1201,30 @@ func (c *chunkedDiffer) findAndCopyFile(dirfd int, r *fileMetadata, copyOptions 
 		return c.recordFsVerity(r.Name, roFile)
 	}
 
-	found, dstFile, _, err := findFileInOtherLayers(c.layersCache, r, dirfd, copyOptions.useHardLinks)
+	found, dstFile, _, implicitDirs, err := findFileInOtherLayers(c.layersCache, r, dirfd, copyOptions.useHardLinks)
 	if err != nil {
-		return false, err
+		return false, nil, err
 	}
 	if found {
 		if err := finalizeFile(dstFile); err != nil {
-			return false, err
+			return false, nil, err
 		}
-		return true, nil
+		return true, implicitDirs, nil
 	}
 
-	found, dstFile, _, err = findFileInOSTreeRepos(r, copyOptions.ostreeRepos, dirfd, copyOptions.useHardLinks)
+	found, dstFile, _, moreImplicitDirs, err := findFileInOSTreeRepos(r, copyOptions.ostreeRepos, dirfd, copyOptions.useHardLinks)
 	if err != nil {
-		return false, err
+		return false, nil, err
 	}
+	implicitDirs = append(implicitDirs, moreImplicitDirs...)
 	if found {
 		if err := finalizeFile(dstFile); err != nil {
-			return false, err
+			return false, nil, err
 		}
-		return true, nil
+		return true, implicitDirs, nil
 	}
 
-	return false, nil
+	return false, implicitDirs, nil
 }
 
 // makeEntriesFlat collects regular-file entries from mergedEntries, and produces a new list
@@ -1596,8 +1601,9 @@ func (c *chunkedDiffer) ApplyDiff(dest string, options *archive.TarOptions, diff
 		mode     os.FileMode
 		metadata *fileMetadata
 
-		found bool
-		err   error
+		found        bool
+		implicitDirs []string
+		err          error
 	}
 
 	var wg sync.WaitGroup
@@ -1616,14 +1622,16 @@ func (c *chunkedDiffer) ApplyDiff(dest string, options *archive.TarOptions, diff
 		jobs := copyFileJobs
 		wg.Go(func() {
 			for job := range jobs {
-				found, err := c.findAndCopyFile(dirfd, job.metadata, &copyOptions, job.mode)
+				found, implicitDirs, err := c.findAndCopyFile(dirfd, job.metadata, &copyOptions, job.mode)
 				job.err = err
 				job.found = found
+				job.implicitDirs = implicitDirs
 				copyResults[job.njob] = job
 			}
 		})
 	}
 
+	var implicitDirs, explicitDirs []string
 	filesToWaitFor := 0
 	for i := range mergedEntries {
 		r := &mergedEntries[i]
@@ -1686,6 +1694,7 @@ func (c *chunkedDiffer) ApplyDiff(dest string, options *archive.TarOptions, diff
 			if err != nil {
 				return output, err
 			}
+			implicitDirs = append(implicitDirs, handler.implicitDirs...)
 			if !writeFile {
 				continue
 			}
@@ -1695,20 +1704,22 @@ func (c *chunkedDiffer) ApplyDiff(dest string, options *archive.TarOptions, diff
 			// Create directly empty files.
 			if size == 0 {
 				// Used to have a scope for cleanup.
-				createEmptyFile := func() error {
-					file, err := openFileUnderRoot(dirfd, r.Name, newFileFlags, 0)
+				createEmptyFile := func() ([]string, error) {
+					file, implicitDirs, err := openFileUnderRoot(dirfd, r.Name, newFileFlags, 0)
 					if err != nil {
-						return err
+						return nil, err
 					}
 					defer file.Close()
 					if err := setFileAttrs(dirfd, file, mode, r, options, false); err != nil {
-						return err
+						return nil, err
 					}
-					return nil
+					return implicitDirs, nil
 				}
-				if err := createEmptyFile(); err != nil {
+				theseImplicitDirs, err := createEmptyFile()
+				if err != nil {
 					return output, err
 				}
+				implicitDirs = append(implicitDirs, theseImplicitDirs...)
 				continue
 			}
 
@@ -1716,9 +1727,12 @@ func (c *chunkedDiffer) ApplyDiff(dest string, options *archive.TarOptions, diff
 			if r.Name == "/" {
 				output.RootDirMode = &mode
 			}
-			if err := safeMkdir(dirfd, mode, r.Name, r, options); err != nil {
+			theseImplicitDirs, theseExplicitDirs, err := safeMkdir(dirfd, mode, r.Name, r, options)
+			if err != nil {
 				return output, err
 			}
+			implicitDirs = append(implicitDirs, theseImplicitDirs...)
+			explicitDirs = append(explicitDirs, theseExplicitDirs...)
 			continue
 
 		case tar.TypeLink:
@@ -1735,9 +1749,11 @@ func (c *chunkedDiffer) ApplyDiff(dest string, options *archive.TarOptions, diff
 			continue
 
 		case tar.TypeSymlink:
-			if err := safeSymlink(dirfd, r); err != nil {
+			theseImplicitDirs, err := safeSymlink(dirfd, r)
+			if err != nil {
 				return output, err
 			}
+			implicitDirs = append(implicitDirs, theseImplicitDirs...)
 			continue
 
 		case tar.TypeChar:
@@ -1784,6 +1800,7 @@ func (c *chunkedDiffer) ApplyDiff(dest string, options *archive.TarOptions, diff
 		missingPartsSize += r.Size
 
 		remainingSize := r.Size
+		implicitDirs = append(implicitDirs, res.implicitDirs...)
 
 		// the file is missing, attempt to find individual chunks.
 		for _, chunk := range r.chunks {
@@ -1837,16 +1854,36 @@ func (c *chunkedDiffer) ApplyDiff(dest string, options *archive.TarOptions, diff
 	}
 	// There are some missing files.  Prepare a multirange request for the missing chunks.
 	if len(missingParts) > 0 {
-		if err := c.retrieveMissingFiles(stream, dirfd, missingParts, options); err != nil {
+		theseImplicitDirs, err := c.retrieveMissingFiles(stream, dirfd, missingParts, options)
+		if err != nil {
 			return output, err
 		}
+		implicitDirs = append(implicitDirs, theseImplicitDirs...)
 	}
 
 	for _, m := range hardLinks {
-		if err := safeLink(m.dirfd, m.mode, m.metadata, options); err != nil {
+		theseImplicitDirs, err := safeLink(m.dirfd, m.mode, m.metadata, options)
+		if err != nil {
 			return output, err
 		}
+		implicitDirs = append(implicitDirs, theseImplicitDirs...)
 	}
+
+	implicitDirSet := make(map[string]struct{}, len(implicitDirs))
+	for _, dir := range implicitDirs {
+		implicitDirSet[strings.Trim(dir, "/")] = struct{}{}
+	}
+	for _, dir := range explicitDirs {
+		delete(implicitDirSet, strings.Trim(dir, "/"))
+	}
+	output.ImplicitDirs = make([]string, 0, len(implicitDirSet))
+	for dir := range implicitDirSet {
+		if dir == "" {
+			continue
+		}
+		output.ImplicitDirs = append(output.ImplicitDirs, dir)
+	}
+	slices.Sort(output.ImplicitDirs)
 
 	// To ensure that consumers of the layer who decompress and read the full tar stream,
 	// and consumers who consume the data via the TOC, both see exactly the same data and metadata,
@@ -1988,7 +2025,7 @@ func validateChunkChecksum(chunk *minimal.FileMetadata, root, path string, offse
 	}
 	defer unix.Close(parentDirfd)
 
-	fd, err := openFileUnderRoot(parentDirfd, path, unix.O_RDONLY|unix.O_CLOEXEC, 0)
+	fd, _, err := openFileUnderRoot(parentDirfd, path, unix.O_RDONLY|unix.O_CLOEXEC, 0)
 	if err != nil {
 		return false
 	}

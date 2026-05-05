@@ -27,6 +27,7 @@ import (
 	graphdriver "go.podman.io/storage/drivers"
 	"go.podman.io/storage/drivers/overlayutils"
 	"go.podman.io/storage/drivers/quota"
+	"go.podman.io/storage/drivers/unionbackfill"
 	"go.podman.io/storage/internal/dedup"
 	"go.podman.io/storage/internal/driver"
 	"go.podman.io/storage/internal/staging_lockfile"
@@ -40,6 +41,7 @@ import (
 	"go.podman.io/storage/pkg/idtools"
 	"go.podman.io/storage/pkg/mount"
 	"go.podman.io/storage/pkg/system"
+	"go.podman.io/storage/pkg/tarbackfill"
 	"go.podman.io/storage/pkg/unshare"
 	"golang.org/x/sys/unix"
 )
@@ -2287,6 +2289,51 @@ func (d *Driver) ApplyDiffFromStagingDirectory(id, parent string, diffOutput *gr
 			return err
 		}
 	}
+	if d.options.forceMask == nil && parent != "" && len(diffOutput.ImplicitDirs) > 0 {
+		lowerDiffDirs, err := d.getLowerDiffPaths(id)
+		if err != nil {
+			return err
+		}
+		if len(lowerDiffDirs) > 0 {
+			backfiller := unionbackfill.NewBackfiller(options.Mappings, lowerDiffDirs)
+			for _, implicitDir := range diffOutput.ImplicitDirs {
+				hdr, err := backfiller.Backfill(implicitDir)
+				if err != nil {
+					return err
+				}
+				if hdr == nil {
+					continue
+				}
+
+				path := filepath.Join(stagingDirectory, implicitDir)
+				idPair := idtools.IDPair{UID: hdr.Uid, GID: hdr.Gid}
+				if options.Mappings != nil {
+					if mapped, err := options.Mappings.ToHost(idPair); err == nil {
+						idPair = mapped
+					}
+				}
+				if err := os.Chown(path, idPair.UID, idPair.GID); err != nil {
+					return err
+				}
+				for xattr, xval := range hdr.Xattrs {
+					if err := system.Lsetxattr(path, xattr, []byte(xval), 0); err != nil {
+						return err
+					}
+				}
+				if err := os.Chmod(path, os.FileMode(hdr.Mode)&os.ModePerm); err != nil {
+					return err
+				}
+				atime := hdr.AccessTime
+				mtime := hdr.ModTime
+				if atime.IsZero() {
+					atime = mtime
+				}
+				if err := os.Chtimes(path, atime, mtime); err != nil {
+					return err
+				}
+			}
+		}
+	}
 
 	if d.usingComposefs {
 		toc := diffOutput.Artifacts[tocArtifact]
@@ -2393,8 +2440,21 @@ func (d *Driver) applyDiff(target string, options graphdriver.ApplyDiffOpts) (si
 	}
 
 	logrus.Debugf("Applying tar in %s", target)
-	// Overlay doesn't need the parent id to apply the diff
-	if err := untar(options.Diff, target, &archive.TarOptions{
+	diff := options.Diff
+	if id := filepath.Base(filepath.Dir(target)); id != "" {
+		lowerDiffDirs, err := d.getLowerDiffPaths(id)
+		if err != nil {
+			return 0, err
+		}
+		if len(lowerDiffDirs) > 0 {
+			backfiller := unionbackfill.NewBackfiller(idMappings, lowerDiffDirs)
+			rc := tarbackfill.NewIOReaderWithBackfiller(diff, backfiller)
+			defer rc.Close()
+			diff = rc
+		}
+	}
+
+	if err := untar(diff, target, &archive.TarOptions{
 		UIDMaps:           idMappings.UIDs(),
 		GIDMaps:           idMappings.GIDs(),
 		IgnoreChownErrors: d.options.ignoreChownErrors,
