@@ -630,9 +630,7 @@ func (c *dockerClient) makeRequestToResolvedURLOnce(ctx context.Context, method 
 	}
 	req.Header.Set("Docker-Distribution-API-Version", "registry/2.0")
 	for n, h := range headers {
-		for _, hh := range h {
-			req.Header.Add(n, hh)
-		}
+		req.Header.Set(n, strings.Join(h, ", "))
 	}
 	req.Header.Add("User-Agent", c.userAgent)
 	if auth == v2Auth {

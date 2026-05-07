@@ -482,3 +482,42 @@ func TestIsManifestUnknownError(t *testing.T) {
 		assert.True(t, res, "%s: %#v", c.name, err)
 	}
 }
+
+func TestMakeRequestMergesAcceptHeaders(t *testing.T) {
+	var gotAccept []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAccept = r.Header["Accept"]
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	headers := map[string][]string{
+		"Accept": {
+			"application/vnd.oci.image.manifest.v1+json",
+			"application/vnd.oci.image.index.v1+json",
+			"application/vnd.docker.distribution.manifest.v2+json",
+		},
+	}
+
+	u, err := url.Parse(srv.URL)
+	require.NoError(t, err)
+
+	c := &dockerClient{
+		client:    &http.Client{},
+		userAgent: useragent.DefaultUserAgent,
+	}
+	resp, err := c.makeRequestToResolvedURLOnce(context.Background(), http.MethodGet, u, headers, nil, -1, noAuth, nil)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	// CloudFront and similar proxies only forward the first header line;
+	// all MIME types must arrive in a single comma-separated value.
+	require.Len(t, gotAccept, 1, "expected exactly one Accept header line on the wire")
+	for _, mime := range []string{
+		"application/vnd.oci.image.manifest.v1+json",
+		"application/vnd.oci.image.index.v1+json",
+		"application/vnd.docker.distribution.manifest.v2+json",
+	} {
+		assert.True(t, strings.Contains(gotAccept[0], mime), "Accept header missing MIME type %q", mime)
+	}
+}
