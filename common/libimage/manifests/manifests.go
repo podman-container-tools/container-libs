@@ -287,6 +287,7 @@ func (l *list) Reference(store storage.Store, multiple cp.ImageListSelection, in
 	}
 	if len(l.artifacts.Manifests) > 0 {
 		img, err := is.Transport.GetImage(s)
+		_, img, err := is.ResolveReference(s)
 		if err != nil {
 			return nil, fmt.Errorf("locating image %s: %w", transports.ImageName(s), err)
 		}
