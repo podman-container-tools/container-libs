@@ -20,7 +20,7 @@ require (
 	github.com/moby/sys/user v0.4.0
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/opencontainers/runtime-spec v1.3.0
-	github.com/opencontainers/selinux v1.13.1
+	github.com/opencontainers/selinux v1.14.1
 	github.com/sirupsen/logrus v1.9.4
 	github.com/stretchr/testify v1.11.1
 	github.com/tchap/go-patricia/v2 v2.3.3
