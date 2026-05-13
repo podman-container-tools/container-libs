@@ -836,6 +836,21 @@ func DefaultProfile() *Seccomp {
 				"socket",
 			},
 			Action:   ActErrno,
+			Errno:    "EPERM",
+			ErrnoRet: &eperm,
+			Args: []*Arg{
+				{
+					Index: 0,
+					Value: unix.AF_ALG,
+					Op:    OpEqualTo,
+				},
+			},
+		},
+		{
+			Names: []string{
+				"socket",
+			},
+			Action:   ActErrno,
 			Errno:    "EINVAL",
 			ErrnoRet: &einval,
 			Args: []*Arg{
