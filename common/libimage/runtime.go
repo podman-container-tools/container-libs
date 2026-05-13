@@ -701,6 +701,9 @@ type RemoveImagesOptions struct {
 	WithSize bool
 	// NoPrune will not remove dangling images
 	NoPrune bool
+	// DryRun will not remove images but will display image id's
+	// that would have been removed
+	DryRun bool
 }
 
 // RemoveImages removes images specified by names.  If no names are specified,
