@@ -762,7 +762,7 @@ func extractTarFileEntry(path, extractDir string, hdr *tar.Header, reader io.Rea
 	case tar.TypeLink:
 		targetPath := filepath.Join(extractDir, hdr.Linkname)
 		// check for hardlink breakout
-		if !strings.HasPrefix(targetPath, extractDir) {
+		if !strings.HasPrefix(targetPath, extractDir+string(os.PathSeparator)) {
 			return breakoutError(fmt.Errorf("invalid hardlink %q -> %q", targetPath, hdr.Linkname))
 		}
 		if err := handleLLink(targetPath, path); err != nil {
@@ -776,7 +776,7 @@ func extractTarFileEntry(path, extractDir string, hdr *tar.Header, reader io.Rea
 
 		// the reason we don't need to check symlinks in the path (with FollowSymlinkInScope) is because
 		// that symlink would first have to be created, which would be caught earlier, at this very check:
-		if !strings.HasPrefix(targetPath, extractDir) {
+		if !strings.HasPrefix(targetPath, extractDir+string(os.PathSeparator)) {
 			return breakoutError(fmt.Errorf("invalid symlink %q -> %q", path, hdr.Linkname))
 		}
 		if err := os.Symlink(hdr.Linkname, path); err != nil {
@@ -1150,7 +1150,7 @@ loop:
 		if rel == "." {
 			rootHdr = hdr
 		}
-		if strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		if rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
 			return breakoutError(fmt.Errorf("%q is outside of %q", hdr.Name, dest))
 		}
 
