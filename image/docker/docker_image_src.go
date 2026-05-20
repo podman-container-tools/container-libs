@@ -8,15 +8,20 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"math/rand/v2"
 	"mime"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
 	"strings"
 	"sync"
+	"time"
 
+	"github.com/docker/distribution/registry/api/errcode"
+	v2 "github.com/docker/distribution/registry/api/v2"
 	digest "github.com/opencontainers/go-digest"
 	"github.com/sirupsen/logrus"
 	"go.podman.io/image/v5/docker/reference"
@@ -48,6 +53,25 @@ type dockerImageSource struct {
 	// State
 	cachedManifest         []byte // nil if not loaded yet
 	cachedManifestMIMEType string // Only valid if cachedManifest != nil
+
+	// Mirror fallback: when a blob fetch fails with a fallback-worthy error,
+	// try remaining pull sources before giving up. Protected by mirrorMu.
+	mirrorMu         sync.Mutex
+	mirrorOverride   *mirrorSource                // If non-nil, this is the mirror and physicalRef for the override client
+	prevOverrides    []*dockerClient              // mirror clients replaced by a newer mirrorOverride; kept open because other goroutines may still be reading blobs through them, closed in Close()
+	remainingSources []sysregistriesv2.PullSource // later pull sources not yet tried, consumed front-to-back during fallback; nil when selected source is already the original source.
+	fallbackSys      *types.SystemContext
+}
+
+type mirrorSource struct {
+	client *dockerClient
+	ref    dockerReference
+}
+
+type pullEndpoint struct {
+	client      *dockerClient
+	ref         dockerReference
+	endpointSys *types.SystemContext
 }
 
 // newImageSource creates a new ImageSource for the specified image reference.
@@ -91,7 +115,7 @@ func newImageSource(ctx context.Context, sys *types.SystemContext, ref dockerRef
 		err error
 	}
 	attempts := []attempt{}
-	for _, pullSource := range pullSources {
+	for i, pullSource := range pullSources {
 		if sys != nil && sys.DockerLogMirrorChoice {
 			logrus.Infof("Trying to access %q", pullSource.Reference)
 		} else {
@@ -99,6 +123,10 @@ func newImageSource(ctx context.Context, sys *types.SystemContext, ref dockerRef
 		}
 		s, err := newImageSourceAttempt(ctx, sys, ref, pullSource, registryConfig)
 		if err == nil {
+			if i+1 < len(pullSources) {
+				s.remainingSources = pullSources[i+1:]
+				s.fallbackSys = sys
+			}
 			return s, nil
 		}
 		logrus.Debugf("Accessing %q failed: %v", pullSource.Reference, err)
@@ -131,25 +159,10 @@ func newImageSource(ctx context.Context, sys *types.SystemContext, ref dockerRef
 func newImageSourceAttempt(ctx context.Context, sys *types.SystemContext, logicalRef dockerReference, pullSource sysregistriesv2.PullSource,
 	registryConfig *registryConfiguration,
 ) (*dockerImageSource, error) {
-	physicalRef, err := newReference(pullSource.Reference, false)
+	endpoint, err := newPullClient(sys, logicalRef, pullSource, registryConfig)
 	if err != nil {
 		return nil, err
 	}
-
-	endpointSys := sys
-	// sys.DockerAuthConfig does not explicitly specify a registry; we must not blindly send the credentials intended for the primary endpoint to mirrors.
-	if endpointSys != nil && endpointSys.DockerAuthConfig != nil && reference.Domain(physicalRef.ref) != reference.Domain(logicalRef.ref) {
-		copy := *endpointSys
-		copy.DockerAuthConfig = nil
-		copy.DockerBearerRegistryToken = ""
-		endpointSys = &copy
-	}
-
-	client, err := newDockerClientFromRef(endpointSys, physicalRef, registryConfig, false, "pull")
-	if err != nil {
-		return nil, err
-	}
-	client.tlsClientConfig.InsecureSkipVerify = pullSource.Endpoint.Insecure
 
 	s := &dockerImageSource{
 		PropertyMethodsInitialize: impl.PropertyMethods(impl.Properties{
@@ -157,26 +170,26 @@ func newImageSourceAttempt(ctx context.Context, sys *types.SystemContext, logica
 		}),
 
 		logicalRef:  logicalRef,
-		physicalRef: physicalRef,
-		c:           client,
+		physicalRef: endpoint.ref,
+		c:           endpoint.client,
 	}
 	s.Compat = impl.AddCompat(s)
 
 	if err := s.ensureManifestIsLoaded(ctx); err != nil {
-		client.Close()
+		endpoint.client.Close()
 		return nil, err
 	}
 
-	if h, err := sysregistriesv2.AdditionalLayerStoreAuthHelper(endpointSys); err == nil && h != "" {
+	if h, err := sysregistriesv2.AdditionalLayerStoreAuthHelper(endpoint.endpointSys); err == nil && h != "" {
 		acf := map[string]struct {
 			Username      string `json:"username,omitempty"`
 			Password      string `json:"password,omitempty"`
 			IdentityToken string `json:"identityToken,omitempty"`
 		}{
-			physicalRef.ref.String(): {
-				Username:      client.auth.Username,
-				Password:      client.auth.Password,
-				IdentityToken: client.auth.IdentityToken,
+			endpoint.ref.ref.String(): {
+				Username:      endpoint.client.auth.Username,
+				Password:      endpoint.client.auth.Password,
+				IdentityToken: endpoint.client.auth.IdentityToken,
 			},
 		}
 		acfD, err := json.Marshal(acf)
@@ -197,6 +210,35 @@ func newImageSourceAttempt(ctx context.Context, sys *types.SystemContext, logica
 	return s, nil
 }
 
+// newPullClient creates a dockerClient, reference, and endpoint-specific SystemContext
+// for the given pull source.
+// The caller must call client.Close() when done.
+func newPullClient(sys *types.SystemContext, logicalRef dockerReference, pullSource sysregistriesv2.PullSource,
+	registryConfig *registryConfiguration,
+) (*pullEndpoint, error) {
+	physicalRef, err := newReference(pullSource.Reference, false)
+	if err != nil {
+		return nil, err
+	}
+
+	endpointSys := sys
+	// sys.DockerAuthConfig does not explicitly specify a registry; we must not blindly send the credentials intended for the primary endpoint to mirrors.
+	if endpointSys != nil && endpointSys.DockerAuthConfig != nil && reference.Domain(physicalRef.ref) != reference.Domain(logicalRef.ref) {
+		copy := *endpointSys
+		copy.DockerAuthConfig = nil
+		copy.DockerBearerRegistryToken = ""
+		endpointSys = &copy
+	}
+
+	client, err := newDockerClientFromRef(endpointSys, physicalRef, registryConfig, false, "pull")
+	if err != nil {
+		return nil, err
+	}
+	client.tlsClientConfig.InsecureSkipVerify = pullSource.Endpoint.Insecure
+
+	return &pullEndpoint{client: client, ref: physicalRef, endpointSys: endpointSys}, nil
+}
+
 // Reference returns the reference used to set up this source, _as specified by the user_
 // (not as the image itself, or its underlying storage, claims).  This can be used e.g. to determine which public keys are trusted for this image.
 func (s *dockerImageSource) Reference() types.ImageReference {
@@ -205,6 +247,18 @@ func (s *dockerImageSource) Reference() types.ImageReference {
 
 // Close removes resources associated with an initialized ImageSource, if any.
 func (s *dockerImageSource) Close() error {
+	s.mirrorMu.Lock()
+	prev := s.prevOverrides
+	override := s.mirrorOverride
+	s.prevOverrides = nil
+	s.mirrorOverride = nil
+	s.mirrorMu.Unlock()
+	for _, m := range prev {
+		m.Close()
+	}
+	if override != nil {
+		override.client.Close()
+	}
 	return s.c.Close()
 }
 
@@ -455,7 +509,163 @@ func (s *dockerImageSource) GetBlobAt(ctx context.Context, info types.BlobInfo, 
 // The Digest field in BlobInfo is guaranteed to be provided, Size may be -1 and MediaType may be optionally provided.
 // May update BlobInfoCache, preferably after it knows for certain that a blob truly exists at a specific location.
 func (s *dockerImageSource) GetBlob(ctx context.Context, info types.BlobInfo, cache types.BlobInfoCache) (io.ReadCloser, int64, error) {
-	return s.c.getBlob(ctx, s.physicalRef, info, cache)
+	client, physRef, hasRemaining := s.getActiveSource()
+	reader, size, err := tryGetBlob(ctx, client, physRef, info, cache, hasRemaining)
+	if err == nil || !hasRemaining {
+		return reader, size, err
+	}
+	if isMirrorTransientError(err) || isMirrorFallbackError(err) {
+		logrus.Debugf("Blob %s fetch from %q failed (%v), trying fallback sources", info.Digest, physRef.ref, err)
+		return s.getBlobWithMirrorFallback(ctx, info, cache, err, client)
+	}
+	return reader, size, err
+}
+
+func (s *dockerImageSource) getActiveSource() (*dockerClient, dockerReference, bool) {
+	s.mirrorMu.Lock()
+	defer s.mirrorMu.Unlock()
+	hasRemaining := len(s.remainingSources) > 0
+	if s.mirrorOverride != nil {
+		return s.mirrorOverride.client, s.mirrorOverride.ref, hasRemaining
+	}
+	return s.c, s.physicalRef, hasRemaining
+}
+
+// tryGetBlob attempts to fetch a blob, retrying once on transient errors if fallback mirrors remain.
+func tryGetBlob(ctx context.Context, client *dockerClient, physRef dockerReference,
+	info types.BlobInfo, cache types.BlobInfoCache, hasRemainingSources bool,
+) (io.ReadCloser, int64, error) {
+	reader, size, err := client.getBlob(ctx, physRef, info, cache)
+	if err != nil && hasRemainingSources && isMirrorTransientError(err) {
+		logrus.Debugf("Transient error fetching blob %s from %q, retrying: %v", info.Digest, physRef.ref, err)
+		delay := time.Second + rand.N(time.Second/10) // same as retry.IfNecessary first attempt: 1s + 10% jitter
+		select {
+		case <-ctx.Done():
+			return nil, 0, fmt.Errorf("%w (while retrying after: %v)", ctx.Err(), err)
+		case <-time.After(delay):
+		}
+		reader, size, err = client.getBlob(ctx, physRef, info, cache)
+	}
+	return reader, size, err
+}
+
+// isMirrorFallbackError returns true for errors where the blob is not present
+// on this source but may be available from another — warranting a fallback attempt.
+// All tested registries (docker.io, registry.redhat.io, quay.io, registry.access.redhat.com)
+// return BLOB_UNKNOWN for blob 404s, matching the OCI distribution spec.
+func isMirrorFallbackError(err error) bool {
+	var ec errcode.ErrorCoder
+	if errors.As(err, &ec) {
+		switch ec.ErrorCode() {
+		case v2.ErrorCodeBlobUnknown:
+			// Blob endpoint returns HTTP 404 with errcode JSON body
+			// {"errors":[{"code":"BLOB_UNKNOWN",...}]}.
+			// registryHTTPResponseToError calls handleErrorResponse → parseHTTPErrorResponse,
+			// then unwraps errcode.Errors to the first errcode.Error.
+			return true
+		case errcode.ErrorCodeTooManyRequests:
+			// makeRequestToResolvedURL already retried 5 times with exponential
+			// backoff. This source's rate limit is exhausted — skip straight to
+			// the next mirror which has its own rate limit budget.
+			return true
+		}
+	}
+
+	// UnexpectedHTTPStatusError (capital U) is NOT matched here — for regular blobs,
+	// handleErrorResponse never produces it for 4xx (only for 5xx). For external blobs,
+	// getExternalBlob() produces it via newUnexpectedHTTPStatusError() directly for any
+	// non-200 including 404, but external URLs are fixed and mirror-independent —
+	// a different registry mirror cannot serve them.
+	return false
+}
+
+// isMirrorTransientError returns true for errors that are transient; the source
+// probably has the blob but temporarily cannot serve it.
+func isMirrorTransientError(err error) bool {
+	// HTTP 5xx: handleErrorResponse returns UnexpectedHTTPStatusError for status
+	// codes outside 400–499. Server-side error, another mirror may succeed.
+	var httpErr UnexpectedHTTPStatusError
+	if errors.As(err, &httpErr) && httpErr.StatusCode >= 500 {
+		return true
+	}
+
+	// Network timeout: makeRequest returns net.Error with Timeout() == true.
+	// The mirror is reachable but slow — worth retrying on another.
+	var netErr net.Error
+	return errors.As(err, &netErr) && netErr.Timeout()
+}
+
+func (s *dockerImageSource) getBlobWithMirrorFallback(ctx context.Context, info types.BlobInfo, cache types.BlobInfoCache, originalErr error, failedClient *dockerClient) (io.ReadCloser, int64, error) {
+	// Held for the full fallback loop, including network I/O. This serializes
+	// concurrent blob fetchers during fallback — only one goroutine probes
+	// sources while the rest block on getActiveSource(). Acceptable trade-off:
+	// fallback is rare and serialization prevents thundering-herd probing.
+	s.mirrorMu.Lock()
+	defer s.mirrorMu.Unlock()
+
+	// If another goroutine already switched to a working mirror, try it first.
+	if s.mirrorOverride != nil && s.mirrorOverride.client != failedClient {
+		client, physRef := s.mirrorOverride.client, s.mirrorOverride.ref
+		reader, size, err := tryGetBlob(ctx, client, physRef, info, cache, len(s.remainingSources) > 0)
+		if err == nil {
+			return reader, size, nil
+		}
+		// Override failed — retire it so subsequent goroutines don't retry it.
+		s.prevOverrides = append(s.prevOverrides, s.mirrorOverride.client)
+		s.mirrorOverride = nil
+	}
+
+	registryConf, regErr := loadRegistryConfiguration(s.fallbackSys)
+	if regErr != nil {
+		logrus.Debugf("Mirror fallback: failed to load registry config: %v", regErr)
+		return nil, 0, originalErr
+	}
+
+	type attempt struct {
+		ref reference.Named
+		err error
+	}
+	attempts := []attempt{}
+	for len(s.remainingSources) > 0 {
+		pullSource := s.remainingSources[0]
+		s.remainingSources = s.remainingSources[1:]
+
+		logrus.Debugf("Trying to access %q", pullSource.Reference)
+
+		fallbackEndpoint, clientErr := newPullClient(s.fallbackSys, s.logicalRef, pullSource, registryConf)
+		if clientErr != nil {
+			logrus.Debugf("Accessing %q failed: %v", pullSource.Reference, clientErr)
+			attempts = append(attempts, attempt{ref: pullSource.Reference, err: clientErr})
+			continue
+		}
+
+		reader, size, err := tryGetBlob(ctx, fallbackEndpoint.client, fallbackEndpoint.ref, info, cache, len(s.remainingSources) > 0)
+		if err != nil {
+			fallbackEndpoint.client.Close()
+			logrus.Debugf("Accessing %q failed: %v", pullSource.Reference, err)
+			attempts = append(attempts, attempt{ref: pullSource.Reference, err: err})
+			if !isMirrorTransientError(err) && !isMirrorFallbackError(err) {
+				break
+			}
+			continue
+		}
+
+		if s.mirrorOverride != nil {
+			s.prevOverrides = append(s.prevOverrides, s.mirrorOverride.client)
+		}
+		s.mirrorOverride = &mirrorSource{client: fallbackEndpoint.client, ref: fallbackEndpoint.ref}
+		logrus.Debugf("Blob fetch succeeded from fallback source %q, switching to it for future requests", pullSource.Reference)
+
+		return reader, size, nil
+	}
+	if len(attempts) > 0 {
+		extras := []string{}
+		for _, a := range attempts {
+			extras = append(extras, fmt.Sprintf("[%s: %v]", a.ref.String(), a.err))
+		}
+		logrus.Debugf("(Fallback sources also failed: %s): %v", strings.Join(extras, "\n"), originalErr)
+	}
+	return nil, 0, originalErr
 }
 
 // GetSignaturesWithFormat returns the image's signatures.  It may use a remote (= slow) service.
