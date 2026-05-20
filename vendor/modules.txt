@@ -511,7 +511,7 @@ go.opentelemetry.io/otel/trace/internal/telemetry
 go.opentelemetry.io/otel/trace/noop
 # go.podman.io/image/v5 v5.39.2
 ## explicit; go 1.25.6
-# go.podman.io/storage v1.62.1-0.20260515151312-e2c14667a598
+# go.podman.io/storage v1.63.0
 ## explicit; go 1.25.0
 # go.yaml.in/yaml/v2 v2.4.3
 ## explicit; go 1.15
