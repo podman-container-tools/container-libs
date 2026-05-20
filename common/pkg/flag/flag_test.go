@@ -111,8 +111,8 @@ func TestOptionalBoolIsBoolFlag(t *testing.T) {
 		cmd := &cobra.Command{
 			Use: "cmd",
 			RunE: func(_ *cobra.Command, args []string) error {
-				assert.Equal(t, c.expectedOB, ob)     // nolint
-				assert.Equal(t, c.expectedArgs, args) //nolint
+				assert.Equal(t, c.expectedOB, ob)
+				assert.Equal(t, c.expectedArgs, args)
 				actionRun = true
 				return nil
 			},
@@ -206,8 +206,8 @@ func TestOptionalStringIsBoolFlag(t *testing.T) {
 		cmd := &cobra.Command{
 			Use: "cmd",
 			RunE: func(cmd *cobra.Command, args []string) error {
-				assert.Equal(t, c.expectedOS, os)     // nolint
-				assert.Equal(t, c.expectedArgs, args) // nolint
+				assert.Equal(t, c.expectedOS, os)
+				assert.Equal(t, c.expectedArgs, args)
 				actionRun = true
 				return nil
 			},

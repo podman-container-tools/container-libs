@@ -45,16 +45,16 @@ func TestDeviceParser(t *testing.T) {
 	assert.Equal(t, permissions, "rm")
 
 	// test bogus permissions
-	_, _, _, err = Device("/dev/fuse1:BOGUS") //nolint
+	_, _, _, err = Device("/dev/fuse1:BOGUS")
 	assert.Error(t, err)
 
-	_, _, _, err = Device("") //nolint
+	_, _, _, err = Device("")
 	assert.Error(t, err)
 
-	_, _, _, err = Device("/dev/foo:/dev/bar:rm:") //nolint
+	_, _, _, err = Device("/dev/foo:/dev/bar:rm:")
 	assert.Error(t, err)
 
-	_, _, _, err = Device("/dev/foo::rm") //nolint
+	_, _, _, err = Device("/dev/foo::rm")
 	assert.Error(t, err)
 }
 
