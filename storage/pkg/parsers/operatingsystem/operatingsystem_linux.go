@@ -52,6 +52,9 @@ func GetOperatingSystem() (string, error) {
 			prettyName = prettyNames[0]
 		}
 	}
+	if err := scanner.Err(); err != nil {
+		return "", err
+	}
 	if prettyName != "" {
 		return prettyName, nil
 	}
