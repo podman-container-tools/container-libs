@@ -38,11 +38,11 @@ require (
 	github.com/vbauerster/mpb/v8 v8.12.0
 	go.etcd.io/bbolt v1.4.3
 	go.podman.io/storage v1.63.0
+	go.yaml.in/yaml/v3 v3.0.4
 	golang.org/x/crypto v0.51.0
 	golang.org/x/oauth2 v0.36.0
 	golang.org/x/sync v0.20.0
 	golang.org/x/term v0.43.0
-	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
@@ -103,4 +103,5 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260519071638-aa98bba5eb94 // indirect
 	google.golang.org/grpc v1.81.1 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
