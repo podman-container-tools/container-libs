@@ -9,12 +9,12 @@ import (
 const (
 	// ProfilePrefix is used for version-independent presence checks.
 	ProfilePrefix = "containers-default-"
-
-	// Profile default name.
-	Profile = ProfilePrefix + version.Version
 )
 
 var (
+	// Profile default name.
+	Profile = ProfilePrefix + version.Version
+
 	// ErrApparmorUnsupported indicates that AppArmor support is not supported.
 	ErrApparmorUnsupported = errors.New("AppArmor is not supported")
 	// ErrApparmorRootless indicates that AppArmor support is not supported in rootless mode.
