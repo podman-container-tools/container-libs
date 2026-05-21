@@ -395,7 +395,9 @@ func TestGetBlobSize(t *testing.T) {
 		var buf bytes.Buffer
 		buf.WriteString("HTTP/1.1 200 OK\r\n")
 		for _, v := range c.headers {
-			buf.WriteString("Content-Length: " + v + "\r\n")
+			buf.WriteString("Content-Length: ")
+			buf.WriteString(v)
+			buf.WriteString("\r\n")
 		}
 		buf.WriteString("\r\n")
 		resp, err := http.ReadResponse(bufio.NewReader(&buf), nil)
