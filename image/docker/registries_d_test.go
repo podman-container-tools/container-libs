@@ -24,7 +24,7 @@ func dockerRefFromString(t *testing.T, s string) dockerReference {
 func writeDockerLookaside(t *testing.T, dir, filename, registry, lookaside string) {
 	t.Helper()
 	require.NoError(t, os.MkdirAll(dir, 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(dir, filename), []byte(fmt.Sprintf("docker:\n  %s:\n    lookaside: %s\n", registry, lookaside)), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, filename), fmt.Appendf(nil, "docker:\n  %s:\n    lookaside: %s\n", registry, lookaside), 0o644))
 }
 
 func TestSignatureStorageBaseURL(t *testing.T) {
@@ -214,7 +214,6 @@ func TestLoadRegistryConfiguration(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run("", func(t *testing.T) {
 			sys := tt.setup(t)
 			cfg, err := loadRegistryConfiguration(sys)
