@@ -12,10 +12,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.podman.io/storage/pkg/system"
 	"golang.org/x/sys/unix"
-	"gotest.tools/v3/assert"
-	is "gotest.tools/v3/assert/cmp"
 )
 
 func TestCopy(t *testing.T) {
@@ -36,40 +36,40 @@ func TestCopyDir(t *testing.T) {
 
 	dstDir := t.TempDir()
 
-	assert.Check(t, DirCopy(srcDir, dstDir, Content, false))
-	assert.NilError(t, filepath.Walk(srcDir, func(srcPath string, f os.FileInfo, err error) error {
+	require.NoError(t, DirCopy(srcDir, dstDir, Content, false))
+	require.NoError(t, filepath.Walk(srcDir, func(srcPath string, f os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
 
 		// Rebase path
 		relPath, err := filepath.Rel(srcDir, srcPath)
-		assert.NilError(t, err)
+		require.NoError(t, err)
 		if relPath == "." {
 			return nil
 		}
 
 		dstPath := filepath.Join(dstDir, relPath)
-		assert.NilError(t, err)
+		require.NoError(t, err)
 
 		// If we add non-regular dirs and files to the test
 		// then we need to add more checks here.
 		dstFileInfo, err := os.Lstat(dstPath)
-		assert.NilError(t, err)
+		require.NoError(t, err)
 
 		srcFileSys := f.Sys().(*syscall.Stat_t)
 		dstFileSys := dstFileInfo.Sys().(*syscall.Stat_t)
 
 		t.Log(relPath)
 		if srcFileSys.Dev == dstFileSys.Dev {
-			assert.Check(t, srcFileSys.Ino != dstFileSys.Ino)
+			assert.NotEqual(t, srcFileSys.Ino, dstFileSys.Ino)
 		}
 		// Todo: check size, and ctim is not equal
 		/// on filesystems that have granular ctimes
-		assert.Check(t, is.DeepEqual(srcFileSys.Mode, dstFileSys.Mode))
-		assert.Check(t, is.DeepEqual(srcFileSys.Uid, dstFileSys.Uid))
-		assert.Check(t, is.DeepEqual(srcFileSys.Gid, dstFileSys.Gid))
-		assert.Check(t, is.DeepEqual(srcFileSys.Mtim, dstFileSys.Mtim))
+		assert.Equal(t, srcFileSys.Mode, dstFileSys.Mode)
+		assert.Equal(t, srcFileSys.Uid, dstFileSys.Uid)
+		assert.Equal(t, srcFileSys.Gid, dstFileSys.Gid)
+		assert.Equal(t, srcFileSys.Mtim, dstFileSys.Mtim)
 
 		return nil
 	}))
@@ -86,7 +86,7 @@ func populateSrcDir(t *testing.T, srcDir string, remainingDepth int) {
 	if remainingDepth == 0 {
 		socketPath := filepath.Join(srcDir, "srcsocket")
 		s, err := net.ListenUnix("unix", &net.UnixAddr{Name: socketPath, Net: "unix"})
-		assert.NilError(t, err)
+		require.NoError(t, err)
 		s.SetUnlinkOnClose(false)
 		s.Close()
 		return
@@ -97,16 +97,16 @@ func populateSrcDir(t *testing.T, srcDir string, remainingDepth int) {
 	for i := range 10 {
 		dirName := filepath.Join(srcDir, fmt.Sprintf("srcdir-%d", i))
 		// Owner all bits set
-		assert.NilError(t, os.Mkdir(dirName, randomMode(0o700)))
+		require.NoError(t, os.Mkdir(dirName, randomMode(0o700)))
 		populateSrcDir(t, dirName, remainingDepth-1)
-		assert.NilError(t, system.Chtimes(dirName, aTime, mTime))
+		require.NoError(t, system.Chtimes(dirName, aTime, mTime))
 	}
 
 	for i := range 10 {
 		fileName := filepath.Join(srcDir, fmt.Sprintf("srcfile-%d", i))
 		// Owner read bit set
-		assert.NilError(t, os.WriteFile(fileName, []byte{}, randomMode(0o400)))
-		assert.NilError(t, system.Chtimes(fileName, aTime, mTime))
+		require.NoError(t, os.WriteFile(fileName, []byte{}, randomMode(0o400)))
+		require.NoError(t, system.Chtimes(fileName, aTime, mTime))
 	}
 }
 
@@ -118,15 +118,15 @@ func doCopyTest(t *testing.T, copyWithFileRange, copyWithFileClone *bool) {
 	r := rand.New(rand.NewSource(0))
 	buf := make([]byte, 1024)
 	_, err := r.Read(buf)
-	assert.NilError(t, err)
-	assert.NilError(t, os.WriteFile(srcFilename, buf, 0o777))
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(srcFilename, buf, 0o777))
 	fileinfo, err := os.Stat(srcFilename)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
-	assert.NilError(t, CopyRegular(srcFilename, dstFilename, fileinfo, copyWithFileRange, copyWithFileClone))
+	require.NoError(t, CopyRegular(srcFilename, dstFilename, fileinfo, copyWithFileRange, copyWithFileClone))
 	readBuf, err := os.ReadFile(dstFilename)
-	assert.NilError(t, err)
-	assert.Check(t, is.DeepEqual(buf, readBuf))
+	require.NoError(t, err)
+	assert.Equal(t, buf, readBuf)
 }
 
 func TestCopyHardlink(t *testing.T) {
@@ -139,16 +139,16 @@ func TestCopyHardlink(t *testing.T) {
 	srcFile2 := filepath.Join(srcDir, "file2")
 	dstFile1 := filepath.Join(dstDir, "file1")
 	dstFile2 := filepath.Join(dstDir, "file2")
-	assert.NilError(t, os.WriteFile(srcFile1, []byte{}, 0o777))
-	assert.NilError(t, os.Link(srcFile1, srcFile2))
+	require.NoError(t, os.WriteFile(srcFile1, []byte{}, 0o777))
+	require.NoError(t, os.Link(srcFile1, srcFile2))
 
-	assert.Check(t, DirCopy(srcDir, dstDir, Content, false))
+	require.NoError(t, DirCopy(srcDir, dstDir, Content, false))
 
-	assert.NilError(t, unix.Stat(srcFile1, &srcFile1FileInfo))
-	assert.NilError(t, unix.Stat(srcFile2, &srcFile2FileInfo))
+	require.NoError(t, unix.Stat(srcFile1, &srcFile1FileInfo))
+	require.NoError(t, unix.Stat(srcFile2, &srcFile2FileInfo))
 	assert.Equal(t, srcFile1FileInfo.Ino, srcFile2FileInfo.Ino)
 
-	assert.NilError(t, unix.Stat(dstFile1, &dstFile1FileInfo))
-	assert.NilError(t, unix.Stat(dstFile2, &dstFile2FileInfo))
-	assert.Check(t, is.Equal(dstFile1FileInfo.Ino, dstFile2FileInfo.Ino))
+	require.NoError(t, unix.Stat(dstFile1, &dstFile1FileInfo))
+	require.NoError(t, unix.Stat(dstFile2, &dstFile2FileInfo))
+	assert.Equal(t, dstFile1FileInfo.Ino, dstFile2FileInfo.Ino)
 }

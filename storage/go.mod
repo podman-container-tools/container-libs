@@ -28,13 +28,11 @@ require (
 	github.com/vbatts/tar-split v0.12.3
 	golang.org/x/sync v0.20.0
 	golang.org/x/sys v0.44.0
-	gotest.tools/v3 v3.5.2
 )
 
 require (
 	cyphar.com/go-pathrs v0.2.4 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
-	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect

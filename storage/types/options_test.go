@@ -4,13 +4,12 @@ import (
 	"bytes"
 	"os"
 	"strconv"
-	"strings"
 	"testing"
 
 	"github.com/sirupsen/logrus"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.podman.io/storage/pkg/unshare"
-	"gotest.tools/v3/assert"
 )
 
 func TestInvalidKeyFile(t *testing.T) {
@@ -23,9 +22,9 @@ func TestInvalidKeyFile(t *testing.T) {
 	var storageOpts StoreOptions
 	storageOpts, err := LoadStoreOptions(LoadOptions{})
 	require.NoError(t, err)
-	assert.Equal(t, storageOpts.RunRoot, "/run/containers/test")
+	assert.Equal(t, "/run/containers/test", storageOpts.RunRoot)
 
-	assert.Equal(t, strings.Contains(content.String(), "Failed to decode the keys [\\\"foo\\\" \\\"storage.options.graphroot\\\"] from \\\"./storage_broken.conf\\\"\""), true)
+	assert.Contains(t, content.String(), "Failed to decode the keys [\\\"foo\\\" \\\"storage.options.graphroot\\\"] from \\\"./storage_broken.conf\\\"\"")
 }
 
 func TestLoadStoreOptions(t *testing.T) {
@@ -34,6 +33,6 @@ func TestLoadStoreOptions(t *testing.T) {
 	storageOpts, err := LoadStoreOptions(LoadOptions{})
 	require.NoError(t, err)
 
-	assert.Equal(t, storageOpts.RunRoot, "/run/"+strconv.Itoa(unshare.GetRootlessUID())+"/containers/storage")
-	assert.Equal(t, storageOpts.GraphRoot, os.Getenv("HOME")+"/"+strconv.Itoa(unshare.GetRootlessUID())+"/containers/storage")
+	assert.Equal(t, "/run/"+strconv.Itoa(unshare.GetRootlessUID())+"/containers/storage", storageOpts.RunRoot)
+	assert.Equal(t, os.Getenv("HOME")+"/"+strconv.Itoa(unshare.GetRootlessUID())+"/containers/storage", storageOpts.GraphRoot)
 }

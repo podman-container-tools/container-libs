@@ -737,14 +737,6 @@ google.golang.org/protobuf/types/known/timestamppb
 # gopkg.in/yaml.v3 v3.0.1
 ## explicit
 gopkg.in/yaml.v3
-# gotest.tools/v3 v3.5.2
-## explicit; go 1.17
-gotest.tools/v3/assert
-gotest.tools/v3/assert/cmp
-gotest.tools/v3/internal/assert
-gotest.tools/v3/internal/difflib
-gotest.tools/v3/internal/format
-gotest.tools/v3/internal/source
 # sigs.k8s.io/yaml v1.6.0
 ## explicit; go 1.22
 sigs.k8s.io/yaml

@@ -12,9 +12,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.podman.io/storage/pkg/archive"
 	"golang.org/x/sys/unix"
-	"gotest.tools/v3/assert"
 )
 
 // Test for CVE-2018-15664
@@ -26,12 +27,12 @@ func TestUntarWithMaliciousSymlinks(t *testing.T) {
 	root := filepath.Join(dir, "root")
 
 	err := os.MkdirAll(root, 0o755)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	// Add a file into a directory above root
 	// Ensure that we can't access this file while tarring.
 	err = os.WriteFile(filepath.Join(dir, "host-file"), []byte("I am a host file"), 0o644)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	// Create some data which will be copied into the "container" root into
 	// the symlinked path.
@@ -39,40 +40,39 @@ func TestUntarWithMaliciousSymlinks(t *testing.T) {
 	// With this change it should not.
 	data := filepath.Join(dir, "data")
 	err = os.MkdirAll(data, 0o755)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 	err = os.WriteFile(filepath.Join(data, "local-file"), []byte("pwn3d"), 0o644)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	safe := filepath.Join(root, "safe")
 	err = unix.Symlink(dir, safe)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	rdr, err := archive.TarWithOptions(data, &archive.TarOptions{IncludeFiles: []string{"local-file"}, RebaseNames: map[string]string{"local-file": "host-file"}})
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	// Use tee to test both the good case and the bad case w/o recreating the archive
 	bufRdr := bytes.NewBuffer(nil)
 	tee := io.TeeReader(rdr, bufRdr)
 
 	err = UntarWithRoot(tee, safe, nil, root)
-	assert.Assert(t, err != nil)
 	assert.ErrorContains(t, err, "open /safe/host-file: no such file or directory")
 
 	// Make sure the "host" file is still in tact
 	// Before the fix the host file would be overwritten
 	hostData, err := os.ReadFile(filepath.Join(dir, "host-file"))
-	assert.NilError(t, err)
-	assert.Equal(t, string(hostData), "I am a host file")
+	require.NoError(t, err)
+	assert.Equal(t, "I am a host file", string(hostData))
 
 	// Now test by chrooting to an attacker controlled path
 	// This should succeed as is and overwrite a "host" file
 	// Note that this would be a mis-use of this function.
 	err = UntarWithRoot(bufRdr, safe, nil, safe)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	hostData, err = os.ReadFile(filepath.Join(dir, "host-file"))
-	assert.NilError(t, err)
-	assert.Equal(t, string(hostData), "pwn3d")
+	require.NoError(t, err)
+	assert.Equal(t, "pwn3d", string(hostData))
 }
 
 // Test for CVE-2018-15664
@@ -86,22 +86,22 @@ func TestTarWithMaliciousSymlinks(t *testing.T) {
 	root := filepath.Join(dir, "root")
 
 	err := os.MkdirAll(root, 0o755)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	hostFileData := []byte("I am a host file")
 
 	// Add a file into a directory above root
 	// Ensure that we can't access this file while tarring.
 	err = os.WriteFile(filepath.Join(dir, "host-file"), hostFileData, 0o644)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	safe := filepath.Join(root, "safe")
 	err = unix.Symlink(dir, safe)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	data := filepath.Join(dir, "data")
 	err = os.MkdirAll(data, 0o755)
-	assert.NilError(t, err)
+	require.NoError(t, err)
 
 	type testCase struct {
 		p        string
@@ -131,11 +131,11 @@ func TestTarWithMaliciousSymlinks(t *testing.T) {
 				}
 			}
 			rdr, err := Tar(tc.p, opts, root)
-			assert.NilError(t, err)
+			require.NoError(t, err)
 			defer rdr.Close()
 
 			tr := gotar.NewReader(rdr)
-			assert.Assert(t, !isDataInTar(t, tr, hostFileData, int64(maxBytes)), "host data leaked to archive")
+			assert.False(t, isDataInTar(t, tr, hostFileData, int64(maxBytes)), "host data leaked to archive")
 		})
 	}
 }
@@ -147,16 +147,16 @@ func isDataInTar(t *testing.T, tr *gotar.Reader, compare []byte, maxBytes int64)
 		if err == io.EOF {
 			break
 		}
-		assert.NilError(t, err)
+		require.NoError(t, err)
 
 		if h.Size == 0 {
 			continue
 		}
-		assert.Assert(t, h.Size <= maxBytes, "%s: file size exceeds max expected size %d: %d", h.Name, maxBytes, h.Size)
+		assert.LessOrEqual(t, h.Size, maxBytes, "%s: file size exceeds max expected size %d: %d", h.Name, maxBytes, h.Size)
 
 		data := make([]byte, int(h.Size))
 		_, err = io.ReadFull(tr, data)
-		assert.NilError(t, err)
+		require.NoError(t, err)
 		if bytes.Contains(data, compare) {
 			return true
 		}
