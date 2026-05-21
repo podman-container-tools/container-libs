@@ -87,7 +87,7 @@ require (
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/sergi/go-diff v1.4.0 // indirect
 	github.com/sigstore/protobuf-specs v0.5.1 // indirect
-	github.com/smallstep/pkcs7 v0.1.1 // indirect
+	github.com/smallstep/pkcs7 v0.2.1 // indirect
 	github.com/stefanberger/go-pkcs11uri v0.0.0-20230803200340-78284954bff6 // indirect
 	github.com/tchap/go-patricia/v2 v2.3.3 // indirect
 	github.com/vbatts/tar-split v0.12.3 // indirect
