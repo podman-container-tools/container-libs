@@ -1,3 +1,5 @@
+//go:build linux || darwin
+
 package umask_test
 
 import (
