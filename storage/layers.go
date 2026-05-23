@@ -847,8 +847,8 @@ func (r *layerStore) GarbageCollect() error {
 		name := entry.Name()
 		var id string
 		var isDataDir bool
-		if strings.HasSuffix(name, tarSplitSuffix) {
-			id = strings.TrimSuffix(name, tarSplitSuffix)
+		if before, ok := strings.CutSuffix(name, tarSplitSuffix); ok {
+			id = before
 		} else if stringid.ValidateID(name) == nil {
 			id = name
 			isDataDir = true

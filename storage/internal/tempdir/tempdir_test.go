@@ -49,7 +49,7 @@ func TestTempDirAddMultipleFiles(t *testing.T) {
 
 	tempDir := t.TempDir()
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		testFile := filepath.Join(tempDir, fmt.Sprintf("testfile%d.txt", i))
 		err = os.WriteFile(testFile, fmt.Appendf(nil, "content %d", i), 0o644)
 		require.NoError(t, err)
