@@ -33,8 +33,9 @@ func TestFormatter_HasTable(t *testing.T) {
 type testFormatterStruct struct {
 	FieldA bool // camel case test
 	Fieldb bool // no camel case
-	fieldC bool // nolint // private field
-	fieldd bool // nolint // private field
+	// Private fields.
+	fieldC bool //nolint:unused
+	fieldd bool //nolint:unused
 }
 
 func TestFormatter_HeadersNoOverrides(t *testing.T) {

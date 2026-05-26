@@ -82,10 +82,6 @@ type ConfigMap struct {
 // ConfigMapsDriver interfaces with the configMaps data store.
 // The driver stores the actual bytes of configMap data, as opposed to
 // the configMap metadata.
-//
-// revive does not like the name because the package is already called configmaps
-//
-//nolint:revive
 type ConfigMapsDriver interface {
 	// List lists all configMap ids in the configMaps data store
 	List() ([]string, error)

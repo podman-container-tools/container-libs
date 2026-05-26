@@ -16,8 +16,9 @@ func TestNewTemplate(t *testing.T) {
 type testStruct struct {
 	FieldA bool // camel case test
 	Fieldb bool // no camel case
-	fieldC bool // nolint // private field
-	fieldd bool // nolint // private field
+	// Private fields.
+	fieldC bool //nolint:unused
+	fieldd bool //nolint:unused
 }
 
 func TestHeadersSimple(t *testing.T) {
