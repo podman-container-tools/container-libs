@@ -2,6 +2,8 @@ package storage
 
 import (
 	"archive/tar"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -64,6 +66,38 @@ func TestCheckDirectory(t *testing.T) {
 			assert.ElementsMatch(t, vectors[i].expected, actual)
 		})
 	}
+}
+
+func TestCheckParentLayerInROStore(t *testing.T) {
+	roStoreRoot := t.TempDir()
+
+	parentLayerID := "ro-parent-layer"
+
+	// Create the RO layer store directory structure that newROLayerStore expects.
+	layerStoreDir := filepath.Join(roStoreRoot, "vfs-layers")
+	require.NoError(t, os.MkdirAll(layerStoreDir, 0o755))
+	// layers.lock is required by lockfile.GetROLockFile.
+	require.NoError(t, os.WriteFile(filepath.Join(layerStoreDir, "layers.lock"), nil, 0o644))
+	layers, err := json.Marshal([]Layer{{ID: parentLayerID}})
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(layerStoreDir, "layers.json"), layers, 0o644))
+
+	// Create the driver-level directory for the parent layer.
+	require.NoError(t, os.MkdirAll(filepath.Join(roStoreRoot, "vfs", "dir", parentLayerID), 0o755))
+
+	stoar := newTestStore(t, StoreOptions{
+		GraphDriverOptions: []string{"imagestore=" + roStoreRoot},
+	})
+	t.Cleanup(func() { _, _ = stoar.Shutdown(true) })
+
+	// Create a RW child layer whose parent is in the RO store.
+	_, err = stoar.CreateLayer("rw-child-layer", parentLayerID, nil, "", true, nil)
+	require.NoError(t, err)
+
+	report, err := stoar.Check(nil)
+	require.NoError(t, err)
+	assert.Empty(t, report.Layers, "RW child layer with RO parent should not be flagged")
+	assert.Empty(t, report.ROLayers, "RO parent layer should not be flagged")
 }
 
 func TestCheckDetectWriteable(t *testing.T) {
