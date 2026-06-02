@@ -1523,6 +1523,7 @@ func (d *Driver) get(id string, disableShifting bool, options graphdriver.MountO
 	if !d.SupportsShifting(options.UidMaps, options.GidMaps) || options.DisableShifting {
 		disableShifting = true
 	}
+	logrus.Debugf("disableShifting: %s", strconv.FormatBool(disableShifting))
 
 	logLevel := logrus.WarnLevel
 	if unshare.IsRootless() {
@@ -2600,6 +2601,9 @@ func (d *Driver) supportsIDmappedMounts() bool {
 func (d *Driver) SupportsShifting(uidmap, gidmap []idtools.IDMap) bool {
 	if os.Getenv("_CONTAINERS_OVERLAY_DISABLE_IDMAP") == "yes" {
 		return false
+	}
+        if _, ok := os.LookupEnv("_CONTAINERS_FORCE_SHIFTING"); ok {
+		return true
 	}
 	if d.options.mountProgram != "" {
 		// fuse-overlayfs supports only contiguous mappings, since it performs the mapping on the
