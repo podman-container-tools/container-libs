@@ -74,6 +74,12 @@ location = "@REGISTRY@/with-mirror"
 		// The observable behavior
 		assert.Equal(t, "//"+c.input, src.Reference().StringWithinTransport(), c.input)
 		assert.Equal(t, ref.StringWithinTransport(), src.Reference().StringWithinTransport(), c.input)
+		// Verify ResolvedReference() returns the physical ref through the public interface
+		resolver, ok := src.(types.ResolvedImageSource)
+		require.True(t, ok, c.input)
+		resolved := resolver.ResolvedReference()
+		assert.Equal(t, "//"+c.physical, resolved.StringWithinTransport(), c.input)
+
 		// Also peek into internal state
 		src2, ok := src.(*dockerImageSource)
 		require.True(t, ok, c.input)
