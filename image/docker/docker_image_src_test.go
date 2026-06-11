@@ -3,6 +3,7 @@ package docker
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/docker/distribution/registry/api/errcode"
+	v2 "github.com/docker/distribution/registry/api/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.podman.io/image/v5/internal/private"
@@ -79,6 +82,115 @@ location = "@REGISTRY@/with-mirror"
 		require.True(t, ok, c.input)
 		assert.Equal(t, "//"+c.input, src2.logicalRef.StringWithinTransport(), c.input)
 		assert.Equal(t, "//"+c.physical, src2.physicalRef.StringWithinTransport(), c.input)
+	}
+}
+
+// testTimeoutError is a net.Error with configurable Timeout() for testing.
+type testTimeoutError struct{ timeout bool }
+
+func (e *testTimeoutError) Error() string   { return "test timeout error" }
+func (e *testTimeoutError) Timeout() bool   { return e.timeout }
+func (e *testTimeoutError) Temporary() bool { return false }
+
+func TestIsMirrorTransientError(t *testing.T) {
+	for _, c := range []struct {
+		name     string
+		err      error
+		expected bool
+	}{
+		// UnexpectedHTTPStatusError: handleErrorResponse returns this for status codes outside 400–499.
+		// getBlob wraps it with "fetching blob: ".
+		{
+			name:     "HTTP 500 from handleErrorResponse",
+			err:      fmt.Errorf("fetching blob: %w", UnexpectedHTTPStatusError{StatusCode: 500, status: "500 Internal Server Error"}),
+			expected: true,
+		},
+		{
+			name:     "HTTP 503 from handleErrorResponse",
+			err:      fmt.Errorf("fetching blob: %w", UnexpectedHTTPStatusError{StatusCode: 503, status: "503 Service Unavailable"}),
+			expected: true,
+		},
+		{
+			name:     "HTTP 404 is not transient",
+			err:      UnexpectedHTTPStatusError{StatusCode: 404, status: "404 Not Found"},
+			expected: false,
+		},
+		{
+			name:     "HTTP 400 is not transient",
+			err:      UnexpectedHTTPStatusError{StatusCode: 400, status: "400 Bad Request"},
+			expected: false,
+		},
+		// Network timeout: makeRequest returns net.Error with Timeout() == true.
+		{
+			name:     "network timeout from makeRequest",
+			err:      &testTimeoutError{timeout: true},
+			expected: true,
+		},
+		{
+			name:     "network error without timeout",
+			err:      &testTimeoutError{timeout: false},
+			expected: false,
+		},
+		{
+			name:     "wrapped network timeout",
+			err:      fmt.Errorf("making request: %w", &testTimeoutError{timeout: true}),
+			expected: true,
+		},
+		{
+			name:     "plain error",
+			err:      fmt.Errorf("something unrelated"),
+			expected: false,
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.expected, isMirrorTransientError(c.err))
+		})
+	}
+}
+
+func TestIsMirrorFallbackError(t *testing.T) {
+	for _, c := range []struct {
+		name     string
+		err      error
+		expected bool
+	}{
+		// BLOB_UNKNOWN: registryHTTPResponseToError → handleErrorResponse → parseHTTPErrorResponse
+		// returns errcode.Error{Code: v2.ErrorCodeBlobUnknown}. getBlob wraps with "fetching blob: ".
+		{
+			name:     "BLOB_UNKNOWN from registry",
+			err:      fmt.Errorf("fetching blob: %w", errcode.Error{Code: v2.ErrorCodeBlobUnknown, Message: "blob unknown to registry"}),
+			expected: true,
+		},
+		// TOO_MANY_REQUESTS: parseHTTPErrorResponse returns this for HTTP 429,
+		// or the detailsErr path in handleErrorResponse produces it.
+		{
+			name:     "TOO_MANY_REQUESTS from registry",
+			err:      fmt.Errorf("fetching blob: %w", errcode.ErrorCodeTooManyRequests.WithMessage("rate limit exceeded")),
+			expected: true,
+		},
+		// MANIFEST_UNKNOWN should not trigger fallback — it means the image doesn't exist,
+		// not just the blob.
+		{
+			name:     "MANIFEST_UNKNOWN is not fallback",
+			err:      errcode.Error{Code: v2.ErrorCodeManifestUnknown, Message: "manifest unknown"},
+			expected: false,
+		},
+		// UnexpectedHTTPStatusError is not matched — for regular blobs, handleErrorResponse
+		// never produces it for 4xx.
+		{
+			name:     "UnexpectedHTTPStatusError 404 is not fallback",
+			err:      UnexpectedHTTPStatusError{StatusCode: 404, status: "404 Not Found"},
+			expected: false,
+		},
+		{
+			name:     "plain error",
+			err:      fmt.Errorf("something unrelated"),
+			expected: false,
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.expected, isMirrorFallbackError(c.err))
+		})
 	}
 }
 
