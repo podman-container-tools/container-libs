@@ -161,6 +161,9 @@ func (m *manifestSchema2) UpdatedImageNeedsLayerDiffIDs(options types.ManifestUp
 // if the CompressionOperation and CompressionAlgorithm specified in one or more
 // options.LayerInfos items is anything other than gzip.
 func (m *manifestSchema2) UpdatedImage(ctx context.Context, options types.ManifestUpdateOptions) (types.Image, error) {
+	if len(options.PrependLayers) > 0 || len(options.RemoveLayerIndices) > 0 {
+		return nil, errors.New("layer addition/removal is not supported for Docker schema2 manifests")
+	}
 	copy := manifestSchema2{ // NOTE: This is not a deep copy, it still shares slices etc.
 		src:        m.src,
 		configBlob: m.configBlob,

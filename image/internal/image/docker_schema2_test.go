@@ -519,6 +519,24 @@ func TestManifestSchema2UpdatedImage(t *testing.T) {
 	assert.Equal(t, *typedM2, *typedOriginal)
 }
 
+func TestManifestSchema2UpdatedImageLayerEditRejection(t *testing.T) {
+	originalSrc := newSchema2ImageSource(t, "httpd:latest")
+	original := manifestSchema2FromFixture(t, originalSrc, "schema2.json", false)
+
+	_, err := original.UpdatedImage(context.Background(), types.ManifestUpdateOptions{
+		PrependLayers: []types.PrependedLayerInfo{{
+			BlobInfo: types.BlobInfo{Digest: "sha256:aa", Size: 1, MediaType: "application/vnd.test"},
+			DiffID:   "sha256:bb",
+		}},
+	})
+	assert.Error(t, err)
+
+	_, err = original.UpdatedImage(context.Background(), types.ManifestUpdateOptions{
+		RemoveLayerIndices: []int{0},
+	})
+	assert.Error(t, err)
+}
+
 func TestConvertToManifestOCI(t *testing.T) {
 	originalSrc := newSchema2ImageSource(t, "httpd-copy:latest")
 	original := manifestSchema2FromFixture(t, originalSrc, "schema2.json", false)

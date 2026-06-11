@@ -2,6 +2,7 @@ package image
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/opencontainers/go-digest"
@@ -106,6 +107,9 @@ func (m *manifestSchema1) UpdatedImageNeedsLayerDiffIDs(options types.ManifestUp
 // UpdatedImage returns a types.Image modified according to options.
 // This does not change the state of the original Image object.
 func (m *manifestSchema1) UpdatedImage(ctx context.Context, options types.ManifestUpdateOptions) (types.Image, error) {
+	if len(options.PrependLayers) > 0 || len(options.RemoveLayerIndices) > 0 {
+		return nil, errors.New("layer addition/removal is not supported for Docker schema1 manifests")
+	}
 	copy := manifestSchema1{m: manifest.Schema1Clone(m.m)}
 
 	// We have 2 MIME types for schema 1, which are basically equivalent (even the un-"Signed" MIME type will be rejected if there isn’t a signature; so,
