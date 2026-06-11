@@ -96,6 +96,38 @@ var _ = Describe("IPAM", func() {
 		Expect(err.Error()).To(Equal("IPAM error: requested ip address 10.88.0.2 is already allocated to container ID someContainerID"))
 	})
 
+	It("ipam static ip matching gateway should fail", func() {
+		s, _ := types.ParseCIDR("10.0.0.1/24")
+		network, err := networkInterface.NetworkCreate(
+			types.Network{
+				Subnets: []types.Subnet{
+					{
+						Subnet: s,
+					},
+				},
+			},
+			nil,
+		)
+		Expect(err).ToNot(HaveOccurred())
+
+		netName := network.Name
+
+		// 10.0.0.1 is the gateway for this subnet — requesting it as a static IP should fail
+		opts := &types.NetworkOptions{
+			ContainerID: "someContainerID",
+			Networks: []types.NamedPerNetworkOptions{{
+				Name: netName,
+				PerNetworkOptions: types.PerNetworkOptions{
+					StaticIPs: []net.IP{net.ParseIP("10.0.0.1")},
+				},
+			}},
+		}
+
+		err = networkInterface.allocIPs(opts)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(Equal("IPAM error: address already in use: requested static IP 10.0.0.1 matches the subnet gateway"))
+	})
+
 	It("ipam try to alloc more ips as in range", func() {
 		s, _ := types.ParseCIDR("10.0.0.1/24")
 		network, err := networkInterface.NetworkCreate(
