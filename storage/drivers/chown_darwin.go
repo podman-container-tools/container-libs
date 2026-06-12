@@ -19,8 +19,9 @@ type inode struct {
 }
 
 type platformChowner struct {
-	mutex  sync.Mutex
-	inodes map[inode]bool
+	mutex               sync.Mutex
+	inodes              map[inode]bool
+	modifiedDirectories sync.Map
 }
 
 func newLChowner() *platformChowner {
@@ -102,7 +103,9 @@ func (c *platformChowner) LChown(path string, info os.FileInfo, toHost, toContai
 				return fmt.Errorf("%s: %w", os.Args[0], err)
 			}
 		}
-
+		if info.IsDir() {
+			c.modifiedDirectories.Store(path, struct{}{})
+		}
 	}
 	return nil
 }

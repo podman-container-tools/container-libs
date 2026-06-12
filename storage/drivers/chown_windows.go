@@ -4,12 +4,13 @@ package graphdriver
 
 import (
 	"os"
+	"sync"
 	"syscall"
 
 	"go.podman.io/storage/pkg/idtools"
 )
 
-type platformChowner struct{}
+type platformChowner struct{ modifiedDirectories sync.Map }
 
 func newLChowner() *platformChowner {
 	return &platformChowner{}

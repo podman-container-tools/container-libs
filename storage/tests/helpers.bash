@@ -22,7 +22,7 @@ function setup() {
 	rm -fr ${TESTDIR}
 	mkdir -p ${TESTDIR}/{root,runroot}
         # disable idmapped mounts in the overlay driver, since that
-        # is the expectation in the idmaps.bats tests.
+        # is the expectation in the chown.bats and idmaps.bats tests.
         export _CONTAINERS_OVERLAY_DISABLE_IDMAP=yes
 }
 

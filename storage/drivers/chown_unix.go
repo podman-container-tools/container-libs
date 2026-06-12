@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sync"
 	"syscall"
 
@@ -19,8 +20,9 @@ type inode struct {
 }
 
 type platformChowner struct {
-	mutex  sync.Mutex
-	inodes map[inode]string
+	mutex               sync.Mutex
+	inodes              map[inode]string
+	modifiedDirectories sync.Map
 }
 
 func newLChowner() *platformChowner {
@@ -60,11 +62,11 @@ func (c *platformChowner) LChown(path string, info os.FileInfo, toHost, toContai
 		// of chowning it again.  This is necessary when the underlying file system breaks
 		// inodes on copy-up (as it is with overlay with index=off) to maintain the original
 		// link and correct file ownership.
-
 		// The target already exists so remove it before creating the link to the new target.
 		if err := os.Remove(path); err != nil {
 			return err
 		}
+		c.modifiedDirectories.Store(filepath.Dir(path), struct{}{})
 		return os.Link(oldTarget, path)
 	}
 
@@ -120,7 +122,9 @@ func (c *platformChowner) LChown(path string, info os.FileInfo, toHost, toContai
 				return fmt.Errorf("%s: %w", os.Args[0], err)
 			}
 		}
-
+		if info.IsDir() {
+			c.modifiedDirectories.Store(path, struct{}{})
+		}
 	}
 	return nil
 }
