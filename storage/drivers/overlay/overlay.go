@@ -1107,8 +1107,14 @@ func (d *Driver) create(id, parent string, opts *graphdriver.CreateOpts, readOnl
 	defer func() {
 		// Clean up on failure
 		if retErr != nil {
+			if d.quotaCtl != nil && !disableQuota {
+				if err2 := d.quotaCtl.ReleaseQuota(dir); err2 != nil {
+					retErr = errors.Join(retErr, fmt.Errorf("releasing project quota for %q: %w", dir, err2))
+				}
+			}
 			if err2 := os.RemoveAll(dir); err2 != nil {
 				logrus.Errorf("While recovering from a failure creating a layer, error deleting %#v: %v", dir, err2)
+				retErr = errors.Join(retErr, fmt.Errorf("deleting %q after layer creation failure: %w", dir, err2))
 			}
 		}
 	}()
@@ -1403,14 +1409,14 @@ func (d *Driver) removeCommon(id string, cleanup func(string) error) error {
 
 	d.releaseAdditionalLayerByID(id)
 
+	if d.quotaCtl != nil {
+		if err := d.quotaCtl.ReleaseQuota(dir); err != nil {
+			return fmt.Errorf("releasing project quota for %q: %w", dir, err)
+		}
+	}
+
 	if err := cleanup(dir); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
-	}
-	if d.quotaCtl != nil {
-		d.quotaCtl.ClearQuota(dir)
-		if d.imageStore != "" {
-			d.quotaCtl.ClearQuota(d.imageStore)
-		}
 	}
 	return nil
 }

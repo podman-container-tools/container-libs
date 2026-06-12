@@ -230,18 +230,69 @@ func (q *Control) SetQuota(targetPath string, quota Quota) error {
 	return q.setProjectQuota(projectID, quota)
 }
 
+// ReleaseQuota clears the quota limits for targetPath's project ID and removes
+// targetPath from the quotas map.
+func (q *Control) ReleaseQuota(targetPath string) error {
+	projectID, ok, err := q.projectIDForPath(targetPath)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return nil
+	}
+
+	logrus.Debugf("ReleaseQuota path=%s, projectID=%d", targetPath, projectID)
+	if err := q.clearProjectQuota(projectID); err != nil {
+		return err
+	}
+	q.quotas.Delete(targetPath)
+	return nil
+}
+
 // ClearQuota removes the map entry in the quotas map for targetPath.
 // It does so to prevent the map leaking entries as directories are deleted.
+//
+// Deprecated: use ReleaseQuota to also clear the underlying project quota
+// limits.
 func (q *Control) ClearQuota(targetPath string) {
 	q.quotas.Delete(targetPath)
 }
 
-// setProjectQuota - set the quota for project id on xfs block device
-func (q *Control) setProjectQuota(projectID uint32, quota Quota) error {
+func (q *Control) projectIDForPath(targetPath string) (uint32, bool, error) {
+	value, ok := q.quotas.Load(targetPath)
+	if ok {
+		projectID, ok := value.(uint32)
+		if !ok {
+			return 0, false, fmt.Errorf("quota project ID for path %s has unexpected type %T", targetPath, value)
+		}
+		return projectID, true, nil
+	}
+
+	projectID, err := getProjectID(targetPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return 0, false, nil
+		}
+		return 0, false, err
+	}
+	if projectID == 0 {
+		return 0, false, nil
+	}
+	q.quotas.Store(targetPath, projectID)
+	return projectID, true, nil
+}
+
+func newDiskQuota(projectID uint32) C.fs_disk_quota_t {
 	var d C.fs_disk_quota_t
 	d.d_version = C.FS_DQUOT_VERSION
 	d.d_id = C.__u32(projectID)
 	d.d_flags = C.FS_PROJ_QUOTA
+	return d
+}
+
+// setProjectQuota - set the quota for project id on xfs block device
+func (q *Control) setProjectQuota(projectID uint32, quota Quota) error {
+	d := newDiskQuota(projectID)
 
 	if quota.Size > 0 {
 		d.d_fieldmask = d.d_fieldmask | C.FS_DQ_BHARD | C.FS_DQ_BSOFT
@@ -254,6 +305,17 @@ func (q *Control) setProjectQuota(projectID uint32, quota Quota) error {
 		d.d_ino_softlimit = d.d_ino_hardlimit
 	}
 
+	return q.applyProjectQuota(projectID, d)
+}
+
+func (q *Control) clearProjectQuota(projectID uint32) error {
+	d := newDiskQuota(projectID)
+	d.d_fieldmask = d.d_fieldmask | C.FS_DQ_BHARD | C.FS_DQ_BSOFT | C.FS_DQ_IHARD | C.FS_DQ_ISOFT
+
+	return q.applyProjectQuota(projectID, d)
+}
+
+func (q *Control) applyProjectQuota(projectID uint32, d C.fs_disk_quota_t) error {
 	cs := C.CString(q.backingFsBlockDev)
 	defer C.free(unsafe.Pointer(cs))
 
@@ -270,18 +332,18 @@ func (q *Control) setProjectQuota(projectID uint32, quota Quota) error {
 	if errors.Is(errno, unix.ENOENT) {
 		if _, err := makeBackingFsDev(q.basePath); err != nil {
 			return fmt.Errorf(
-				"failed to recreate missing backingFsBlockDev %s for projid %d: %w",
+				"failed to recreate missing backingFsBlockDev %s to apply quota limit for projid %d: %w",
 				q.backingFsBlockDev, projectID, err,
 			)
 		}
 
 		if errno := runQuotactl(); errno != 0 {
-			return fmt.Errorf("failed to set quota limit for projid %d on %s after backingFsBlockDev recreation: %w",
+			return fmt.Errorf("failed to apply quota limit for projid %d on %s after backingFsBlockDev recreation: %w",
 				projectID, q.backingFsBlockDev, errno)
 		}
 
 	} else if errno != 0 {
-		return fmt.Errorf("failed to set quota limit for projid %d on %s: %w",
+		return fmt.Errorf("failed to apply quota limit for projid %d on %s: %w",
 			projectID, q.backingFsBlockDev, errno)
 	}
 
