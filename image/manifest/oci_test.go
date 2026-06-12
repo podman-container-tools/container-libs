@@ -9,6 +9,7 @@ import (
 	imgspecv1 "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	internalManifest "go.podman.io/image/v5/internal/manifest"
 	"go.podman.io/image/v5/pkg/compression"
 	"go.podman.io/image/v5/types"
 )
@@ -405,9 +406,13 @@ func TestOCI1CanChangeLayerCompression(t *testing.T) {
 	m := manifestOCI1FromFixture(t, "ociv1.manifest.json")
 
 	assert.True(t, m.CanChangeLayerCompression(imgspecv1.MediaTypeImageLayerGzip))
-	// Some projects like to use squashfs and other unspecified formats for layers; don’t touch those.
+	// Some projects like to use squashfs and other unspecified formats for layers; don't touch those.
 	assert.False(t, m.CanChangeLayerCompression("a completely unknown and quite possibly invalid MIME type"))
 
 	artifact := manifestOCI1FromFixture(t, "ociv1.artifact.json")
 	assert.False(t, artifact.CanChangeLayerCompression(imgspecv1.MediaTypeImageLayerGzip))
+
+	// Nydus layer types don't support compression changes
+	assert.False(t, m.CanChangeLayerCompression(internalManifest.NydusBootstrapLayerMediaType))
+	assert.False(t, m.CanChangeLayerCompression(internalManifest.NydusBlobLayerMediaType))
 }

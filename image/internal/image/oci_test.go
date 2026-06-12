@@ -17,6 +17,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.podman.io/image/v5/docker/reference"
+	internalManifest "go.podman.io/image/v5/internal/manifest"
 	"go.podman.io/image/v5/internal/testing/mocks"
 	"go.podman.io/image/v5/manifest"
 	"go.podman.io/image/v5/pkg/compression"
@@ -884,8 +885,9 @@ func TestManifestOCI1CanChangeLayerCompression(t *testing.T) {
 		manifestOCI1FromComponentsLikeFixture(nil),
 	} {
 		assert.True(t, m.CanChangeLayerCompression(imgspecv1.MediaTypeImageLayerGzip))
-		// Some projects like to use squashfs and other unspecified formats for layers; don’t touch those.
 		assert.False(t, m.CanChangeLayerCompression("a completely unknown and quite possibly invalid MIME type"))
+		assert.False(t, m.CanChangeLayerCompression(internalManifest.NydusBootstrapLayerMediaType))
+		assert.False(t, m.CanChangeLayerCompression(internalManifest.NydusBlobLayerMediaType))
 	}
 
 	artifact := manifestOCI1FromFixture(t, mocks.ForbiddenImageSource{}, "oci1-artifact.json")
