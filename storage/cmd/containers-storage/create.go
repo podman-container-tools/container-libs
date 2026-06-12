@@ -122,7 +122,12 @@ func createLayer(flags *mflag.FlagSet, action string, m storage.Store, args []st
 	if err != nil {
 		return 1, err
 	}
-	options := &storage.LayerOptions{IDMappingOptions: *mappings}
+	options := &storage.LayerOptions{IDMappingOptions: storage.LayerIDMappingOptions{
+		HostUIDMapping: mappings.HostUIDMapping,
+		HostGIDMapping: mappings.HostGIDMapping,
+		UIDMap:         mappings.UIDMap,
+		GIDMap:         mappings.GIDMap,
+	}}
 	layer, err := m.CreateLayer(paramID, parent, paramNames, paramMountLabel, !paramCreateRO, options)
 	if err != nil {
 		return 1, err
@@ -155,7 +160,12 @@ func importLayer(flags *mflag.FlagSet, action string, m storage.Store, args []st
 	if err != nil {
 		return 1, err
 	}
-	options := &storage.LayerOptions{IDMappingOptions: *mappings}
+	options := &storage.LayerOptions{IDMappingOptions: storage.LayerIDMappingOptions{
+		HostUIDMapping: mappings.HostUIDMapping,
+		HostGIDMapping: mappings.HostGIDMapping,
+		UIDMap:         mappings.UIDMap,
+		GIDMap:         mappings.GIDMap,
+	}}
 	layer, _, err := m.PutLayer(paramID, parent, paramNames, paramMountLabel, !paramCreateRO, options, diffStream)
 	if err != nil {
 		return 1, err
