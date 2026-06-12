@@ -484,3 +484,58 @@ func TestIsManifestUnknownError(t *testing.T) {
 		assert.True(t, res, "%s: %#v", c.name, err)
 	}
 }
+
+func TestResolveRequestURLWithNamespaceProxy(t *testing.T) {
+	for _, c := range []struct {
+		name           string
+		registry       string
+		scheme         string
+		path           string
+		namespaceProxy string
+		expected       string
+	}{
+		{
+			name:           "no namespace proxy",
+			registry:       "registry.example.com",
+			scheme:         "https",
+			path:           "/v2/library/nginx/manifests/latest",
+			namespaceProxy: "",
+			expected:       "https://registry.example.com/v2/library/nginx/manifests/latest",
+		},
+		{
+			name:           "with namespace proxy for docker.io",
+			registry:       "proxy.example.com",
+			scheme:         "https",
+			path:           "/v2/library/nginx/manifests/latest",
+			namespaceProxy: "docker.io",
+			expected:       "https://proxy.example.com/v2/library/nginx/manifests/latest?ns=docker.io",
+		},
+		{
+			name:           "with namespace proxy for quay.io",
+			registry:       "proxy.example.com",
+			scheme:         "https",
+			path:           "/v2/coreos/etcd/blobs/sha256:abc123",
+			namespaceProxy: "quay.io",
+			expected:       "https://proxy.example.com/v2/coreos/etcd/blobs/sha256:abc123?ns=quay.io",
+		},
+		{
+			name:           "with namespace proxy and port",
+			registry:       "proxy.example.com:5000",
+			scheme:         "http",
+			path:           "/v2/myimage/manifests/v1.0",
+			namespaceProxy: "gcr.io",
+			expected:       "http://proxy.example.com:5000/v2/myimage/manifests/v1.0?ns=gcr.io",
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			client := &dockerClient{
+				registry:       c.registry,
+				scheme:         c.scheme,
+				namespaceProxy: c.namespaceProxy,
+			}
+			result, err := client.resolveRequestURL(c.path)
+			require.NoError(t, err)
+			assert.Equal(t, c.expected, result.String())
+		})
+	}
+}
