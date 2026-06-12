@@ -38,6 +38,13 @@ func TestSupportedOCI1MediaType(t *testing.T) {
 		{imgspecv1.MediaTypeImageLayerZstd, false},
 		{imgspecv1.MediaTypeImageManifest, false},
 		{imgspecv1.MediaTypeLayoutHeader, false},
+		{"application/vnd.wasm.content.layer.v1", false},
+		{"application/vnd.wasm.content.layer.v1+gzip", false},
+		{"application/vnd.wasm.content.layer.v1+zstd", false},
+		{"application/vnd.wasm.content.layer.v1+encrypted", false},
+		{"application/vnd.wasm.content.layer.v1+gzip+encrypted", false},
+		{"application/vnd.wasm.content.layer.v1+zstd+encrypted", false},
+		{"application/vnd.wasm.config.v1+json", false},
 		{"application/vnd.oci.image.layer.nondistributable.v1.tar+unknown", true},
 	}
 	for _, d := range data {

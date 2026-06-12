@@ -34,6 +34,10 @@ const (
 	DockerV2Schema2ForeignLayerMediaType = "application/vnd.docker.image.rootfs.foreign.diff.tar"
 	// DockerV2Schema2ForeignLayerMediaTypeGzip is the MIME type used for gzipped schema 2 foreign layers.
 	DockerV2Schema2ForeignLayerMediaTypeGzip = "application/vnd.docker.image.rootfs.foreign.diff.tar.gzip"
+	// WasmContentLayerMediaType is the MIME type used for WASM content layers.
+	WasmContentLayerMediaType = "application/vnd.wasm.content.layer.v1"
+	// WasmConfigMediaType is the MIME type used for WASM config blobs.
+	WasmConfigMediaType = "application/vnd.wasm.config.v1+json"
 )
 
 // GuessMIMEType guesses MIME type of a manifest and returns it _if it is recognized_, or "" if unknown or unrecognized.
