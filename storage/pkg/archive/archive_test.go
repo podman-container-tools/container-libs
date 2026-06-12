@@ -885,6 +885,13 @@ func TestUntarInvalidFilenames(t *testing.T) {
 				Mode:     0o644,
 			},
 		},
+		{ // prefix collision (dest vs destx)
+			{
+				Name:     "../destx/outside",
+				Typeflag: tar.TypeReg,
+				Mode:     0o644,
+			},
+		},
 	} {
 		if err := testBreakout(t, "untar", headers); err != nil {
 			t.Fatalf("i=%d. %v", i, err)
@@ -935,6 +942,14 @@ func TestUntarInvalidHardlink(t *testing.T) {
 				Name:     "dotdot",
 				Typeflag: tar.TypeLink,
 				Linkname: "../victim/hello",
+				Mode:     0o644,
+			},
+		},
+		{ // prefix collision (dest vs destx)
+			{
+				Name:     "prefix-collision",
+				Typeflag: tar.TypeLink,
+				Linkname: "../destx/hello",
 				Mode:     0o644,
 			},
 		},
@@ -1019,6 +1034,22 @@ func TestUntarInvalidSymlink(t *testing.T) {
 				Name:     "dotdot",
 				Typeflag: tar.TypeSymlink,
 				Linkname: "../victim/hello",
+				Mode:     0o644,
+			},
+		},
+		{ // try escaping to parent (..)
+			{
+				Name:     "parent",
+				Typeflag: tar.TypeSymlink,
+				Linkname: "..",
+				Mode:     0o644,
+			},
+		},
+		{ // prefix collision (dest vs destx)
+			{
+				Name:     "link",
+				Typeflag: tar.TypeSymlink,
+				Linkname: "../destx/hello",
 				Mode:     0o644,
 			},
 		},
