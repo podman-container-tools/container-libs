@@ -6,6 +6,7 @@ module go.podman.io/storage
 
 require (
 	github.com/BurntSushi/toml v1.6.0
+	github.com/bootc-dev/jsonrpc-fdpass-go v0.0.0-20260415021005-8c14abba964b
 	github.com/containerd/stargz-snapshotter/estargz v0.18.2
 	github.com/cyphar/filepath-securejoin v0.6.1
 	github.com/docker/go-units v0.5.0
@@ -19,6 +20,7 @@ require (
 	github.com/moby/sys/mountinfo v0.7.2
 	github.com/moby/sys/user v0.4.0
 	github.com/opencontainers/go-digest v1.0.0
+	github.com/opencontainers/image-spec v1.1.1
 	github.com/opencontainers/runtime-spec v1.3.0
 	github.com/opencontainers/selinux v1.15.1
 	github.com/sirupsen/logrus v1.9.4

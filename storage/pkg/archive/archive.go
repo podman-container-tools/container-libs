@@ -79,6 +79,11 @@ const (
 	tarExt  = "tar"
 	windows = "windows"
 	darwin  = "darwin"
+
+	// copyBufferSize is the buffer size used for reading file content
+	// during archive extraction and splitfdstream operations.  1 MiB
+	// balances syscall overhead against memory usage.
+	copyBufferSize = 1 << 20
 )
 
 var xattrsToIgnore = map[string]any{
@@ -702,7 +707,7 @@ func (ta *tarWriter) addFile(headers *addFileData) error {
 	return nil
 }
 
-func extractTarFileEntry(path, extractDir string, hdr *tar.Header, reader io.Reader, Lchown bool, chownOpts *idtools.IDPair, inUserns, ignoreChownErrors bool, forceMask *os.FileMode, buffer []byte) error {
+func extractTarFileEntry(path, extractDir string, hdr *tar.Header, writeContent func(*os.File) error, Lchown bool, chownOpts *idtools.IDPair, inUserns, ignoreChownErrors bool, forceMask *os.FileMode) error {
 	// hdr.Mode is in linux format, which we can use for sycalls,
 	// but for os.Foo() calls we need the mode converted to os.FileMode,
 	// so use hdrInfo.Mode() (they differ for e.g. setuid bits)
@@ -739,9 +744,11 @@ func extractTarFileEntry(path, extractDir string, hdr *tar.Header, reader io.Rea
 		if err != nil {
 			return err
 		}
-		if _, err := io.CopyBuffer(file, reader, buffer); err != nil {
-			file.Close()
-			return err
+		if writeContent != nil {
+			if err := writeContent(file); err != nil {
+				file.Close()
+				return err
+			}
 		}
 		if err := file.Close(); err != nil {
 			return err
@@ -1085,17 +1092,67 @@ func TarWithOptions(srcPath string, options *TarOptions) (io.ReadCloser, error) 
 	return pipeReader, nil
 }
 
-// Unpack unpacks the decompressedArchive to dest with options.
-func Unpack(decompressedArchive io.Reader, dest string, options *TarOptions) error {
+// TarEntryIterator abstracts iteration over tar entries.
+// Standard implementation wraps tar.Reader; splitfdstream provides
+// entries from its chunk-based format with reflink support.
+type TarEntryIterator interface {
+	// Next advances to the next entry and returns its header.
+	Next() (*tar.Header, error)
+	// WriteContentTo writes the current entry's file content to dst.
+	// Called for TypeReg entries (including zero-size files).
+	WriteContentTo(dst *os.File) error
+}
+
+// tarReaderIterator implements TarEntryIterator for a standard tar.Reader.
+type tarReaderIterator struct {
+	tr     *tar.Reader
+	trBuf  *bufio.Reader
+	buffer []byte
+}
+
+func newTarReaderIterator(decompressedArchive io.Reader) *tarReaderIterator {
 	tr := tar.NewReader(decompressedArchive)
 	trBuf := pools.BufioReader32KPool.Get(nil)
-	defer pools.BufioReader32KPool.Put(trBuf)
+	return &tarReaderIterator{
+		tr:     tr,
+		trBuf:  trBuf,
+		buffer: make([]byte, copyBufferSize),
+	}
+}
 
+func (i *tarReaderIterator) Next() (*tar.Header, error) {
+	hdr, err := i.tr.Next()
+	if err != nil {
+		return nil, err
+	}
+	i.trBuf.Reset(i.tr)
+	return hdr, nil
+}
+
+func (i *tarReaderIterator) WriteContentTo(dst *os.File) error {
+	_, err := io.CopyBuffer(dst, i.trBuf, i.buffer)
+	return err
+}
+
+func (i *tarReaderIterator) close() {
+	pools.BufioReader32KPool.Put(i.trBuf)
+}
+
+// Unpack unpacks the decompressedArchive to dest with options.
+func Unpack(decompressedArchive io.Reader, dest string, options *TarOptions) error {
+	iter := newTarReaderIterator(decompressedArchive)
+	defer iter.close()
+	return UnpackFromIterator(iter, dest, options)
+}
+
+// UnpackFromIterator unpacks tar entries from the given iterator to dest with options.
+// This allows plugging in alternative sources of tar entries (e.g., splitfdstream)
+// while reusing the full extraction logic including xattrs, whiteouts, device nodes, etc.
+func UnpackFromIterator(iter TarEntryIterator, dest string, options *TarOptions) error {
 	var dirs []*tar.Header
 	idMappings := idtools.NewIDMappingsFromMaps(options.UIDMaps, options.GIDMaps)
 	rootIDs := idMappings.RootPair()
 	whiteoutConverter := GetWhiteoutConverter(options.WhiteoutFormat, options.WhiteoutData)
-	buffer := make([]byte, 1<<20)
 
 	doChown := !options.NoLchown
 	if options.ForceMask != nil {
@@ -1107,7 +1164,7 @@ func Unpack(decompressedArchive io.Reader, dest string, options *TarOptions) err
 	// Iterate through the files in the archive.
 loop:
 	for {
-		hdr, err := tr.Next()
+		hdr, err := iter.Next()
 		if err == io.EOF {
 			// end of tar archive
 			break
@@ -1181,7 +1238,6 @@ loop:
 				}
 			}
 		}
-		trBuf.Reset(tr)
 
 		chownOpts := options.ChownOpts
 		if err := remapIDs(nil, idMappings, chownOpts, hdr); err != nil {
@@ -1202,7 +1258,10 @@ loop:
 			chownOpts = &idtools.IDPair{UID: hdr.Uid, GID: hdr.Gid}
 		}
 
-		if err = extractTarFileEntry(path, dest, hdr, trBuf, doChown, chownOpts, options.InUserNS, options.IgnoreChownErrors, options.ForceMask, buffer); err != nil {
+		writeContent := func(dst *os.File) error {
+			return iter.WriteContentTo(dst)
+		}
+		if err = extractTarFileEntry(path, dest, hdr, writeContent, doChown, chownOpts, options.InUserNS, options.IgnoreChownErrors, options.ForceMask); err != nil {
 			return err
 		}
 

@@ -3,12 +3,14 @@
 package jsonproxy_test
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -555,4 +557,129 @@ func TestProxyPolicyVerification(t *testing.T) {
 			require.NoError(t, err)
 		})
 	}
+}
+
+// newProxyWithStore spawns the test binary with a local containers-storage
+// store seeded with the given image. It returns the proxy and the
+// containers-storage:// reference string for the seeded image.
+func newProxyWithStore(t *testing.T, seedImage string) (*proxy, string) {
+	t.Helper()
+
+	proxyBinary := os.Getenv("JSON_PROXY_TEST_BINARY")
+	if proxyBinary == "" {
+		t.Skip("JSON_PROXY_TEST_BINARY is not set; skipping integration test")
+	}
+
+	wd := t.TempDir()
+	graphRoot := filepath.Join(wd, "root")
+	runRoot := filepath.Join(wd, "run")
+
+	fds, err := syscall.Socketpair(syscall.AF_LOCAL, syscall.SOCK_SEQPACKET, 0)
+	require.NoError(t, err)
+	myfd := os.NewFile(uintptr(fds[0]), "myfd")
+	defer myfd.Close()
+	theirfd := os.NewFile(uintptr(fds[1]), "theirfd")
+	defer theirfd.Close()
+
+	mysock, err := net.FileConn(myfd)
+	require.NoError(t, err)
+	unixConn, ok := mysock.(*net.UnixConn)
+	require.True(t, ok, "expected *net.UnixConn, got %T", mysock)
+
+	proc := exec.Command(proxyBinary, //nolint:gosec
+		"--sockfd", "3",
+		"--graph-root", graphRoot,
+		"--run-root", runRoot,
+		"--seed-image", seedImage,
+	)
+	proc.Stderr = os.Stderr
+	proc.ExtraFiles = append(proc.ExtraFiles, theirfd)
+
+	stdoutPipe, err := proc.StdoutPipe()
+	require.NoError(t, err)
+
+	err = proc.Start()
+	require.NoError(t, err)
+
+	// Read the containers-storage reference from stdout.
+	scanner := bufio.NewScanner(stdoutPipe)
+	require.True(t, scanner.Scan(), "expected storage reference on stdout")
+	storageRef := strings.TrimSpace(scanner.Text())
+	require.True(t, strings.HasPrefix(storageRef, "containers-storage:"), "unexpected ref: %s", storageRef)
+
+	p := &proxy{
+		c:    unixConn,
+		proc: proc,
+	}
+	t.Cleanup(p.close)
+
+	v, err := p.callNoFd("Initialize", nil)
+	require.NoError(t, err)
+	semver, ok := v.(string)
+	require.True(t, ok, "proxy Initialize: Unexpected value %T", v)
+	require.True(t, strings.HasPrefix(semver, expectedProxySemverMajor), "Unexpected semver %s", semver)
+
+	return p, storageRef
+}
+
+func TestOpenJSONRPCFdPass(t *testing.T) {
+	p, storageRef := newProxyWithStore(t, knownListImage)
+
+	// Open the containers-storage image to trigger auto-discovery.
+	imgidVal, err := p.callNoFd("OpenImage", []any{storageRef})
+	require.NoError(t, err)
+	imgid, ok := imgidVal.(float64)
+	require.True(t, ok)
+	require.NotZero(t, imgid)
+
+	// OpenJSONRPCFdPass should return a valid FD.
+	_, fd, err := p.call("OpenJSONRPCFdPass", nil)
+	require.NoError(t, err)
+	require.NotNil(t, fd, "expected an FD from OpenJSONRPCFdPass")
+
+	// Verify the received FD is a unix socket.
+	var stat syscall.Stat_t
+	err = syscall.Fstat(int(fd.datafd.Fd()), &stat)
+	require.NoError(t, err)
+	require.True(t, stat.Mode&syscall.S_IFMT == syscall.S_IFSOCK, "expected socket, got mode %o", stat.Mode)
+
+	// Validate the socket speaks the splitfdstream jsonrpc-fdpass protocol.
+	// Send a JSON-RPC request for a bogus method and expect a method-not-found error.
+	conn, err := net.FileConn(fd.datafd)
+	fd.datafd.Close()
+	require.NoError(t, err)
+	unixSock, ok := conn.(*net.UnixConn)
+	require.True(t, ok)
+	defer unixSock.Close()
+
+	rpcReq := []byte("{\"jsonrpc\":\"2.0\",\"method\":\"NoSuchMethod\",\"id\":1}\n")
+	_, err = unixSock.Write(rpcReq)
+	require.NoError(t, err)
+
+	respBuf := make([]byte, 4096)
+	n, err := unixSock.Read(respBuf)
+	require.NoError(t, err)
+	var rpcResp map[string]any
+	err = json.Unmarshal(respBuf[:n], &rpcResp)
+	require.NoError(t, err)
+	// A valid JSON-RPC server returns an error object for unknown methods.
+	rpcErr, ok := rpcResp["error"].(map[string]any)
+	require.True(t, ok, "expected JSON-RPC error object, got %v", rpcResp)
+	require.Contains(t, rpcErr["message"], "not found")
+
+	_, err = p.callNoFd("CloseImage", []any{imgid})
+	require.NoError(t, err)
+}
+
+func TestOpenJSONRPCFdPassNotAvailable(t *testing.T) {
+	p := newProxy(t)
+
+	// Open a docker:// image (no splitfdstream support).
+	_, err := p.callNoFd("OpenImage", []any{knownNotManifestListedImageX8664})
+	require.NoError(t, err)
+
+	// OpenJSONRPCFdPass should fail since no containers-storage source was opened.
+	_, _, err = p.call("OpenJSONRPCFdPass", nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "splitfdstream store not configured")
 }
