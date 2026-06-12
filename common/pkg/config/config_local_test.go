@@ -664,4 +664,15 @@ var _ = Describe("Config Local", func() {
 		// Then
 		gomega.Expect(err).To(gomega.HaveOccurred())
 	})
+	It("should parse env_merge from config file", func() {
+		// Given
+		config, err := newLocked(&Options{}, testConfigPath(""))
+		gomega.Expect(err).ToNot(gomega.HaveOccurred())
+		gomega.Expect(config.Containers.EnvMerge.Get()).To(gomega.BeEmpty())
+		// When
+		config2, err := newLocked(&Options{}, testConfigPath("testdata/containers_default.conf"))
+		// Then
+		gomega.Expect(err).ToNot(gomega.HaveOccurred())
+		gomega.Expect(config2.Containers.EnvMerge.Get()).To(gomega.Equal([]string{"FOO=bar"}))
+	})
 })

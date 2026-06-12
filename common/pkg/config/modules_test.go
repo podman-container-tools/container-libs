@@ -57,6 +57,11 @@ var _ = Describe("Config Modules", func() {
 		gomega.Expect(err).ToNot(gomega.HaveOccurred())
 		gomega.Expect(c.Containers.InitPath).To(gomega.Equal("etc four"))
 		gomega.Expect(c.Containers.Env.Get()).To(gomega.Equal([]string{"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "usr share only"}))
+		gomega.Expect(c.Containers.EnvMerge.Get()).To(gomega.Equal([]string{
+			"PATH=/base/bin:${PATH}",
+			"PATH=/usr/local/share/bin:${PATH}",
+			"etc only env_merge conf",
+		}))
 		gomega.Expect(c.Network.DefaultNetwork).To(gomega.Equal("etc only conf"))
 		gomega.Expect(c.LoadedModules()).To(gomega.HaveLen(3)) // 3 modules are getting loaded!
 
