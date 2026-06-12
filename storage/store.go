@@ -1,7 +1,6 @@
 package storage
 
 import (
-	_ "embed"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -35,6 +34,7 @@ import (
 	"go.podman.io/storage/pkg/stringutils"
 	"go.podman.io/storage/pkg/system"
 	"go.podman.io/storage/types"
+	"go.podman.io/storage/version"
 )
 
 type updateNameOperation int
@@ -2960,8 +2960,7 @@ func (s *store) Status() ([][2]string, error) {
 	return rlstore.Status()
 }
 
-//go:embed VERSION
-var storageVersion string
+var storageVersion = version.Version
 
 func (s *store) Version() ([][2]string, error) {
 	if trimmedVersion := strings.TrimSpace(storageVersion); trimmedVersion != "" {
