@@ -40,6 +40,75 @@ func TestReferenceDeleteImage_onlyOneImage(t *testing.T) {
 	require.Equal(t, 0, len(index.Manifests))
 }
 
+func TestReferenceDeleteImage_onlyOneImageWithSignature(t *testing.T) {
+	tmpDir := loadFixture(t, "delete_image_with_signature")
+
+	ref, err := NewReference(tmpDir, "latest")
+	require.NoError(t, err)
+
+	ociRef, ok := ref.(ociReference)
+	require.True(t, ok)
+	index, err := ociRef.getIndex()
+	require.NoError(t, err)
+	require.Equal(t, 2, len(index.Manifests))
+
+	err = ref.DeleteImage(context.Background(), nil)
+	require.NoError(t, err)
+
+	// Check that all blobs were deleted
+	blobsDir := filepath.Join(tmpDir, "blobs")
+	files, err := os.ReadDir(filepath.Join(blobsDir, "sha256"))
+	require.NoError(t, err)
+	require.Empty(t, files)
+
+	// Check that the index is empty as there is only one image in the fixture
+	index, err = ociRef.getIndex()
+	require.NoError(t, err)
+	require.Equal(t, 0, len(index.Manifests))
+}
+
+func TestReferenceDeleteImage_multipleImageWithSignature(t *testing.T) {
+	tmpDir := loadFixture(t, "delete_image_multiple_images_with_single_signature")
+
+	ref, err := NewReference(tmpDir, "latest")
+	require.NoError(t, err)
+
+	ociRef, ok := ref.(ociReference)
+	require.True(t, ok)
+	index, err := ociRef.getIndex()
+	require.NoError(t, err)
+	require.Equal(t, 3, len(index.Manifests))
+
+	err = ref.DeleteImage(context.Background(), nil)
+	require.NoError(t, err)
+
+	// Check that the index is empty as there is only one image in the fixture
+	index, err = ociRef.getIndex()
+	require.NoError(t, err)
+	require.Equal(t, 2, len(index.Manifests))
+}
+
+func TestReferenceDeleteImage_indexWithMultipleSignatures(t *testing.T) {
+	tmpDir := loadFixture(t, "delete_image_index_with_multiple_signatures")
+
+	ref, err := NewReference(tmpDir, "latest")
+	require.NoError(t, err)
+
+	ociRef, ok := ref.(ociReference)
+	require.True(t, ok)
+	index, err := ociRef.getIndex()
+	require.NoError(t, err)
+	require.Equal(t, 3, len(index.Manifests))
+
+	err = ref.DeleteImage(context.Background(), nil)
+	require.NoError(t, err)
+
+	// Check that the index is empty as there is only one image in the fixture
+	index, err = ociRef.getIndex()
+	require.NoError(t, err)
+	require.Equal(t, 0, len(index.Manifests))
+}
+
 func TestReferenceDeleteImage_onlyOneImage_emptyImageName(t *testing.T) {
 	tmpDir := loadFixture(t, "delete_image_only_one_image")
 

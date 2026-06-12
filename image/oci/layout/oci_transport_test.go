@@ -104,6 +104,40 @@ func TestGetManifestDescriptor(t *testing.T) {
 			image:              "invalid-mime",
 			expectedDescriptor: nil,
 		},
+		{ // Directory with an image with a signature should return only an image, not a signature
+			dir:   "fixtures/signature_single_image",
+			image: "",
+			expectedDescriptor: &imgspecv1.Descriptor{
+				MediaType: "application/vnd.oci.image.manifest.v1+json",
+				Digest:    "sha256:eaa95f3cfaac07c8a5153eb77c933269586ad0226c83405776be08547e4d2a18",
+				Size:      476,
+				Annotations: map[string]string{
+					"org.opencontainers.image.ref.name": "latest",
+				},
+			},
+		},
+		{ // Directory with only a signature should return a signature
+			dir:   "fixtures/signature_only_single_signature",
+			image: "",
+			expectedDescriptor: &imgspecv1.Descriptor{
+				MediaType: "application/vnd.oci.image.manifest.v1+json",
+				Digest:    "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+				Size:      704,
+				Annotations: map[string]string{
+					"org.opencontainers.image.ref.name": "sha256-eaa95f3cfaac07c8a5153eb77c933269586ad0226c83405776be08547e4d2a18.sig",
+				},
+			},
+		},
+		{ // Directory with multiple images should return an error
+			dir:     "fixtures/signature_multiple_images",
+			image:   "",
+			errorIs: ErrMoreThanOneImage,
+		},
+		{ // Directory with only multiple signatures should return an error
+			dir:     "fixtures/signature_only_multiple_signatures",
+			image:   "",
+			errorIs: ErrMoreThanOneImage,
+		},
 	} {
 		ref, err := NewReference(c.dir, c.image)
 		require.NoError(t, err)
