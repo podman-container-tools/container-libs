@@ -68,7 +68,7 @@ Summary: Extra dependencies for Podman and Buildah
 Requires: %{name} = %{epoch}:%{version}-%{release}
 Requires: container-network-stack
 Requires: oci-runtime
-Requires: passt
+Requires: passt >= 0:0^20260526.g038c51e
 %if %{defined fedora}
 Recommends: composefs
 Recommends: crun
