@@ -2,6 +2,7 @@ package manifest
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"maps"
@@ -12,6 +13,7 @@ import (
 	"github.com/opencontainers/go-digest"
 	imgspec "github.com/opencontainers/image-spec/specs-go"
 	imgspecv1 "github.com/opencontainers/image-spec/specs-go/v1"
+	"github.com/sirupsen/logrus"
 	platform "go.podman.io/image/v5/internal/pkg/platform"
 	compression "go.podman.io/image/v5/pkg/compression/types"
 	"go.podman.io/image/v5/types"
@@ -26,6 +28,12 @@ const (
 	// use gzip, depending on their local policy.
 	OCI1InstanceAnnotationCompressionZSTD      = "io.github.containers.compression.zstd"
 	OCI1InstanceAnnotationCompressionZSTDValue = "true"
+
+	// OCI1InstanceAnnotationZstdChunkedSentinel is an annotation name that can be placed on a manifest descriptor
+	// in an OCI index. The value must be "true". It signals that the manifest contains a sentinel layer
+	// prepended to its layers, indicating that aware clients can skip the zstd:chunked full-digest mitigation.
+	OCI1InstanceAnnotationZstdChunkedSentinel      = "io.github.containers.zstd-chunked.sentinel"
+	OCI1InstanceAnnotationZstdChunkedSentinelValue = "true"
 )
 
 // OCI1IndexPublic is just an alias for the OCI index type, but one which we can
@@ -192,18 +200,7 @@ func (index *OCI1IndexPublic) editInstances(editInstances []ListEdit, cannotModi
 	}
 	if len(addedEntries) != 0 || updatedAnnotations {
 		slices.SortStableFunc(index.Manifests, func(a, b imgspecv1.Descriptor) int {
-			// FIXME? With Go 1.21 and cmp.Compare available, turn instanceIsZstd into an integer score that can be compared, and generalizes
-			// into more algorithms?
-			aZstd := instanceIsZstd(a)
-			bZstd := instanceIsZstd(b)
-			switch {
-			case aZstd == bZstd:
-				return 0
-			case !aZstd: // Implies bZstd
-				return -1
-			default: // aZstd && !bZstd
-				return 1
-			}
+			return cmp.Compare(instanceSortScore(a), instanceSortScore(b))
 		})
 	}
 	return nil
@@ -223,9 +220,30 @@ func instanceIsZstd(manifest imgspecv1.Descriptor) bool {
 	return false
 }
 
+// instanceHasSentinel returns true if instance has the zstd:chunked sentinel annotation.
+// Note: This checks the index-level annotation used for instance selection.
+// Actual sentinel layer presence is verified by FilterLayers at pull time.
+func instanceHasSentinel(manifest imgspecv1.Descriptor) bool {
+	return manifest.Annotations[OCI1InstanceAnnotationZstdChunkedSentinel] == OCI1InstanceAnnotationZstdChunkedSentinelValue
+}
+
+// instanceSortScore returns a sorting score for manifest index ordering:
+// 0 = plain (gzip), 1 = zstd, 2 = zstd:chunked sentinel.
+// Lower scores sort first in the index.
+func instanceSortScore(d imgspecv1.Descriptor) int {
+	if instanceHasSentinel(d) {
+		return 2
+	}
+	if instanceIsZstd(d) {
+		return 1
+	}
+	return 0
+}
+
 type instanceCandidate struct {
 	platformIndex    int           // Index of the candidate in platform.WantedPlatforms: lower numbers are preferred; or math.maxInt if the candidate doesn’t have a platform
 	isZstd           bool          // tells if particular instance if zstd instance
+	hasSentinel      bool          // tells if particular instance has the zstd:chunked sentinel layer
 	manifestPosition int           // A zero-based index of the instance in the manifest list
 	digest           digest.Digest // Instance digest
 }
@@ -240,6 +258,8 @@ func (ic instanceCandidate) isPreferredOver(other *instanceCandidate, preferGzip
 		} else {
 			return !ic.isZstd
 		}
+	case ic.hasSentinel != other.hasSentinel:
+		return ic.hasSentinel
 	case ic.manifestPosition != other.manifestPosition:
 		return ic.manifestPosition < other.manifestPosition
 	}
@@ -253,7 +273,7 @@ func (index *OCI1IndexPublic) chooseInstance(ctx *types.SystemContext, preferGzi
 	var bestMatch *instanceCandidate
 	bestMatch = nil
 	for manifestIndex, d := range index.Manifests {
-		candidate := instanceCandidate{platformIndex: math.MaxInt, manifestPosition: manifestIndex, isZstd: instanceIsZstd(d), digest: d.Digest}
+		candidate := instanceCandidate{platformIndex: math.MaxInt, manifestPosition: manifestIndex, isZstd: instanceIsZstd(d), hasSentinel: instanceHasSentinel(d), digest: d.Digest}
 		if d.Platform != nil {
 			imagePlatform := ociPlatformClone(*d.Platform)
 			platformIndex := slices.IndexFunc(wantedPlatforms, func(wantedPlatform imgspecv1.Platform) bool {
@@ -269,6 +289,9 @@ func (index *OCI1IndexPublic) chooseInstance(ctx *types.SystemContext, preferGzi
 		}
 	}
 	if bestMatch != nil {
+		if bestMatch.hasSentinel {
+			logrus.Debugf("Selected instance %s with zstd:chunked sentinel (position %d in index)", bestMatch.digest, bestMatch.manifestPosition)
+		}
 		return bestMatch.digest, nil
 	}
 	return "", fmt.Errorf("no image found in image index for architecture %q, variant %q, OS %q", wantedPlatforms[0].Architecture, wantedPlatforms[0].Variant, wantedPlatforms[0].OS)

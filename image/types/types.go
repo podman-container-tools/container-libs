@@ -455,11 +455,21 @@ type ImageCloser interface {
 	Close() error
 }
 
+// PrependedLayerInfo describes a layer to prepend to an image during manifest update.
+// It carries both the blob metadata (for the manifest layer descriptor) and the
+// uncompressed DiffID (for the image config's RootFS).
+type PrependedLayerInfo struct {
+	BlobInfo BlobInfo
+	DiffID   digest.Digest
+}
+
 // ManifestUpdateOptions is a way to pass named optional arguments to Image.UpdatedImage
 type ManifestUpdateOptions struct {
 	LayerInfos              []BlobInfo // Complete BlobInfos (size+digest+urls+annotations) which should replace the originals, in order (the root layer first, and then successive layered layers). BlobInfos' MediaType fields are ignored.
 	EmbeddedDockerReference reference.Named
 	ManifestMIMEType        string
+	PrependLayers           []PrependedLayerInfo // Layers to prepend to the manifest and config (e.g. sentinel layers). Applied after LayerInfos updates.
+	RemoveLayerIndices      []int                // Indices of layers to remove from the manifest and config. LayerInfos, if set, must not include entries for removed layers. Applied before LayerInfos updates.
 	// The values below are NOT requests to modify the image; they provide optional context which may or may not be used.
 	InformationOnly ManifestUpdateInformation
 }

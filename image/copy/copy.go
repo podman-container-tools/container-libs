@@ -385,6 +385,18 @@ func Image(ctx context.Context, policyContext *signature.PolicyContext, destRef,
 			return nil, err
 		}
 		copiedManifest = single.manifest
+		// If the copied single image has zstd:chunked layers and the destination
+		// supports manifest lists, wrap it in an OCI index with a sentinel variant.
+		// Skip when digests must be preserved or destination is a digested reference.
+		if !options.PreserveDigests && supportsMultipleImages(c.dest) {
+			indexManifest, err := c.createSingleImageSentinelIndex(ctx, single)
+			if err != nil {
+				return nil, err
+			}
+			if indexManifest != nil {
+				copiedManifest = indexManifest
+			}
+		}
 	} else {
 		// If we were asked to copy multiple images and can't, that's an error.
 		if !supportsMultipleImages(c.dest) {

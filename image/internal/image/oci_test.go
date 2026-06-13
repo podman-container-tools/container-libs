@@ -476,6 +476,197 @@ func TestManifestOCI1UpdatedImage(t *testing.T) {
 	assert.Equal(t, *typedM2, *typedOriginal)
 }
 
+func TestManifestOCI1UpdatedImageLayerEdits(t *testing.T) {
+	configJSON, err := os.ReadFile("fixtures/oci1-config.json")
+	require.NoError(t, err)
+
+	for _, tc := range []struct {
+		name               string
+		options            types.ManifestUpdateOptions
+		expectedLayerCount int
+		expectedDiffIDCount int
+		checkFunc          func(t *testing.T, res types.Image, originalConfig imgspecv1.Image)
+		expectError        bool
+	}{
+		{
+			name: "RemoveLayerIndices removes layer 0",
+			options: types.ManifestUpdateOptions{
+				RemoveLayerIndices: []int{0},
+			},
+			expectedLayerCount:  4,
+			expectedDiffIDCount: 4,
+			checkFunc: func(t *testing.T, res types.Image, originalConfig imgspecv1.Image) {
+				layers := res.LayerInfos()
+				assert.Equal(t, layerDescriptorsLikeFixture[1].Digest, layers[0].Digest)
+				assert.Equal(t, layerDescriptorsLikeFixture[4].Digest, layers[3].Digest)
+
+				cb, err := res.ConfigBlob(context.Background())
+				require.NoError(t, err)
+				var config imgspecv1.Image
+				require.NoError(t, json.Unmarshal(cb, &config))
+				assert.Equal(t, originalConfig.RootFS.DiffIDs[1:], config.RootFS.DiffIDs)
+			},
+		},
+		{
+			name: "RemoveLayerIndices removes last layer",
+			options: types.ManifestUpdateOptions{
+				RemoveLayerIndices: []int{4},
+			},
+			expectedLayerCount:  4,
+			expectedDiffIDCount: 4,
+			checkFunc: func(t *testing.T, res types.Image, originalConfig imgspecv1.Image) {
+				layers := res.LayerInfos()
+				assert.Equal(t, layerDescriptorsLikeFixture[3].Digest, layers[3].Digest)
+
+				cb, err := res.ConfigBlob(context.Background())
+				require.NoError(t, err)
+				var config imgspecv1.Image
+				require.NoError(t, json.Unmarshal(cb, &config))
+				assert.Equal(t, originalConfig.RootFS.DiffIDs[:4], config.RootFS.DiffIDs)
+			},
+		},
+		{
+			name: "RemoveLayerIndices removes multiple layers",
+			options: types.ManifestUpdateOptions{
+				RemoveLayerIndices: []int{0, 2, 4},
+			},
+			expectedLayerCount:  2,
+			expectedDiffIDCount: 2,
+			checkFunc: func(t *testing.T, res types.Image, originalConfig imgspecv1.Image) {
+				layers := res.LayerInfos()
+				assert.Equal(t, layerDescriptorsLikeFixture[1].Digest, layers[0].Digest)
+				assert.Equal(t, layerDescriptorsLikeFixture[3].Digest, layers[1].Digest)
+
+				cb, err := res.ConfigBlob(context.Background())
+				require.NoError(t, err)
+				var config imgspecv1.Image
+				require.NoError(t, json.Unmarshal(cb, &config))
+				assert.Equal(t, []digest.Digest{
+					originalConfig.RootFS.DiffIDs[1],
+					originalConfig.RootFS.DiffIDs[3],
+				}, config.RootFS.DiffIDs)
+			},
+		},
+		{
+			name: "RemoveLayerIndices out of range",
+			options: types.ManifestUpdateOptions{
+				RemoveLayerIndices: []int{5},
+			},
+			expectError: true,
+		},
+		{
+			name: "RemoveLayerIndices negative index",
+			options: types.ManifestUpdateOptions{
+				RemoveLayerIndices: []int{-1},
+			},
+			expectError: true,
+		},
+		{
+			name: "PrependLayers adds a layer",
+			options: types.ManifestUpdateOptions{
+				PrependLayers: []types.PrependedLayerInfo{
+					{
+						BlobInfo: types.BlobInfo{
+							Digest:    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+							Size:      512,
+							MediaType: "application/vnd.test.sentinel",
+						},
+						DiffID: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+					},
+				},
+			},
+			expectedLayerCount:  6,
+			expectedDiffIDCount: 6,
+			checkFunc: func(t *testing.T, res types.Image, originalConfig imgspecv1.Image) {
+				layers := res.LayerInfos()
+				assert.Equal(t, digest.Digest("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), layers[0].Digest)
+				assert.Equal(t, "application/vnd.test.sentinel", layers[0].MediaType)
+				assert.Equal(t, int64(512), layers[0].Size)
+				assert.Equal(t, layerDescriptorsLikeFixture[0].Digest, layers[1].Digest)
+
+				cb, err := res.ConfigBlob(context.Background())
+				require.NoError(t, err)
+				var config imgspecv1.Image
+				require.NoError(t, json.Unmarshal(cb, &config))
+				assert.Equal(t, digest.Digest("sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"), config.RootFS.DiffIDs[0])
+				assert.Equal(t, originalConfig.RootFS.DiffIDs, config.RootFS.DiffIDs[1:])
+			},
+		},
+		{
+			name: "RemoveLayerIndices with LayerInfos",
+			options: types.ManifestUpdateOptions{
+				RemoveLayerIndices: []int{0},
+				LayerInfos: []types.BlobInfo{
+					{
+						Digest:               layerDescriptorsLikeFixture[1].Digest,
+						Size:                  layerDescriptorsLikeFixture[1].Size,
+						MediaType:             imgspecv1.MediaTypeImageLayerGzip,
+						CompressionOperation:  types.PreserveOriginal,
+					},
+					{
+						Digest:               layerDescriptorsLikeFixture[2].Digest,
+						Size:                  layerDescriptorsLikeFixture[2].Size,
+						URLs:                  layerDescriptorsLikeFixture[2].URLs,
+						MediaType:             imgspecv1.MediaTypeImageLayerGzip,
+						CompressionOperation:  types.PreserveOriginal,
+					},
+					{
+						Digest:               layerDescriptorsLikeFixture[3].Digest,
+						Size:                  layerDescriptorsLikeFixture[3].Size,
+						Annotations:           layerDescriptorsLikeFixture[3].Annotations,
+						MediaType:             imgspecv1.MediaTypeImageLayerGzip,
+						CompressionOperation:  types.PreserveOriginal,
+					},
+					{
+						Digest:               layerDescriptorsLikeFixture[4].Digest,
+						Size:                  layerDescriptorsLikeFixture[4].Size,
+						MediaType:             imgspecv1.MediaTypeImageLayerGzip,
+						CompressionOperation:  types.PreserveOriginal,
+					},
+				},
+			},
+			expectedLayerCount:  4,
+			expectedDiffIDCount: 4,
+			checkFunc: func(t *testing.T, res types.Image, originalConfig imgspecv1.Image) {
+				layers := res.LayerInfos()
+				assert.Equal(t, layerDescriptorsLikeFixture[1].Digest, layers[0].Digest)
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := manifestOCI1FromComponentsLikeFixture(configJSON)
+
+			var originalConfig imgspecv1.Image
+			require.NoError(t, json.Unmarshal(configJSON, &originalConfig))
+
+			res, err := m.UpdatedImage(context.Background(), tc.options)
+			if tc.expectError {
+				assert.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+
+			layers := res.LayerInfos()
+			assert.Len(t, layers, tc.expectedLayerCount)
+
+			cb, err := res.ConfigBlob(context.Background())
+			require.NoError(t, err)
+			var config imgspecv1.Image
+			require.NoError(t, json.Unmarshal(cb, &config))
+			assert.Len(t, config.RootFS.DiffIDs, tc.expectedDiffIDCount)
+
+			if tc.checkFunc != nil {
+				tc.checkFunc(t, res, originalConfig)
+			}
+
+			// Verify config descriptor is updated
+			configInfo := res.ConfigInfo()
+			assert.Equal(t, digest.FromBytes(cb), configInfo.Digest)
+			assert.Equal(t, int64(len(cb)), configInfo.Size)
+		})
+	}
+}
+
 // successfulOCI1Conversion verifies that an edit of original with edits suceeeds, and and original continues to match originalClone.
 // It returns the resulting image, for more checks
 func successfulOCI1Conversion(t *testing.T, original genericManifest, originalClone genericManifest,
