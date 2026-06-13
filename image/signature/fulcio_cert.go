@@ -21,14 +21,15 @@ type fulcioTrustRoot struct {
 	caCertificates *x509.CertPool
 	oidcIssuer     string
 	subjectEmail   string
+	buildSignerURI string
 }
 
 func (f *fulcioTrustRoot) validate() error {
 	if f.oidcIssuer == "" {
 		return errors.New("Internal inconsistency: Fulcio use set up without OIDC issuer")
 	}
-	if f.subjectEmail == "" {
-		return errors.New("Internal inconsistency: Fulcio use set up without subject email")
+	if f.subjectEmail == "" && f.buildSignerURI == "" {
+		return errors.New("Internal inconsistency: Fulcio use set up without subject identity (subjectEmail or buildSignerURI)")
 	}
 	return nil
 }
@@ -83,6 +84,31 @@ func fulcioIssuerInCertificate(untrustedCertificate *x509.Certificate) (string, 
 	default:
 		return "", internal.NewInvalidSignatureError("Fulcio certificate is missing the issuer extension")
 	}
+}
+
+// fulcioBuildSignerURIInCertificate extracts the BuildSignerURI (OID 1.3.6.1.4.1.57264.1.9) from the certificate.
+// Returns an empty string and no error if the extension is not present.
+func fulcioBuildSignerURIInCertificate(untrustedCertificate *x509.Certificate) (string, error) {
+	var buildSignerURI string
+	found := false
+	for _, untrustedExt := range untrustedCertificate.Extensions {
+		if untrustedExt.Id.Equal(certificate.OIDBuildSignerURI) {
+			if found {
+				// Coverage: This is unreachable in Go ≥1.19, which rejects certificates with duplicate extensions
+				// already in ParseCertificate.
+				return "", internal.NewInvalidSignatureError("Fulcio certificate has a duplicate BuildSignerURI extension")
+			}
+			rest, err := asn1.Unmarshal(untrustedExt.Value, &buildSignerURI)
+			if err != nil {
+				return "", internal.NewInvalidSignatureError(fmt.Sprintf("invalid ASN.1 in BuildSignerURI extension: %v", err))
+			}
+			if len(rest) != 0 {
+				return "", internal.NewInvalidSignatureError("invalid ASN.1 in BuildSignerURI extension, trailing data")
+			}
+			found = true
+		}
+	}
+	return buildSignerURI, nil
 }
 
 func (f *fulcioTrustRoot) verifyFulcioCertificateAtTime(relevantTime time.Time, untrustedCertificateBytes []byte, untrustedIntermediateChainBytes []byte) (crypto.PublicKey, error) {
@@ -164,15 +190,30 @@ func (f *fulcioTrustRoot) verifyFulcioCertificateAtTime(relevantTime time.Time, 
 		return nil, internal.NewInvalidSignatureError(fmt.Sprintf("Unexpected Fulcio OIDC issuer %q", oidcIssuer))
 	}
 
-	// == Validate the OIDC subject
-	if !slices.Contains(untrustedCertificate.EmailAddresses, f.subjectEmail) {
-		return nil, internal.NewInvalidSignatureError(fmt.Sprintf("Required email %q not found (got %q)",
-			f.subjectEmail,
-			untrustedCertificate.EmailAddresses))
+	// == Validate the OIDC subject identity
+	// At least one of subjectEmail or buildSignerURI must be specified (enforced by validate()).
+	// If both are specified, both must match (AND semantics).
+	if f.subjectEmail != "" {
+		if !slices.Contains(untrustedCertificate.EmailAddresses, f.subjectEmail) {
+			return nil, internal.NewInvalidSignatureError(fmt.Sprintf("Required email %q not found (got %q)",
+				f.subjectEmail,
+				untrustedCertificate.EmailAddresses))
+		}
+	}
+	if f.buildSignerURI != "" {
+		certBuildSignerURI, err := fulcioBuildSignerURIInCertificate(untrustedCertificate)
+		if err != nil {
+			return nil, err
+		}
+		if certBuildSignerURI != f.buildSignerURI {
+			return nil, internal.NewInvalidSignatureError(fmt.Sprintf("Required BuildSignerURI %q not found (got %q)",
+				f.buildSignerURI,
+				certBuildSignerURI))
+		}
 	}
 	// FIXME: Match more subject types? Cosign does:
-	// - .DNSNames (can’t be issued by Fulcio)
-	// - .IPAddresses (can’t be issued by Fulcio)
+	// - .DNSNames (can't be issued by Fulcio)
+	// - .IPAddresses (can't be issued by Fulcio)
 	// - .URIs (CAN be issued by Fulcio)
 	// - OtherName values in SAN (CAN be issued by Fulcio)
 	// - Various values about GitHub workflows (CAN be issued by Fulcio)
