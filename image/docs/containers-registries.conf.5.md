@@ -106,6 +106,14 @@ By default, container runtimes require TLS when retrieving images from a registr
 If `insecure` is set to `true`, unencrypted HTTP as well as TLS connections with untrusted
 certificates are allowed.
 
+`proxy`
+: Sets the forwarding proxy to be used specifically for connections to this registry.
+This setting takes precedence over globally-scoped proxies set using environment variables.
+Accepts a URL to the proxy in the format of _scheme_`://`_host_[`:`_port_][`/`_path_]
+where _scheme_ is one of `http`, `https`, `socks5`, or `socks5h`. See CURLOPT_PROXY(3).
+Note that both `socks5` and `socks5h` behave like `socks5h` in curl,
+i.e. name resolution always happens remotely.
+
 `blocked`
 : `true` or `false`.
 If `true`, pulling images with matching names is forbidden.
@@ -137,14 +145,14 @@ With a `prefix` containing a wildcard in the format: "*.example.com" for subdoma
 the location can be empty. In such a case,
 prefix matching will occur, but no reference rewrite will occur. The
 original requested image string will be used as-is. But other settings like
-`insecure` / `blocked` / `mirrors` will be applied to matching images.
+`insecure` / `proxy` / `blocked` / `mirrors` will be applied to matching images.
 
 Example: Given
 ```
 prefix = "*.example.com"
 ```
 requests for the image `blah.example.com/foo/myimage:latest` will be used
-as-is. But other settings like insecure/blocked/mirrors will be applied to matching images
+as-is. But other settings like insecure/proxy/blocked/mirrors will be applied to matching images
 
 `mirror`
 : An array of TOML tables specifying (possibly-partial) mirrors for the
@@ -159,6 +167,8 @@ Each TOML table in the `mirror` array can contain the following fields:
 - `location`： same semantics
 as specified in the `[[registry]]` TOML table
 - `insecure`： same semantics
+as specified in the `[[registry]]` TOML table
+- `proxy`： same semantics
 as specified in the `[[registry]]` TOML table
 - `pull-from-mirror`: `all`, `digest-only` or `tag-only`.  If "digest-only"， mirrors will only be used for digest pulls. Pulling images by tag can potentially yield different images, depending on which endpoint we pull from.  Restricting mirrors to pulls by digest avoids that issue.  If "tag-only", mirrors will only be used for tag pulls.  For a more up-to-date and expensive mirror that it is less likely to be out of sync if tags move, it should not be unnecessarily used for digest references.  Default is "all" (or left empty), mirrors will be used for both digest pulls and tag pulls unless the mirror-by-digest-only is set for the primary registry.
 Note that this per-mirror setting is allowed only when `mirror-by-digest-only` is not configured for the primary registry.
@@ -282,6 +292,7 @@ location = "internal-registry-for-example.com/bar"
 
 [[registry.mirror]]
 location = "example-mirror-0.local/mirror-for-foo"
+proxy = "http://proxy.example.com:8000"
 
 [[registry.mirror]]
 location = "example-mirror-1.local/mirrors/foo"
