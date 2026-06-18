@@ -6,13 +6,20 @@ formatters:
 
 linters:
   enable:
+    - dupl
     - nolintlint
     - unconvert
   exclusions:
     presets:
       - comments
       - std-error-handling
+    rules:
+      - path: '(.+)_test\.go'
+        linters:
+          - dupl
   settings:
+    dupl:
+      threshold: 200
     staticcheck:
       checks:
         - all
