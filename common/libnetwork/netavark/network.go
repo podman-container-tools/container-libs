@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/moby/sys/capability"
 	"github.com/sirupsen/logrus"
 	"go.podman.io/common/libnetwork/internal/rootlessnetns"
 	"go.podman.io/common/libnetwork/internal/util"
@@ -109,6 +110,11 @@ func NewNetworkInterface(conf *InitConfig) (types.ContainerNetwork, error) {
 	// causes issues as this slower more complicated rootless-netns logic should not be used as root.
 	val, ok := os.LookupEnv(unshare.UsernsEnvName)
 	useRootlessNetns := ok && val == "done"
+	// Preserve rootless netns mode unless UID 0 has the networking capability
+	// needed to manage rootful netavark bridge state.
+	if useRootlessNetns && unshare.GetRootlessUID() == 0 && hasCapNetAdmin() {
+		useRootlessNetns = false
+	}
 	if useRootlessNetns {
 		netns, err = rootlessnetns.New(conf.NetworkRunDir, conf.Config)
 		if err != nil {
@@ -170,6 +176,17 @@ func NewNetworkInterface(conf *InitConfig) (types.ContainerNetwork, error) {
 	}
 
 	return n, nil
+}
+
+func hasCapNetAdmin() bool {
+	currentCaps, err := capability.NewPid2(0)
+	if err != nil {
+		return false
+	}
+	if err = currentCaps.Load(); err != nil {
+		return false
+	}
+	return currentCaps.Get(capability.EFFECTIVE, capability.CAP_NET_ADMIN)
 }
 
 var builtinDrivers = []string{types.BridgeNetworkDriver, types.MacVLANNetworkDriver, types.IPVLANNetworkDriver}

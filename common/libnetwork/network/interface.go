@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 
+	"github.com/moby/sys/capability"
 	"go.podman.io/common/libnetwork/netavark"
 	"go.podman.io/common/libnetwork/types"
 	"go.podman.io/common/pkg/config"
@@ -55,10 +56,10 @@ func netavarkBackendFromConf(store storage.Store, conf *config.Config, syslog bo
 
 	// We cannot use the runroot for rootful since the network namespace is shared for all
 	// libpod instances they also have to share the same ipam db.
-	// For rootless we have our own network namespace per libpod instances,
+	// For rootless users we have our own network namespace per libpod instances,
 	// so this is not a problem there.
 	runDir := netavarkRunDir
-	if unshare.IsRootless() {
+	if unshare.IsRootless() && (unshare.GetRootlessUID() != 0 || !hasCapNetAdmin()) {
 		runDir = filepath.Join(store.RunRoot(), "networks")
 	}
 
@@ -78,8 +79,21 @@ func netavarkBackendFromConf(store storage.Store, conf *config.Config, syslog bo
 // use the graphroot for rootful since the network namespace is shared for all
 // libpod instances.
 func getDefaultNetavarkConfigDir(store storage.Store) string {
-	if !unshare.IsRootless() {
-		return netavarkConfigDir
+	// Preserve the existing rootless path layout unless UID 0 has the
+	// networking capability needed to manage rootful netavark bridge state.
+	if unshare.IsRootless() && (unshare.GetRootlessUID() != 0 || !hasCapNetAdmin()) {
+		return filepath.Join(store.GraphRoot(), "networks")
 	}
-	return filepath.Join(store.GraphRoot(), "networks")
+	return netavarkConfigDir
+}
+
+func hasCapNetAdmin() bool {
+	currentCaps, err := capability.NewPid2(0)
+	if err != nil {
+		return false
+	}
+	if err = currentCaps.Load(); err != nil {
+		return false
+	}
+	return currentCaps.Get(capability.EFFECTIVE, capability.CAP_NET_ADMIN)
 }
