@@ -50,6 +50,8 @@ const (
 	resolvConfName = "resolv.conf"
 )
 
+var errEmptyPIDFile = errors.New("PID file is empty")
+
 type Netns struct {
 	// dir used for the rootless netns
 	dir string
@@ -330,12 +332,18 @@ func (n *Netns) cleanupRootlessNetns() error {
 		logrus.Debugf("Rootless netns conn pid file does not exist %s", pidFile)
 		return nil
 	}
-	if err == nil {
-		// kill the slirp/pasta process so we do not leak it
-		err = unix.Kill(pid, unix.SIGTERM)
-		if err == unix.ESRCH {
-			err = nil
-		}
+	// if the pid file is empty, pasta failed to start so there is nothing to clean up
+	if errors.Is(err, errEmptyPIDFile) {
+		logrus.Debugf("Rootless netns conn pid file is empty, nothing to clean up")
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("reading pid file: %w", err)
+	}
+	// kill the slirp/pasta process so we do not leak it
+	err = unix.Kill(pid, unix.SIGTERM)
+	if err == unix.ESRCH {
+		err = nil
 	}
 	return err
 }
@@ -616,9 +624,12 @@ func (n *Netns) Run(lock *lockfile.LockFile, toRun func() error) error {
 	}
 
 	if count == 0 {
-		err = n.cleanup()
-		if err != nil {
-			return wrapError("cleanup", err)
+		cleanupErr := n.cleanup()
+		if cleanupErr != nil {
+			if inErr != nil {
+				return wrapError("cleanup", errors.Join(inErr, cleanupErr))
+			}
+			return wrapError("cleanup", cleanupErr)
 		}
 	}
 
@@ -666,7 +677,11 @@ func readPidFile(path string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	return strconv.Atoi(strings.TrimSpace(string(b)))
+	s := strings.TrimSpace(string(b))
+	if s == "" {
+		return 0, errEmptyPIDFile
+	}
+	return strconv.Atoi(s)
 }
 
 func (n *Netns) serializeInfo() error {
