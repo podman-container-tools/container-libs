@@ -3,6 +3,7 @@ package sysregistriesv2
 import (
 	"fmt"
 	"maps"
+	"net/url"
 	"reflect"
 	"slices"
 	"sort"
@@ -44,6 +45,12 @@ type Endpoint struct {
 	// If true, certs verification will be skipped and HTTP (non-TLS)
 	// connections will be allowed.
 	Insecure bool `toml:"insecure,omitempty"`
+	// The forwarding proxy to be used for accessing this endpoint.
+	// postProcessRegistries normalizes this field into the public Proxy field.
+	ProxyRaw string `toml:"proxy,omitempty"`
+	// The forwarding proxy to be used for accessing this endpoint.
+	// Parsed from ProxyRaw after normalization.
+	Proxy *url.URL `toml:"-"`
 	// PullFromMirror is used for adding restrictions to image pull through the mirror.
 	// Set to "all", "digest-only", or "tag-only".
 	// If "digest-only"， mirrors will only be used for digest pulls. Pulling images by
@@ -327,6 +334,27 @@ func parseLocation(input string) (string, error) {
 	return trimmed, nil
 }
 
+// parseProxy parses the input string for a proxy configuration.
+// Errors if a scheme is unsupported or unspecified, or if the input is not a valid URL.
+func parseProxy(input string) (*url.URL, error) {
+	if input == "" {
+		return nil, nil
+	}
+
+	parsed, err := url.Parse(input)
+	if err != nil {
+		return nil, fmt.Errorf("parsing proxy URL %q: %w", input, err)
+	}
+
+	supportedSchemes := []string{"http", "https", "socks5", "socks5h"}
+	if !slices.Contains(supportedSchemes, parsed.Scheme) {
+		msg := fmt.Sprintf(`proxy URL scheme "%s" is not supported. Supported are http, https, socks5, socks5h`, parsed.Scheme)
+		return nil, &InvalidRegistries{s: msg}
+	}
+
+	return parsed, nil
+}
+
 // ConvertToV2 returns a v2 config corresponding to a v1 one.
 func (config *V1RegistriesConf) ConvertToV2() (*V2RegistriesConf, error) {
 	regMap := make(map[string]*Registry)
@@ -412,6 +440,11 @@ func (config *V2RegistriesConf) postProcessRegistries() error {
 			}
 		}
 
+		reg.Proxy, err = parseProxy(reg.ProxyRaw)
+		if err != nil {
+			return err
+		}
+
 		// validate the mirror usage settings does not apply to primary registry
 		if reg.PullFromMirror != "" {
 			return fmt.Errorf("pull-from-mirror must not be set for a non-mirror registry %q", reg.Prefix)
@@ -429,6 +462,11 @@ func (config *V2RegistriesConf) postProcessRegistries() error {
 			// https://github.com/containers/image/pull/1191#discussion_r610623216
 			if mir.Location == "" {
 				return &InvalidRegistries{s: "invalid condition: mirror location is unset"}
+			}
+
+			mir.Proxy, err = parseProxy(mir.ProxyRaw)
+			if err != nil {
+				return err
 			}
 
 			if reg.MirrorByDigestOnly && mir.PullFromMirror != "" {
@@ -466,6 +504,11 @@ func (config *V2RegistriesConf) postProcessRegistries() error {
 		for _, other := range others {
 			if reg.Insecure != other.Insecure {
 				msg := fmt.Sprintf("registry '%s' is defined multiple times with conflicting 'insecure' setting", reg.Location)
+				return &InvalidRegistries{s: msg}
+			}
+
+			if reg.Proxy != other.Proxy {
+				msg := fmt.Sprintf("registry '%s' is defined multiple times with conflicting 'proxy' setting", reg.Location)
 				return &InvalidRegistries{s: msg}
 			}
 
