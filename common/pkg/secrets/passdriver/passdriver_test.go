@@ -3,6 +3,8 @@ package passdriver
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -169,4 +171,57 @@ func TestDelete(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestLookupDecryptFailureNotMasked reproduces the core bug from issue 28938:
+// a GPG decrypt failure must not be reported as ErrNoSuchSecret.
+func TestLookupDecryptFailureNotMasked(t *testing.T) {
+	driver := setupDriver(t)
+
+	err := driver.Store("corrupted", []byte("secret-data"))
+	require.NoError(t, err)
+
+	// Corrupt the .gpg file so GPG cannot decrypt it.
+	key, err := driver.getPath("corrupted")
+	require.NoError(t, err)
+	err = os.WriteFile(key, []byte("not-valid-gpg-data"), 0o644)
+	require.NoError(t, err)
+
+	// Lookup must fail with a decrypt error, not ErrNoSuchSecret.
+	_, err = driver.Lookup("corrupted")
+	require.Error(t, err)
+	require.NotErrorIs(t, err, define.ErrNoSuchSecret,
+		"Lookup must not report 'no such secret' when the .gpg file exists but decryption fails")
+}
+
+// TestListFiltersNonGpgEntries verifies that List skips directories and
+// non-.gpg files instead of panicking or returning garbage IDs.
+func TestListFiltersNonGpgEntries(t *testing.T) {
+	driver := setupDriver(t)
+	require.NoError(t, driver.Store("valid", []byte("data")))
+
+	// Add a non-.gpg file and a subdirectory to the store root.
+	err := os.WriteFile(filepath.Join(driver.Root, "readme.txt"), []byte("hi"), 0o644)
+	require.NoError(t, err)
+	err = os.Mkdir(filepath.Join(driver.Root, "subdir"), 0o755)
+	require.NoError(t, err)
+
+	list, err := driver.List()
+	require.NoError(t, err)
+	require.Equal(t, []string{"valid"}, list,
+		"List should only return IDs from .gpg files, skipping directories and other files")
+}
+
+// TestStoreExistenceCheckWithoutGpg verifies that Store detects duplicate IDs
+// via os.Stat rather than a GPG decrypt, and returns ErrSecretIDExists.
+func TestStoreExistenceCheckWithoutGpg(t *testing.T) {
+	driver := setupDriver(t)
+
+	err := driver.Store("exists", []byte("data"))
+	require.NoError(t, err)
+
+	// Storing the same ID again must fail with ErrSecretIDExists.
+	err = driver.Store("exists", []byte("other"))
+	require.Error(t, err)
+	require.ErrorIs(t, err, define.ErrSecretIDExists)
 }
