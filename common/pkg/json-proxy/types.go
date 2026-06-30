@@ -17,7 +17,11 @@ import (
 // departure from the original code which used HTTP.
 //
 // When bumping this, please also update the man page.
-const protocolVersion = "0.2.8"
+//
+// 0.2.9: Added the GetEngineConfig method, which exposes the host
+// containers.conf engine settings (e.g. retry policy) so clients can apply
+// them without re-reading the config themselves.
+const protocolVersion = "0.2.9"
 
 // maxMsgSize is the current limit on a packet size.
 // Note that all non-metadata (i.e. payload data) is sent over a pipe.
@@ -69,6 +73,23 @@ type reply struct {
 	ErrorCode proxyErrorCode `json:"error_code"`
 	// Error should be non-empty if Success == false.
 	Error string `json:"error"`
+}
+
+// engineConfig is the value returned by GetEngineConfig (new in 0.2.9). It
+// exposes a curated subset of the host containers.conf [engine] settings that
+// are relevant to a client driving image pulls through the proxy.
+//
+// This is intentionally extensible: fields are additive and optional, so
+// clients using serde(default)-style decoding remain forward compatible as new
+// settings are surfaced here.
+type engineConfig struct {
+	// Retry is the number of times a failed pull should be retried
+	// (containers.conf [engine] retry; default 3).
+	Retry uint `json:"retry"`
+	// RetryDelayMS is the fixed delay between retries in milliseconds
+	// (containers.conf [engine] retry_delay). It is omitted when unset, in
+	// which case the client should use exponential backoff.
+	RetryDelayMS *int64 `json:"retry_delay_ms,omitempty"`
 }
 
 // replyBuf is our internal deserialization of reply plus optional fd.
