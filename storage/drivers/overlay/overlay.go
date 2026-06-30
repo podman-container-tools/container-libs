@@ -1472,16 +1472,32 @@ func (d *Driver) get(id string, disableShifting bool, options graphdriver.MountO
 		return "", err
 	}
 
-	// user namespace requires this to move a directory from lower to upper.
-	rootUID, rootGID, err := idtools.GetRootUIDGID(options.UidMaps, options.GidMaps)
-	if err != nil {
-		return "", err
+	if !d.SupportsShifting(options.UidMaps, options.GidMaps) || options.DisableShifting {
+		disableShifting = true
 	}
-	rootIDs := idtools.IDPair{UID: rootUID, GID: rootGID}
+
+	needsIDMapping := !disableShifting && len(options.UidMaps) > 0 && len(options.GidMaps) > 0 && d.options.mountProgram == ""
+
+	// Owner IDs for upper directory
+	upperRootUID, upperRootGID := 0, 0
+	// Use user namespace mapped root IDs here if and only if:
+	// a. Mount level ID shifting is completely disabled, container sees FS IDs as is, or
+	// b. Native ID mapping is used for ID shifting, where only lower layers will be mapped.
+	//    Use of userns id here will allow data interchanges between lower and upper
+	// Note that exception is when fuse-overlayfs is used (mountProgram != "")
+	// where the entire FS is ID mapped together and there is no need to change ID here
+	if disableShifting || needsIDMapping {
+		rootUID, rootGID, err := idtools.GetRootUIDGID(options.UidMaps, options.GidMaps)
+		if err != nil {
+			return "", err
+		}
+		upperRootUID, upperRootGID = rootUID, rootGID
+	}
+	upperRootIDs := idtools.IDPair{UID: upperRootUID, GID: upperRootGID}
 
 	mergedDir := d.getMergedDir(id, dir, inAdditionalStore)
 	// Attempt to create the merged dir if it doesn't exist, but don't chown an already existing directory (it might be in an additional store)
-	if err := idtools.MkdirAllAndChownNew(mergedDir, 0o700, rootIDs); err != nil && !os.IsExist(err) {
+	if err := idtools.MkdirAllAndChownNew(mergedDir, 0o700, upperRootIDs); err != nil && !os.IsExist(err) {
 		return "", err
 	}
 
@@ -1504,17 +1520,11 @@ func (d *Driver) get(id string, disableShifting bool, options graphdriver.MountO
 
 	readWrite := !inAdditionalStore
 
-	if !d.SupportsShifting(options.UidMaps, options.GidMaps) || options.DisableShifting {
-		disableShifting = true
-	}
-
 	logLevel := logrus.WarnLevel
 	if unshare.IsRootless() {
 		logLevel = logrus.DebugLevel
 	}
 	optsList := options.Options
-
-	needsIDMapping := !disableShifting && len(options.UidMaps) > 0 && len(options.GidMaps) > 0 && d.options.mountProgram == ""
 
 	if len(optsList) == 0 {
 		if d.options.mountOptions != "" {
@@ -1697,7 +1707,7 @@ func (d *Driver) get(id string, disableShifting bool, options graphdriver.MountO
 		absLowers = append(absLowers, path.Join(dir, "empty"))
 	}
 
-	if err := idtools.MkdirAllAndChown(diffDir, perms, rootIDs); err != nil {
+	if err := idtools.MkdirAllAndChown(diffDir, perms, upperRootIDs); err != nil {
 		if !inAdditionalStore {
 			return "", err
 		}
