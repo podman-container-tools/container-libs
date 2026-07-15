@@ -519,8 +519,8 @@ func needsRetryWithUpdatedScope(res *http.Response) (bool, []authScope) {
 			if challenge.Scheme == "bearer" {
 				if errmsg, ok := challenge.Parameters["error"]; ok && errmsg == "insufficient_scope" {
 					if scope, ok := challenge.Parameters["scope"]; ok && scope != "" {
-						if newScope, err := parseAuthScope(scope); err == nil {
-							return true, []authScope{*newScope}
+						if newScopes, err := parseAuthScopes(scope); err == nil {
+							return true, newScopes
 						} else {
 							logrus.WithFields(logrus.Fields{
 								"error":     err,
