@@ -250,15 +250,13 @@ func TestNeedsRetryOnInsuficientScope(t *testing.T) {
 		actions:      "*",
 	}
 
-	needsRetry, scope := needsRetryWithUpdatedScope(&resp)
+	needsRetry, scopes := needsRetryWithUpdatedScope(&resp)
 
 	if !needsRetry {
 		t.Fatal("Expected needing to retry")
 	}
 
-	if expectedScope != *scope {
-		t.Fatalf("Got an invalid scope, expected '%q' but got '%q'", expectedScope, *scope)
-	}
+	assert.Equal(t, []authScope{expectedScope}, scopes)
 }
 
 func TestNeedsRetryNoRetryWhenNoAuthHeader(t *testing.T) {
