@@ -85,6 +85,61 @@ var _ = Describe("Config Local", func() {
 		))
 	})
 
+	It("should fail on invalid ipv6 subnet pool with ipv4 address", func() {
+		defConf, err := defaultConfig()
+		gomega.Expect(err).ToNot(gomega.HaveOccurred())
+
+		net, _ := types.ParseCIDR("10.0.0.0/8")
+		defConf.Network.DefaultSubnetPoolsV6 = []SubnetPool{
+			{Base: &net, Size: 24},
+		}
+
+		err = defConf.Network.Validate()
+		gomega.Expect(err).To(gomega.HaveOccurred())
+		gomega.Expect(err.Error()).To(gomega.ContainSubstring("must be ipv6"))
+	})
+
+	It("should fail on invalid ipv6 subnet pool size bigger than subnet", func() {
+		defConf, err := defaultConfig()
+		gomega.Expect(err).ToNot(gomega.HaveOccurred())
+
+		net, _ := types.ParseCIDR("fd00::/48")
+		defConf.Network.DefaultSubnetPoolsV6 = []SubnetPool{
+			{Base: &net, Size: 32},
+		}
+
+		err = defConf.Network.Validate()
+		gomega.Expect(err).To(gomega.HaveOccurred())
+		gomega.Expect(err.Error()).To(gomega.ContainSubstring("size is bigger than subnet"))
+	})
+
+	It("should fail on invalid ipv6 subnet pool size exceeding 128", func() {
+		defConf, err := defaultConfig()
+		gomega.Expect(err).ToNot(gomega.HaveOccurred())
+
+		net, _ := types.ParseCIDR("fd00::/8")
+		defConf.Network.DefaultSubnetPoolsV6 = []SubnetPool{
+			{Base: &net, Size: 129},
+		}
+
+		err = defConf.Network.Validate()
+		gomega.Expect(err).To(gomega.HaveOccurred())
+		gomega.Expect(err.Error()).To(gomega.ContainSubstring("must be between 0-128"))
+	})
+
+	It("should pass on valid ipv6 subnet pool", func() {
+		defConf, err := defaultConfig()
+		gomega.Expect(err).ToNot(gomega.HaveOccurred())
+
+		net, _ := types.ParseCIDR("fd00::/8")
+		defConf.Network.DefaultSubnetPoolsV6 = []SubnetPool{
+			{Base: &net, Size: 64},
+		}
+
+		err = defConf.Network.Validate()
+		gomega.Expect(err).ToNot(gomega.HaveOccurred())
+	})
+
 	It("parse dns port", func() {
 		// Given
 		config, err := newLocked(&Options{}, testConfigPath(""))

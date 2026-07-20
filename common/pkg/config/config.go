@@ -604,9 +604,18 @@ type NetworkConfig struct {
 	// DefaultSubnetPools is a list of subnets and size which are used to
 	// allocate subnets automatically for podman network create.
 	// It will iterate through the list and will pick the first free subnet
-	// with the given size. This is only used for ipv4 subnets, ipv6 subnets
-	// are always assigned randomly.
+	// with the given size. This is only used for ipv4 subnets.
 	DefaultSubnetPools []SubnetPool `toml:"default_subnet_pools,omitempty"`
+
+	// DefaultSubnetV6 is the IPv6 subnet for the default network.
+	// If empty, no IPv6 subnet is added to the default network.
+	// Must be a valid IPv6 CIDR block.
+	DefaultSubnetV6 string `toml:"default_subnet_v6,omitempty"`
+
+	// DefaultSubnetPoolsV6 is a list of IPv6 subnets and prefix lengths used to
+	// allocate subnets automatically for podman network create with --ipv6.
+	// If empty, IPv6 subnets are assigned randomly from fd00::/8 (RFC 4193).
+	DefaultSubnetPoolsV6 []SubnetPool `toml:"default_subnet_pools_v6,omitempty"`
 
 	// DefaultRootlessNetworkCmd is used to set the default rootless network
 	// program, either "slirp4nents" (default) or "pasta".
@@ -945,6 +954,19 @@ func (c *NetworkConfig) Validate() error {
 			if pool.Size > 32 {
 				return errors.New("invalid subnet pool size, must be between 0-32")
 			}
+		}
+	}
+
+	for _, pool := range c.DefaultSubnetPoolsV6 {
+		if pool.Base.IP.To4() != nil {
+			return fmt.Errorf("invalid ipv6 subnet pool ip %q, must be ipv6", pool.Base.IP)
+		}
+		ones, _ := pool.Base.IPNet.Mask.Size()
+		if ones > pool.Size {
+			return fmt.Errorf("invalid ipv6 subnet pool, size is bigger than subnet %q", &pool.Base.IPNet)
+		}
+		if pool.Size > 128 {
+			return errors.New("invalid ipv6 subnet pool size, must be between 0-128")
 		}
 	}
 
