@@ -26,7 +26,7 @@ env:
   # CI automation repo release for the VM image downloads in ci.sh.
   # ENV is managed by renovate, do not change the name without
   # updating the renovate config in the automation repo.
-  AUTOMATION_RELEASE: 20260707t092805z
+  AUTOMATION_RELEASE: 20260721t105526z
 
 jobs:
   lima:
