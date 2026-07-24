@@ -22,7 +22,7 @@ IMAGE_URL="https://objectstorage.us-ashburn-1.oraclecloud.com/n/id0lmbbwgcdv/b/p
 trap 'limactl delete --force $LIMA_VM_NAME' EXIT
 
 echo "::group::Starting VM"
-limactl --yes start --plain --name=$LIMA_VM_NAME --cpus $(nproc) --memory 4 --nested-virt \
+limactl --yes start --plain --name=$LIMA_VM_NAME --cpus $(nproc) --memory 8 --nested-virt \
     --set ".images=[{\"location\":\"$IMAGE_URL\", \"arch\": \"x86_64\"}]" \
     "$SCRIPT_DIR/template.lima.yml"
 
