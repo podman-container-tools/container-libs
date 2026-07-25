@@ -270,6 +270,9 @@ func supportsIdmappedLowerLayers(home string) (bool, error) {
 	}()
 
 	opts := fmt.Sprintf("lowerdir=%s,upperdir=%s,workdir=%s", lowerMappedDir, upperDir, workDir)
+	if unshare.IsRootless() {
+		opts += ",userxattr"
+	}
 	flags := uintptr(0)
 	if err := unix.Mount("overlay", mergedDir, "overlay", flags, opts); err != nil {
 		return false, err
