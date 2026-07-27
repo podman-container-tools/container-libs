@@ -29,7 +29,8 @@ TESTFLAGS := $(shell $(GO) test -race $(BUILDFLAGS) ./pkg/stringutils 2>&1 > /de
 default all: local-binary docs local-cross ## build and cross-build\nbinaries and docs
 
 clean: ## remove all built files
-	$(RM) -f containers-storage containers-storage.* docs/*.1 docs/*.5
+	$(RM) -f containers-storage containers-storage.*
+	$(MAKE) -C docs clean
 
 containers-storage: ## build using gc on the host
 	$(GO) build -compiler gc $(BUILDFLAGS) ./cmd/containers-storage

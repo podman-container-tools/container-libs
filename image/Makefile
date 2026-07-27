@@ -21,12 +21,6 @@ TEST_PACKAGES := ./...
 PACKAGES := $(shell go list $(BUILDFLAGS) ./...)
 SOURCE_DIRS = $(shell echo $(PACKAGES) | awk 'BEGIN{FS="/"; RS=" "}{print $$4}' | uniq)
 
-PREFIX ?= ${DESTDIR}/usr
-MANINSTALLDIR=${PREFIX}/share/man
-GOMD2MAN ?= $(shell command -v go-md2man || echo '$(GOBIN)/go-md2man')
-MANPAGES_MD = $(wildcard docs/*.5.md)
-MANPAGES ?= $(MANPAGES_MD:%.md=%)
-
 ifeq ($(shell uname -s),FreeBSD)
 CONTAINERSCONFDIR ?= /usr/local/share/containers
 else
@@ -43,15 +37,13 @@ all: test lint
 build:
 	go build $(BUILDFLAGS) ./...
 
-$(MANPAGES): %: %.md
-	$(GOMD2MAN) -in $< -out $@
-
-docs: $(MANPAGES)
+.PHONY: docs
+docs:
+	$(MAKE) -C docs docs
 
 .PHONY: install-docs
 install-docs: docs
-	install -d -m 755 ${MANINSTALLDIR}/man5
-	install -m 644 docs/*.5 ${MANINSTALLDIR}/man5/
+	$(MAKE) -C docs install
 
 .PHONY: install
 install: install-docs
@@ -67,7 +59,7 @@ cross:
 
 .PHONY: clean
 clean:
-	rm -rf $(MANPAGES)
+	$(MAKE) -C docs clean
 
 .PHONY: test
 test:
