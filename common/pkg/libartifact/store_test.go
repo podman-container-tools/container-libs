@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -687,6 +688,46 @@ func TestArtifactStore_List_Multiple(t *testing.T) {
 	// Verify all artifacts have valid digests
 	for _, artifact := range artifacts {
 		assert.NotEmpty(t, artifact.Digest.String())
+	}
+}
+
+func TestArtifactStore_List_BareTagAnnotation(t *testing.T) {
+	bareTags := []string{"v1", "latest", "1.14.4"}
+
+	for _, bareTag := range bareTags {
+		t.Run(bareTag, func(t *testing.T) {
+			as, ctx := setupTestStore(t)
+
+			// Add an artifact normally first, so the store has valid blobs
+			fileNames := map[string]int{"test.txt": 64}
+			refName := "quay.io/test/artifact:v1"
+			helperAddArtifact(t, as, refName, fileNames, nil)
+
+			// Rewrite the index.json to simulate an externally created OCI
+			// layout (like skopeo) that only stores the tag in the annotation
+			indexPath := filepath.Join(as.storePath, "index.json")
+			indexData, err := os.ReadFile(indexPath)
+			require.NoError(t, err)
+
+			var index specV1.Index
+			require.NoError(t, json.Unmarshal(indexData, &index))
+
+			for i := range index.Manifests {
+				if _, ok := index.Manifests[i].Annotations[specV1.AnnotationRefName]; ok {
+					index.Manifests[i].Annotations[specV1.AnnotationRefName] = bareTag
+				}
+			}
+
+			updatedIndex, err := json.Marshal(index)
+			require.NoError(t, err)
+			require.NoError(t, os.WriteFile(indexPath, updatedIndex, 0o644))
+
+			artifacts, err := as.List(ctx)
+			require.NoError(t, err)
+			require.Len(t, artifacts, 1)
+			assert.Empty(t, artifacts[0].Name,
+				"bare tag %q should not be used as artifact name", bareTag)
+		})
 	}
 }
 

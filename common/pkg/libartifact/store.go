@@ -886,7 +886,16 @@ func (as *ArtifactStore) getArtifacts(ctx context.Context, _ *libartTypes.GetArt
 			rawManifest: b,
 		}
 		if val, ok := l.ManifestDescriptor.Annotations[specV1.AnnotationRefName]; ok {
-			artifact.SetName(val)
+			// OCI layouts created by external tools (e.g. skopeo) may
+			// store only the tag portion in the annotation (e.g. "1.14.4"
+			// instead of "docker.io/coredns/coredns:1.14.4"). Only set
+			// the name when it looks like a qualified reference.
+			if strings.Contains(val, "/") {
+				artifact.SetName(val)
+			} else {
+				logrus.Warnf("Ignoring bare tag %q in OCI layout annotation %s: use a fully qualified reference instead",
+					val, specV1.AnnotationRefName)
+			}
 		}
 
 		al = append(al, &artifact)
