@@ -16,12 +16,10 @@ By default, the configuration is read from `$XDG_CONFIG_HOME/containers/containe
 Podman on Windows does not run containers natively. Instead, `podman machine`
 creates a Linux virtual machine, and most settings in this file — anything
 under `[containers]`, for example — are applied by the container engine
-running **inside that VM**, not by the Windows host. Placing a file
-somewhere on the Windows filesystem has no effect unless that file is also
-visible inside the VM.
+running **inside that VM**, not by the Windows host. A configuration file on the Windows host is ignored unless it is visible inside the VM.
 
 Starting with Podman 6, `podman machine` automatically mounts the host
-directory `%APPDATA%\containers` into the VM at `/etc/containers`. Note that
+directory `%APPDATA%\containers` into the VM at `/etc/containers`.
 `%APPDATA%` already expands to `...\AppData\Roaming`, so the correct location
 for a drop-in file is:
 
