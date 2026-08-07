@@ -187,3 +187,27 @@ func TestZfsOptions(t *testing.T) {
 		t.Fatalf("Expected to find size %q, got %v", s100, doptions)
 	}
 }
+
+// Options set in different driver sections must all survive one call. Every
+// other test here sets a single field on a fresh OptionsConfig, so a branch
+// that ends the chain early goes unnoticed: 5d9d814bc3 fixed btrfs.min_space
+// returning instead of appending, and this package passed either way.
+func TestCombinedDriverOptions(t *testing.T) {
+	var options OptionsConfig
+	options.Btrfs.MinSpace = s100
+	options.Overlay.MountOpt = nodev
+	options.Vfs.IgnoreChownErrors = trueString
+	options.Zfs.Name = foobar
+
+	doptions := GetGraphDriverOptions(options)
+	for _, want := range []string{
+		"btrfs.min_space=" + s100,
+		"overlay.mountopt=" + nodev,
+		"vfs.ignore_chown_errors=" + trueString,
+		"zfs.fsname=" + foobar,
+	} {
+		if !searchOptions(doptions, want) {
+			t.Fatalf("Expected to find %q, got %v", want, doptions)
+		}
+	}
+}
