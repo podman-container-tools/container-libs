@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-SKOPEO_CI_BRANCH=release-1.22
+SKOPEO_CI_BRANCH=cherry-pick-e894dac8-release-1.22
 
 # This script is only intended to be run inside the Lima VM to configure it and start the tests.
 # Do not run locally.
@@ -156,7 +156,7 @@ run_image_skopeo() {
     sudo podman umount --latest
     sudo podman rm --latest
 
-    git clone -b "$SKOPEO_CI_BRANCH" https://github.com/podman-container-tools/skopeo.git "$SKOPEO_PATH"
+    git clone -b "$SKOPEO_CI_BRANCH" https://github.com/QiWang19/skopeo.git "$SKOPEO_PATH"
     cd "$SKOPEO_PATH"
     go mod edit -replace "go.podman.io/storage=$GOSRC/storage"
     go mod edit -replace "go.podman.io/image/v5=$GOSRC/image"
