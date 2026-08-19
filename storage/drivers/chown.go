@@ -6,10 +6,13 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"sync"
+	"syscall"
 
 	"github.com/opencontainers/selinux/pkg/pwalkdir"
 	"go.podman.io/storage/pkg/idtools"
 	"go.podman.io/storage/pkg/reexec"
+	"go.podman.io/storage/pkg/system"
 )
 
 const (
@@ -54,11 +57,15 @@ func chownByMapsMain() {
 	}
 
 	chowner := newLChowner()
+	var dirModTimes sync.Map // [path string](mtime int64)
 
 	var chown fs.WalkDirFunc = func(path string, d fs.DirEntry, _ error) error {
 		info, err := d.Info()
 		if path == "." || err != nil {
 			return nil
+		}
+		if info.IsDir() {
+			dirModTimes.Store(path, info.ModTime().UnixNano())
 		}
 		return chowner.LChown(path, info, toHost, toContainer)
 	}
@@ -66,7 +73,29 @@ func chownByMapsMain() {
 		fmt.Fprintf(os.Stderr, "error during chown: %v", err)
 		os.Exit(1)
 	}
-	os.Exit(0)
+	exitStatus := 0
+	chowner.modifiedDirectories.Range(func(key, _ any) bool {
+		dir := key.(string)
+		if value, ok := dirModTimes.Load(dir); ok {
+			st, err := os.Lstat(dir)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "error during chown: %v", err)
+				exitStatus = 1
+				return true
+			}
+			tsCurrent := st.ModTime().UnixNano()
+			tsSaved := value.(int64)
+			if tsCurrent != tsSaved {
+				ts := syscall.NsecToTimespec(tsSaved)
+				if err := system.LUtimesNano(dir, []syscall.Timespec{ts, ts}); err != nil {
+					fmt.Fprintf(os.Stderr, "error during chown: %v", err)
+					exitStatus = 1
+				}
+			}
+		}
+		return true
+	})
+	os.Exit(exitStatus)
 }
 
 // ChownPathByMaps walks the filesystem tree, changing the ownership

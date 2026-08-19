@@ -58,7 +58,7 @@ func TestUntarWithMaliciousSymlinks(t *testing.T) {
 	err = UntarWithRoot(tee, safe, nil, root)
 	assert.ErrorContains(t, err, "open /safe/host-file: no such file or directory")
 
-	// Make sure the "host" file is still in tact
+	// Make sure the "host" file is still intact
 	// Before the fix the host file would be overwritten
 	hostData, err := os.ReadFile(filepath.Join(dir, "host-file"))
 	require.NoError(t, err)

@@ -19,8 +19,9 @@ type inode struct {
 }
 
 type platformChowner struct {
-	mutex  sync.Mutex
-	inodes map[inode]bool
+	mutex               sync.Mutex
+	inodes              map[inode]bool
+	modifiedDirectories sync.Map
 }
 
 func newLChowner() *platformChowner {
