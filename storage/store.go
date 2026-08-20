@@ -286,6 +286,16 @@ type Store interface {
 	// but the list of layers which would be removed is still returned.
 	DeleteImage(id string, commit bool) (layers []string, err error)
 
+	// DeleteImageWithSize is like DeleteImage, and additionally returns the
+	// number of bytes the layers it removed occupied.  That is the size the
+	// removal releases, which is less than the size of the image whenever it
+	// shares layers with an image that is not removed.  It does not cover the
+	// image's big data.
+	//
+	// Layers are measured uncompressed, like Layer.UncompressedSize, while
+	// holding the same lock that removes them.
+	DeleteImageWithSize(id string, commit bool) (layers []string, size int64, err error)
+
 	// DeleteContainer removes the specified container and its layer.  If
 	// there is no matching container, or if the container exists but its
 	// layer does not, an error will be returned.
@@ -2745,6 +2755,19 @@ func (s *store) DeleteLayer(id string) (retErr error) {
 }
 
 func (s *store) DeleteImage(id string, commit bool) (layers []string, retErr error) {
+	layers, _, err := s.deleteImage(id, commit, false)
+	return layers, err
+}
+
+func (s *store) DeleteImageWithSize(id string, commit bool) (layers []string, size int64, retErr error) {
+	return s.deleteImage(id, commit, true)
+}
+
+// deleteImage implements DeleteImage, and computes the size of the removed
+// layers if withSize is set.  Measuring the layers here, rather than in a
+// separate call, keeps the size consistent with the removal: it is determined
+// while holding the lock that removes them.
+func (s *store) deleteImage(id string, commit, withSize bool) (layers []string, size int64, retErr error) {
 	layersToRemove := []string{}
 	cleanupFunctions := []tempdir.CleanupTempDirFunc{}
 	defer func() {
@@ -2855,6 +2878,25 @@ func (s *store) DeleteImage(id string, commit bool) (layers []string, retErr err
 		if !imageFound {
 			return ErrNotAnImage
 		}
+		if withSize {
+			// The layers must be measured before they are removed.
+			for _, layer := range layersToRemove {
+				layerSize, err := rlstore.Size(layer)
+				if err != nil {
+					return err
+				}
+				if layerSize == -1 {
+					// The size is unknown, for instance for a layer that
+					// only recorded a TOC digest, so it must be computed,
+					// which can be slow as it might have to walk all files.
+					layerSize, err = rlstore.DiffSize("", layer)
+					if err != nil {
+						return err
+					}
+				}
+				size += layerSize
+			}
+		}
 		if commit {
 			for _, layer := range layersToRemove {
 				cf, err := rlstore.deferredDelete(layer)
@@ -2866,9 +2908,9 @@ func (s *store) DeleteImage(id string, commit bool) (layers []string, retErr err
 		}
 		return nil
 	}); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	return layersToRemove, nil
+	return layersToRemove, size, nil
 }
 
 func (s *store) DeleteContainer(id string) (retErr error) {
