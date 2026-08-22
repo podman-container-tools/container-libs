@@ -2856,12 +2856,10 @@ func (s *store) DeleteImage(id string, commit bool) (layers []string, retErr err
 			return ErrNotAnImage
 		}
 		if commit {
-			for _, layer := range layersToRemove {
-				cf, err := rlstore.deferredDelete(layer)
-				cleanupFunctions = append(cleanupFunctions, cf...)
-				if err != nil {
-					return err
-				}
+			cf, err := rlstore.deferredDeleteMultiple(layersToRemove)
+			cleanupFunctions = append(cleanupFunctions, cf...)
+			if err != nil {
+				return err
 			}
 		}
 		return nil
