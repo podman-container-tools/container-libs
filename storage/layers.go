@@ -1060,10 +1060,19 @@ func (r *layerStore) load(lockedForWriting bool) (bool, error) {
 				layersToDelete = append(layersToDelete, layer)
 			}
 		}
+		// Delete children before parents: removing a layer that still has a child
+		// breaks the driver's model, and on snapshot-based drivers it fails
+		// outright. r.layers cannot be relied on for this -- it is the
+		// concatenation of the per-location JSON files, so creation order only
+		// holds within one location. A layer is always created after its parent,
+		// so newest-first is child-first; Wipe() orders bulk deletion the same way.
+		slices.SortFunc(layersToDelete, func(a, b *Layer) int {
+			return -a.Created.Compare(b.Created)
+		})
 		// Now actually delete the layers
 		for _, layer := range layersToDelete {
 			logrus.Warnf("Found incomplete layer %q, deleting it", layer.ID)
-			cleanFunctions, err := r.internalDelete(layer.ID)
+			cleanFunctions, err := r.internalDelete(layer)
 			defer func() {
 				if err := tempdir.CleanupTemporaryDirectories(cleanFunctions...); err != nil {
 					logrus.Errorf("Error cleaning up temporary directories: %v", err)
@@ -2103,13 +2112,9 @@ func layerHasIncompleteFlag(layer *Layer) bool {
 // Requires startWriting.
 // Caller MUST run all returned cleanup functions after this, EVEN IF the function returns an error.
 // Ideally outside of the startWriting.
-func (r *layerStore) internalDelete(id string) ([]tempdir.CleanupTempDirFunc, error) {
+func (r *layerStore) internalDelete(layer *Layer) ([]tempdir.CleanupTempDirFunc, error) {
 	if !r.lockfile.IsReadWrite() {
 		return nil, fmt.Errorf("not allowed to delete layers at %q: %w", r.layerdir, ErrStoreIsReadOnly)
-	}
-	layer, ok := r.lookup(id)
-	if !ok {
-		return nil, ErrLayerUnknown
 	}
 	// Ensure that if we are interrupted, the layer will be cleaned up.
 	if markIncomplete(layer) {
@@ -2124,7 +2129,7 @@ func (r *layerStore) internalDelete(id string) ([]tempdir.CleanupTempDirFunc, er
 	if err != nil {
 		return nil, err
 	}
-	id = layer.ID
+	id := layer.ID
 	cleanFunc, err := r.driver.DeferredRemove(id)
 	cleanFunctions = append(cleanFunctions, cleanFunc)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -2199,7 +2204,7 @@ func (r *layerStore) deferredDelete(id string) ([]tempdir.CleanupTempDirFunc, er
 	if err := r.unmountAll(id); err != nil {
 		return nil, err
 	}
-	cleanFunctions, err := r.internalDelete(id)
+	cleanFunctions, err := r.internalDelete(layer)
 	if err != nil {
 		return cleanFunctions, err
 	}
@@ -2255,6 +2260,11 @@ func (r *layerStore) deferredDeleteMultiple(ids []string) ([]tempdir.CleanupTemp
 		if err := r.unmountAll(layer.ID); err != nil {
 			return nil, err
 		}
+		// Mark every layer before deleting any of them. This is not redundant
+		// with internalDelete's own marking: because the flag is already set,
+		// internalDelete skips its per-layer save, which is what reduces the
+		// whole operation to two saves instead of two per layer. Removing this
+		// silently restores the per-layer saves.
 		if markIncomplete(layer) {
 			marked |= layer.location
 		}
@@ -2270,7 +2280,7 @@ func (r *layerStore) deferredDeleteMultiple(ids []string) ([]tempdir.CleanupTemp
 	var deleted layerLocations
 	var firstErr error
 	for _, layer := range layers {
-		cf, err := r.internalDelete(layer.ID)
+		cf, err := r.internalDelete(layer)
 		cleanFunctions = append(cleanFunctions, cf...)
 		if err != nil {
 			firstErr = err
