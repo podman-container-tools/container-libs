@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,12 +12,17 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	digest "github.com/opencontainers/go-digest"
+	imgspecv1 "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.podman.io/image/v5/docker/reference"
+	"go.podman.io/image/v5/internal/set"
 	"go.podman.io/image/v5/internal/useragent"
 	"go.podman.io/image/v5/types"
 )
@@ -536,6 +542,399 @@ func TestResolveRequestURLWithNamespaceProxy(t *testing.T) {
 			result, err := client.resolveRequestURL(c.path)
 			require.NoError(t, err)
 			assert.Equal(t, c.expected, result.String())
+		})
+	}
+}
+
+func TestGetReferrers(t *testing.T) {
+	const testDigest = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	testDigestParsed := digest.Digest(testDigest)
+	fallbackTag := strings.Replace(testDigest, ":", "-", 1)
+
+	referrersIndex := imgspecv1.Index{
+		MediaType: imgspecv1.MediaTypeImageIndex,
+		Manifests: []imgspecv1.Descriptor{
+			{
+				MediaType:    imgspecv1.MediaTypeImageManifest,
+				Digest:       digest.Digest("sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
+				Size:         100,
+				ArtifactType: "application/vnd.dev.sigstore.bundle.v0.3+json",
+			},
+		},
+	}
+	referrersBody, err := json.Marshal(referrersIndex)
+	require.NoError(t, err)
+
+	emptyIndex := imgspecv1.Index{
+		MediaType: imgspecv1.MediaTypeImageIndex,
+		Manifests: []imgspecv1.Descriptor{},
+	}
+	emptyBody, err := json.Marshal(emptyIndex)
+	require.NoError(t, err)
+
+	for _, tc := range []struct {
+		name           string
+		handler        http.HandlerFunc
+		expectNil      bool
+		expectErr      bool
+		expectManifest int
+	}{
+		{
+			name: "Referrers API returns index with entries",
+			handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/v2/" {
+					w.WriteHeader(http.StatusOK)
+					return
+				}
+				if strings.Contains(r.URL.Path, "/referrers/") {
+					w.Header().Set("Content-Type", imgspecv1.MediaTypeImageIndex)
+					w.WriteHeader(http.StatusOK)
+					_, _ = w.Write(referrersBody)
+					return
+				}
+				w.WriteHeader(http.StatusNotFound)
+			}),
+			expectManifest: 1,
+		},
+		{
+			name: "Referrers API returns empty index",
+			handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/v2/" {
+					w.WriteHeader(http.StatusOK)
+					return
+				}
+				if strings.Contains(r.URL.Path, "/referrers/") {
+					w.Header().Set("Content-Type", imgspecv1.MediaTypeImageIndex)
+					w.WriteHeader(http.StatusOK)
+					_, _ = w.Write(emptyBody)
+					return
+				}
+				w.WriteHeader(http.StatusNotFound)
+			}),
+			expectNil: true,
+		},
+		{
+			name: "Referrers API returns 404, fallback tag exists",
+			handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/v2/" {
+					w.WriteHeader(http.StatusOK)
+					return
+				}
+				if strings.Contains(r.URL.Path, "/referrers/") {
+					w.WriteHeader(http.StatusNotFound)
+					return
+				}
+				if strings.Contains(r.URL.Path, "/manifests/"+fallbackTag) {
+					w.Header().Set("Content-Type", imgspecv1.MediaTypeImageIndex)
+					w.WriteHeader(http.StatusOK)
+					_, _ = w.Write(referrersBody)
+					return
+				}
+				w.WriteHeader(http.StatusNotFound)
+			}),
+			expectManifest: 1,
+		},
+		{
+			name: "Referrers API returns 405, fallback tag exists",
+			handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/v2/" {
+					w.WriteHeader(http.StatusOK)
+					return
+				}
+				if strings.Contains(r.URL.Path, "/referrers/") {
+					w.WriteHeader(http.StatusMethodNotAllowed)
+					return
+				}
+				if strings.Contains(r.URL.Path, "/manifests/"+fallbackTag) {
+					w.Header().Set("Content-Type", imgspecv1.MediaTypeImageIndex)
+					w.WriteHeader(http.StatusOK)
+					_, _ = w.Write(referrersBody)
+					return
+				}
+				w.WriteHeader(http.StatusNotFound)
+			}),
+			expectManifest: 1,
+		},
+		{
+			name: "Referrers API returns 501, fallback tag exists",
+			handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/v2/" {
+					w.WriteHeader(http.StatusOK)
+					return
+				}
+				if strings.Contains(r.URL.Path, "/referrers/") {
+					w.WriteHeader(http.StatusNotImplemented)
+					return
+				}
+				if strings.Contains(r.URL.Path, "/manifests/"+fallbackTag) {
+					w.Header().Set("Content-Type", imgspecv1.MediaTypeImageIndex)
+					w.WriteHeader(http.StatusOK)
+					_, _ = w.Write(referrersBody)
+					return
+				}
+				w.WriteHeader(http.StatusNotFound)
+			}),
+			expectManifest: 1,
+		},
+		{
+			name: "Referrers API returns 404, fallback tag also missing",
+			handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/v2/" {
+					w.WriteHeader(http.StatusOK)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(`{"errors":[{"code":"MANIFEST_UNKNOWN","message":"manifest unknown"}]}`))
+			}),
+			expectNil: true,
+		},
+		{
+			name: "Referrers API returns server error",
+			handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/v2/" {
+					w.WriteHeader(http.StatusOK)
+					return
+				}
+				w.WriteHeader(http.StatusInternalServerError)
+			}),
+			expectErr: true,
+		},
+		{
+			name: "Referrers API returns malformed JSON",
+			handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/v2/" {
+					w.WriteHeader(http.StatusOK)
+					return
+				}
+				w.Header().Set("Content-Type", imgspecv1.MediaTypeImageIndex)
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(`{not json`))
+			}),
+			expectErr: true,
+		},
+		{
+			name: "Referrers API returns wrong Content-Type",
+			handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/v2/" {
+					w.WriteHeader(http.StatusOK)
+					return
+				}
+				w.Header().Set("Content-Type", "text/html")
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(`<html>not an index</html>`))
+			}),
+			expectNil: true,
+		},
+		{
+			name: "Referrers API returns Content-Type with parameters",
+			handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/v2/" {
+					w.WriteHeader(http.StatusOK)
+					return
+				}
+				if strings.Contains(r.URL.Path, "/referrers/") {
+					w.Header().Set("Content-Type", imgspecv1.MediaTypeImageIndex+"; charset=utf-8")
+					w.WriteHeader(http.StatusOK)
+					_, _ = w.Write(referrersBody)
+					return
+				}
+				w.WriteHeader(http.StatusNotFound)
+			}),
+			expectManifest: 1,
+		},
+		{
+			name: "Fallback tag has non-index MIME type",
+			handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/v2/" {
+					w.WriteHeader(http.StatusOK)
+					return
+				}
+				if strings.Contains(r.URL.Path, "/referrers/") {
+					w.WriteHeader(http.StatusNotFound)
+					return
+				}
+				if strings.Contains(r.URL.Path, "/manifests/"+fallbackTag) {
+					w.Header().Set("Content-Type", imgspecv1.MediaTypeImageManifest)
+					w.WriteHeader(http.StatusOK)
+					_, _ = w.Write([]byte(`{}`))
+					return
+				}
+				w.WriteHeader(http.StatusNotFound)
+			}),
+			expectNil: true,
+		},
+		{
+			name: "Referrers API pagination capped at maxReferrersPages",
+			handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/v2/" {
+					w.WriteHeader(http.StatusOK)
+					return
+				}
+				if strings.Contains(r.URL.Path, "/referrers/") {
+					pageStr := r.URL.Query().Get("page")
+					page := 1
+					if pageStr != "" {
+						page, _ = strconv.Atoi(pageStr)
+					}
+					desc := imgspecv1.Descriptor{
+						MediaType:    imgspecv1.MediaTypeImageManifest,
+						Digest:       digest.Digest(fmt.Sprintf("sha256:%064x", page)),
+						Size:         100,
+						ArtifactType: "application/vnd.dev.cosign.simplesigning.v1+json",
+					}
+					body, _ := json.Marshal(imgspecv1.Index{
+						MediaType: imgspecv1.MediaTypeImageIndex,
+						Manifests: []imgspecv1.Descriptor{desc},
+					})
+					w.Header().Set("Content-Type", imgspecv1.MediaTypeImageIndex)
+					w.Header().Set("Link", fmt.Sprintf(`</v2/test/repo/referrers/%s?page=%d>; rel="next"`, testDigest, page+1))
+					w.WriteHeader(http.StatusOK)
+					_, _ = w.Write(body)
+					return
+				}
+				w.WriteHeader(http.StatusNotFound)
+			}),
+			expectManifest: maxReferrersPages,
+		},
+		{
+			name: "Referrers API with pagination via Link header",
+			handler: func() http.HandlerFunc {
+				page1Desc := imgspecv1.Descriptor{
+					MediaType:    imgspecv1.MediaTypeImageManifest,
+					Digest:       digest.Digest("sha256:1111111111111111111111111111111111111111111111111111111111111111"),
+					Size:         100,
+					ArtifactType: "application/vnd.dev.cosign.simplesigning.v1+json",
+				}
+				page2Desc := imgspecv1.Descriptor{
+					MediaType:    imgspecv1.MediaTypeImageManifest,
+					Digest:       digest.Digest("sha256:2222222222222222222222222222222222222222222222222222222222222222"),
+					Size:         200,
+					ArtifactType: "application/vnd.dev.cosign.simplesigning.v1+json",
+				}
+				page1Body, _ := json.Marshal(imgspecv1.Index{
+					MediaType: imgspecv1.MediaTypeImageIndex,
+					Manifests: []imgspecv1.Descriptor{page1Desc},
+				})
+				page2Body, _ := json.Marshal(imgspecv1.Index{
+					MediaType: imgspecv1.MediaTypeImageIndex,
+					Manifests: []imgspecv1.Descriptor{page2Desc},
+				})
+				return func(w http.ResponseWriter, r *http.Request) {
+					if r.URL.Path == "/v2/" {
+						w.WriteHeader(http.StatusOK)
+						return
+					}
+					if strings.Contains(r.URL.Path, "/referrers/") {
+						if r.URL.Query().Get("page") == "2" {
+							w.Header().Set("Content-Type", imgspecv1.MediaTypeImageIndex)
+							w.WriteHeader(http.StatusOK)
+							_, _ = w.Write(page2Body)
+							return
+						}
+						w.Header().Set("Content-Type", imgspecv1.MediaTypeImageIndex)
+						w.Header().Set("Link", fmt.Sprintf(`</v2/test/repo/referrers/%s?page=2>; rel="next"`, testDigest))
+						w.WriteHeader(http.StatusOK)
+						_, _ = w.Write(page1Body)
+						return
+					}
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}(),
+			expectManifest: 2,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := httptest.NewServer(tc.handler)
+			defer s.Close()
+
+			registry := strings.TrimPrefix(s.URL, "http://")
+			named, err := reference.ParseNormalizedNamed(registry + "/test/repo:latest")
+			require.NoError(t, err)
+			ref, err := newReference(named, false)
+			require.NoError(t, err)
+
+			client := &dockerClient{
+				sys:              &types.SystemContext{DockerInsecureSkipTLSVerify: types.OptionalBoolTrue},
+				registry:         registry,
+				scheme:           "http",
+				client:           s.Client(),
+				tokenCache:       map[string]*bearerToken{},
+				reportedWarnings: set.New[string](),
+			}
+			client.detectPropertiesOnce.Do(func() {})
+
+			index, err := client.getReferrers(context.Background(), ref, testDigestParsed)
+			if tc.expectErr {
+				assert.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			if tc.expectNil {
+				assert.Nil(t, index)
+				return
+			}
+			require.NotNil(t, index)
+			assert.Len(t, index.Manifests, tc.expectManifest)
+		})
+	}
+
+	t.Run("Invalid digest", func(t *testing.T) {
+		named, err := reference.ParseNormalizedNamed("example.com/test/repo:latest")
+		require.NoError(t, err)
+		ref, err := newReference(named, false)
+		require.NoError(t, err)
+
+		client := &dockerClient{}
+		_, err = client.getReferrers(context.Background(), ref, digest.Digest("invalid"))
+		assert.Error(t, err)
+	})
+}
+
+func TestNextLinkURL(t *testing.T) {
+	for _, c := range []struct {
+		name     string
+		header   string
+		expected string
+	}{
+		{
+			name:     "empty header",
+			header:   "",
+			expected: "",
+		},
+		{
+			name:     "standard next link",
+			header:   `</v2/repo/referrers/sha256:abc?page=2>; rel="next"`,
+			expected: "/v2/repo/referrers/sha256:abc?page=2",
+		},
+		{
+			name:     "next link without quotes on rel",
+			header:   `</v2/repo/referrers/sha256:abc?page=2>; rel=next`,
+			expected: "/v2/repo/referrers/sha256:abc?page=2",
+		},
+		{
+			name:     "multiple links with next",
+			header:   `</v2/prev>; rel="prev", </v2/next?n=5>; rel="next"`,
+			expected: "/v2/next?n=5",
+		},
+		{
+			name:     "no next rel",
+			header:   `</v2/prev>; rel="prev"`,
+			expected: "",
+		},
+		{
+			name:     "next substring in other parameter does not match",
+			header:   `</v2/path>; title="the next one"; rel="prev"`,
+			expected: "",
+		},
+		{
+			name:     "case-insensitive rel matching",
+			header:   `</v2/repo/referrers/sha256:abc?page=2>; rel="Next"`,
+			expected: "/v2/repo/referrers/sha256:abc?page=2",
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.expected, nextLinkURL(c.header))
 		})
 	}
 }

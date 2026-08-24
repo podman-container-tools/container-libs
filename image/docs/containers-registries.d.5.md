@@ -98,6 +98,7 @@ described above.  The configuration section is a YAML mapping, with the followin
    are download along with images, adding new signatures is possible only if `lookaside-staging` is defined).
 
 - `use-sigstore-attachments` specifies whether sigstore image attachments (signatures, attestations and the like) are going to be read/written along with the image.
+   When enabled, signatures are discovered via both the OCI Referrers API (with tag schema fallback for registries not supporting OCI Distribution Spec 1.1) and the cosign tag convention; duplicates are removed automatically.
    If disabled, the images are treated as if no attachments exist; attempts to write attachments fail.
 
 ## Examples
