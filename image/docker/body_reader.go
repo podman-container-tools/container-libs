@@ -187,7 +187,12 @@ func (br *bodyReader) Read(p []byte) (int, error) {
 			}
 			// Continue below
 		case http.StatusOK:
-			return n, fmt.Errorf("%w (after reconnecting, server did not process a Range: header, status %d)", originalErr, http.StatusOK)
+			// The server ignored the Range: header and is returning the full blob.
+			// Discard the bytes we have already read to resume from the correct offset.
+			if _, err := io.CopyN(io.Discard, res.Body, br.offset); err != nil {
+				return n, fmt.Errorf("%w (after reconnecting, server returned full blob, failed to discard %d bytes: %v)", originalErr, br.offset, err)
+			}
+			logrus.Debugf("Reconnecting to %s: server returned full blob, discarded %d bytes", redactedURL, br.offset)
 		default:
 			err := registryHTTPResponseToError(res)
 			return n, fmt.Errorf("%w (after reconnecting, fetching blob: %v)", originalErr, err)
