@@ -5,12 +5,14 @@ package chrootarchive
 import (
 	gotar "archive/tar"
 	"bytes"
+	"fmt"
 	"io"
 	"os"
 	"path"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -163,4 +165,66 @@ func isDataInTar(t *testing.T, tr *gotar.Reader, compare []byte, maxBytes int64)
 	}
 
 	return false
+}
+
+// slowTarReader feeds a real tar stream in small chunks so the unpack is still
+// running when the test removes the destination.
+type slowTarReader struct {
+	data   []byte
+	offset int
+	remove func()
+	fired  bool
+}
+
+func (s *slowTarReader) Read(p []byte) (int, error) {
+	if s.offset >= len(s.data) {
+		return 0, io.EOF
+	}
+	// let the first entries land, then take the destination away
+	if !s.fired && s.offset > 0 {
+		s.fired = true
+		s.remove()
+	}
+	time.Sleep(20 * time.Millisecond)
+	n := copy(p, s.data[s.offset:min(s.offset+512, len(s.data))])
+	s.offset += n
+	return n, nil
+}
+
+// A destination that disappears while the untar child is writing into it makes
+// every create fail with ENOENT, which looks like a corrupt archive. Check that
+// the error names the real cause instead.
+func TestUntarDestinationRemovedWhileUnpacking(t *testing.T) {
+	if os.Getuid() != 0 {
+		t.Skip("test requires root")
+	}
+	tmpdir := t.TempDir()
+
+	var buf bytes.Buffer
+	tw := gotar.NewWriter(&buf)
+	body := bytes.Repeat([]byte("x"), 1024)
+	for i := range 200 {
+		hdr := &gotar.Header{
+			Name:     fmt.Sprintf("file-%d", i),
+			Mode:     0o644,
+			Size:     int64(len(body)),
+			Typeflag: gotar.TypeReg,
+		}
+		require.NoError(t, tw.WriteHeader(hdr))
+		_, err := tw.Write(body)
+		require.NoError(t, err)
+	}
+	require.NoError(t, tw.Close())
+
+	dest := filepath.Join(tmpdir, "dest")
+	require.NoError(t, os.MkdirAll(dest, 0o700))
+
+	stream := &slowTarReader{
+		data:   buf.Bytes(),
+		remove: func() { _ = os.RemoveAll(dest) },
+	}
+
+	err := Untar(stream, dest, &archive.TarOptions{})
+	require.Error(t, err, "unpack into a removed destination should fail")
+	assert.ErrorContains(t, err, "destination was removed while unpacking")
 }

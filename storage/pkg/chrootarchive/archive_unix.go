@@ -162,6 +162,12 @@ func invokeUnpack(decompressedArchive io.Reader, dest *unpackDestination, option
 
 	if err := cmd.Wait(); err != nil {
 		errorOut := fmt.Errorf("unpacking failed (error: %w; output: %s)", err, output)
+		// A destination that was removed while the child was writing into it
+		// fails every create with ENOENT, which on its own reads like the
+		// archive is at fault. Say what actually happened instead.
+		if destRemoved(dest.root) {
+			errorOut = fmt.Errorf("unpacking failed, destination was removed while unpacking (error: %w; output: %s)", err, output)
+		}
 		// when `xz -d -c -q | storage-untar ...` failed on storage-untar side,
 		// we need to exhaust `xz`'s output, otherwise the `xz` side will be
 		// pending on write pipe forever
@@ -271,4 +277,15 @@ func invokePack(srcPath string, options *archive.TarOptions, root string) (io.Re
 	stdin.Close()
 
 	return tarR, nil
+}
+
+// destRemoved reports whether the unpack destination has been unlinked since it
+// was opened. A directory that is gone keeps its descriptor usable but drops to
+// zero links.
+func destRemoved(root *os.File) bool {
+	var st unix.Stat_t
+	if err := unix.Fstat(int(root.Fd()), &st); err != nil {
+		return false
+	}
+	return st.Nlink == 0
 }
