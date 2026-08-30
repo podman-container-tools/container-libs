@@ -441,6 +441,23 @@ func TestManifestSchema1UpdatedImage(t *testing.T) {
 	assert.Equal(t, *typedM2, *typedOriginal)
 }
 
+func TestManifestSchema1UpdatedImageLayerEditRejection(t *testing.T) {
+	original := manifestSchema1FromFixture(t, "schema1.json")
+
+	_, err := original.UpdatedImage(context.Background(), types.ManifestUpdateOptions{
+		PrependLayers: []types.PrependedLayerInfo{{
+			BlobInfo: types.BlobInfo{Digest: "sha256:aa", Size: 1, MediaType: "application/vnd.test"},
+			DiffID:   "sha256:bb",
+		}},
+	})
+	assert.Error(t, err)
+
+	_, err = original.UpdatedImage(context.Background(), types.ManifestUpdateOptions{
+		RemoveLayerIndices: []int{0},
+	})
+	assert.Error(t, err)
+}
+
 func TestManifestSchema1ConvertToSchema2(t *testing.T) {
 	original := manifestSchema1FromFixture(t, "schema1.json")
 	res, err := original.UpdatedImage(context.Background(), types.ManifestUpdateOptions{

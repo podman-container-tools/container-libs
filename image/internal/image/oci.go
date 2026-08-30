@@ -8,6 +8,7 @@ import (
 	"slices"
 
 	ociencspec "github.com/containers/ocicrypt/spec"
+	digest "github.com/opencontainers/go-digest"
 	imgspecv1 "github.com/opencontainers/image-spec/specs-go/v1"
 	"go.podman.io/image/v5/docker/reference"
 	"go.podman.io/image/v5/internal/iolimits"
@@ -163,15 +164,120 @@ func (m *manifestOCI1) UpdatedImage(ctx context.Context, options types.ManifestU
 		return converted, nil
 	}
 
+	// Remove layers before UpdateLayerInfos so the counts match.
+	// LayerInfos, if set, must already exclude entries for removed layers.
+	if len(options.RemoveLayerIndices) > 0 {
+		if err := copy.removeLayers(ctx, options.RemoveLayerIndices); err != nil {
+			return nil, err
+		}
+	}
+
 	// No conversion required, update manifest
 	if options.LayerInfos != nil {
 		if err := copy.m.UpdateLayerInfos(options.LayerInfos); err != nil {
 			return nil, err
 		}
 	}
+
+	// Prepend layers after UpdateLayerInfos.
+	if len(options.PrependLayers) > 0 {
+		if err := copy.prependLayers(ctx, options.PrependLayers); err != nil {
+			return nil, err
+		}
+	}
+
 	// Ignore options.EmbeddedDockerReference: it may be set when converting from schema1, but we really don't care.
 
 	return memoryImageFromManifest(&copy), nil
+}
+
+// parseConfigBlob loads the config blob (from cache or source) and parses it.
+func (m *manifestOCI1) parseConfigBlob(ctx context.Context) (*imgspecv1.Image, error) {
+	cb, err := m.ConfigBlob(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("reading config blob: %w", err)
+	}
+	var config imgspecv1.Image
+	if err := json.Unmarshal(cb, &config); err != nil {
+		return nil, fmt.Errorf("parsing config blob: %w", err)
+	}
+	return &config, nil
+}
+
+// updateConfigBlob marshals the config, updates the cached configBlob and the
+// manifest's Config descriptor to match.
+func (m *manifestOCI1) updateConfigBlob(config *imgspecv1.Image) error {
+	configBlob, err := json.Marshal(config)
+	if err != nil {
+		return fmt.Errorf("marshaling updated config: %w", err)
+	}
+	m.configBlob = configBlob
+	m.m.Config = imgspecv1.Descriptor{
+		MediaType: imgspecv1.MediaTypeImageConfig,
+		Digest:    digest.FromBytes(configBlob),
+		Size:      int64(len(configBlob)),
+	}
+	return nil
+}
+
+// removeLayers removes the layers at the given indices from the manifest and
+// the corresponding DiffIDs from the config.
+func (m *manifestOCI1) removeLayers(ctx context.Context, indices []int) error {
+	config, err := m.parseConfigBlob(ctx)
+	if err != nil {
+		return fmt.Errorf("removing layers: %w", err)
+	}
+	if len(config.RootFS.DiffIDs) != len(m.m.Layers) {
+		return fmt.Errorf("removing layers: config has %d DiffIDs but manifest has %d layers", len(config.RootFS.DiffIDs), len(m.m.Layers))
+	}
+	for _, idx := range indices {
+		if idx < 0 || idx >= len(m.m.Layers) {
+			return fmt.Errorf("removing layers: index %d out of range [0, %d)", idx, len(m.m.Layers))
+		}
+	}
+	m.m.Layers = removeIndices(m.m.Layers, indices)
+	config.RootFS.DiffIDs = removeIndices(config.RootFS.DiffIDs, indices)
+	return m.updateConfigBlob(config)
+}
+
+// prependLayers prepends layers to the manifest and corresponding DiffIDs to
+// the config.
+func (m *manifestOCI1) prependLayers(ctx context.Context, layers []types.PrependedLayerInfo) error {
+	config, err := m.parseConfigBlob(ctx)
+	if err != nil {
+		return fmt.Errorf("prepending layers: %w", err)
+	}
+	descs := make([]imgspecv1.Descriptor, 0, len(layers)+len(m.m.Layers))
+	diffIDs := make([]digest.Digest, 0, len(layers)+len(config.RootFS.DiffIDs))
+	for _, l := range layers {
+		descs = append(descs, imgspecv1.Descriptor{
+			MediaType:   l.BlobInfo.MediaType,
+			Digest:      l.BlobInfo.Digest,
+			Size:        l.BlobInfo.Size,
+			URLs:        l.BlobInfo.URLs,
+			Annotations: l.BlobInfo.Annotations,
+		})
+		diffIDs = append(diffIDs, l.DiffID)
+	}
+	m.m.Layers = append(descs, m.m.Layers...)
+	config.RootFS.DiffIDs = append(diffIDs, config.RootFS.DiffIDs...)
+	return m.updateConfigBlob(config)
+}
+
+// removeIndices removes elements at the given indices from a slice, returning
+// a new slice. Indices must be valid for the slice.
+func removeIndices[T any](s []T, indices []int) []T {
+	remove := make(map[int]struct{}, len(indices))
+	for _, idx := range indices {
+		remove[idx] = struct{}{}
+	}
+	result := make([]T, 0, len(s)-len(remove))
+	for i, v := range s {
+		if _, ok := remove[i]; !ok {
+			result = append(result, v)
+		}
+	}
+	return result
 }
 
 func schema2DescriptorFromOCI1Descriptor(d imgspecv1.Descriptor) manifest.Schema2Descriptor {

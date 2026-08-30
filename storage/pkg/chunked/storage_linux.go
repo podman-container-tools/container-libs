@@ -73,6 +73,9 @@ type chunkedDiffer struct {
 	// is no TOC referenced by the manifest.
 	blobDigest digest.Digest
 	blobSize   int64
+	// skipMitigation is set by SkipMitigation to skip the full-digest
+	// verification without using the insecure flag.
+	skipMitigation bool
 
 	// Input format
 	// ==========
@@ -206,6 +209,22 @@ func (c *chunkedDiffer) Close() error {
 // If it returns an error that matches ErrFallbackToOrdinaryLayerDownload, the caller can
 // retry the operation with a different method.
 // The caller must call Close() on the returned Differ.
+
+// SkipMitigation configures the differ to skip the full-digest mitigation.
+// Must be called after NewDiffer and before PrepareStagedLayer.
+func SkipMitigation(d graphdriver.Differ) error {
+	cd, ok := d.(*chunkedDiffer)
+	if !ok {
+		return fmt.Errorf("SkipMitigation called with unexpected type %T", d)
+	}
+	if cd.convertToZstdChunked {
+		return fmt.Errorf("SkipMitigation called on a convert-from-raw differ for blob %s", cd.blobDigest)
+	}
+	logrus.Debugf("SkipMitigation: skipping full-digest verification for blob %s", cd.blobDigest)
+	cd.skipMitigation = true
+	return nil
+}
+
 func NewDiffer(ctx context.Context, store storage.Store, blobDigest digest.Digest, blobSize int64, annotations map[string]string, iss ImageSourceSeekable) (graphdriver.Differ, error) {
 	pullOptions := parsePullOptions(store)
 
@@ -1959,7 +1978,7 @@ func (c *chunkedDiffer) ApplyDiff(dest string, options *archive.TarOptions, diff
 	// via insecureAllowUnpredictableImageContents .
 	if output.UncompressedDigest == "" {
 		switch {
-		case c.pullOptions.insecureAllowUnpredictableImageContents:
+		case c.pullOptions.insecureAllowUnpredictableImageContents || c.skipMitigation:
 			// Oh well.  Skip the costly digest computation.
 		case output.TarSplit != nil:
 			if _, err := output.TarSplit.Seek(0, io.SeekStart); err != nil {

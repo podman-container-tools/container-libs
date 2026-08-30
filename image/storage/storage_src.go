@@ -122,6 +122,10 @@ func (s *storageImageSource) GetBlob(ctx context.Context, info types.BlobInfo, c
 		return io.NopCloser(bytes.NewReader(image.GzippedEmptyLayer)), int64(len(image.GzippedEmptyLayer)), nil
 	}
 
+	if digest == toc.ZstdChunkedSentinelDigest {
+		return io.NopCloser(bytes.NewReader(toc.ZstdChunkedSentinelContent)), int64(len(toc.ZstdChunkedSentinelContent)), nil
+	}
+
 	var layers []storage.Layer
 
 	// This lookup path is strictly necessary for layers identified by TOC digest
@@ -352,9 +356,25 @@ func (s *storageImageSource) LayerInfosForCopy(ctx context.Context, instanceDige
 	}
 	slices.Reverse(physicalBlobInfos)
 
-	res, err := buildLayerInfosForCopy(man.LayerInfos(), physicalBlobInfos, gzipCompressedLayerType)
+	manifestLayerInfos := man.LayerInfos()
+	// The zstd:chunked sentinel layer was never stored physically;
+	// strip it before matching against physical layers, then prepend its blob info to the result.
+	var sentinelBlobInfo *types.BlobInfo
+	if len(manifestLayerInfos) > 0 && manifestLayerInfos[0].MediaType == toc.ZstdChunkedSentinelMediaType {
+		sentinelBlobInfo = &types.BlobInfo{
+			Digest:    manifestLayerInfos[0].Digest,
+			Size:      int64(len(toc.ZstdChunkedSentinelContent)),
+			MediaType: manifestLayerInfos[0].MediaType,
+		}
+		manifestLayerInfos = manifestLayerInfos[1:]
+	}
+
+	res, err := buildLayerInfosForCopy(manifestLayerInfos, physicalBlobInfos, gzipCompressedLayerType)
 	if err != nil {
 		return nil, fmt.Errorf("creating LayerInfosForCopy of image %q: %w", s.image.ID, err)
+	}
+	if sentinelBlobInfo != nil {
+		res = append([]types.BlobInfo{*sentinelBlobInfo}, res...)
 	}
 	return res, nil
 }

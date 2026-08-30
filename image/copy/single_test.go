@@ -2,21 +2,29 @@ package copy
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	digest "github.com/opencontainers/go-digest"
+	"github.com/opencontainers/image-spec/specs-go"
 	imgspecv1 "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.podman.io/image/v5/internal/private"
+	"go.podman.io/image/v5/manifest"
+	ociLayout "go.podman.io/image/v5/oci/layout"
 	"go.podman.io/image/v5/pkg/compression"
 	compressiontypes "go.podman.io/image/v5/pkg/compression/types"
+	"go.podman.io/image/v5/signature"
 	"go.podman.io/image/v5/types"
+	chunkedToc "go.podman.io/storage/pkg/chunked/toc"
 )
 
 func TestUpdatedBlobInfoFromReuse(t *testing.T) {
@@ -158,4 +166,166 @@ func TestComputeDiffID(t *testing.T) {
 	require.NoError(t, err)
 	_, err = computeDiffID(reader, nil)
 	assert.Error(t, err)
+}
+
+// createOCILayoutWithSentinel creates a minimal OCI layout directory containing
+// a single image with a sentinel layer prepended (simulating a zstd:chunked
+// sentinel image). Returns the path to the OCI layout dir.
+func createOCILayoutWithSentinel(t *testing.T, dir string) {
+	t.Helper()
+
+	blobsDir := filepath.Join(dir, "blobs", "sha256")
+	require.NoError(t, os.MkdirAll(blobsDir, 0o755))
+
+	// Write oci-layout
+	ociLayoutJSON, err := json.Marshal(imgspecv1.ImageLayout{Version: specs.Version})
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "oci-layout"), ociLayoutJSON, 0o644))
+
+	// Create a real layer (a minimal gzip stream).
+	realLayerContent := []byte("real layer data for testing")
+	realLayerDigest := digest.FromBytes(realLayerContent)
+	require.NoError(t, os.WriteFile(filepath.Join(blobsDir, realLayerDigest.Encoded()), realLayerContent, 0o644))
+
+	// Write sentinel blob.
+	sentinelContent := chunkedToc.ZstdChunkedSentinelContent
+	sentinelDigest := chunkedToc.ZstdChunkedSentinelDigest
+	require.NoError(t, os.WriteFile(filepath.Join(blobsDir, sentinelDigest.Encoded()), sentinelContent, 0o644))
+
+	// Create config with sentinel DiffID at [0].
+	config := imgspecv1.Image{
+		RootFS: imgspecv1.RootFS{
+			Type:    "layers",
+			DiffIDs: []digest.Digest{sentinelDigest, realLayerDigest},
+		},
+	}
+	configBlob, err := json.Marshal(config)
+	require.NoError(t, err)
+	configDigest := digest.FromBytes(configBlob)
+	require.NoError(t, os.WriteFile(filepath.Join(blobsDir, configDigest.Encoded()), configBlob, 0o644))
+
+	// Create OCI manifest with sentinel layer at [0].
+	ociManifest := imgspecv1.Manifest{
+		Versioned: specs.Versioned{SchemaVersion: 2},
+		MediaType: imgspecv1.MediaTypeImageManifest,
+		Config: imgspecv1.Descriptor{
+			MediaType: imgspecv1.MediaTypeImageConfig,
+			Digest:    configDigest,
+			Size:      int64(len(configBlob)),
+		},
+		Layers: []imgspecv1.Descriptor{
+			{
+				MediaType: chunkedToc.ZstdChunkedSentinelMediaType,
+				Digest:    sentinelDigest,
+				Size:      int64(len(sentinelContent)),
+			},
+			{
+				MediaType: imgspecv1.MediaTypeImageLayerZstd,
+				Digest:    realLayerDigest,
+				Size:      int64(len(realLayerContent)),
+			},
+		},
+	}
+	manifestBlob, err := json.Marshal(ociManifest)
+	require.NoError(t, err)
+	manifestDigest := digest.FromBytes(manifestBlob)
+	require.NoError(t, os.WriteFile(filepath.Join(blobsDir, manifestDigest.Encoded()), manifestBlob, 0o644))
+
+	// Create index.json.
+	index := imgspecv1.Index{
+		Versioned: specs.Versioned{SchemaVersion: 2},
+		MediaType: imgspecv1.MediaTypeImageIndex,
+		Manifests: []imgspecv1.Descriptor{
+			{
+				MediaType: imgspecv1.MediaTypeImageManifest,
+				Digest:    manifestDigest,
+				Size:      int64(len(manifestBlob)),
+			},
+		},
+	}
+	indexBlob, err := json.Marshal(index)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "index.json"), indexBlob, 0o644))
+}
+
+func TestStripSentinelOnCompressionChange(t *testing.T) {
+	srcDir := t.TempDir()
+	destDir := t.TempDir()
+
+	createOCILayoutWithSentinel(t, srcDir)
+
+	srcRef, err := ociLayout.ParseReference(srcDir)
+	require.NoError(t, err)
+	destRef, err := ociLayout.ParseReference(destDir)
+	require.NoError(t, err)
+
+	policy := &signature.Policy{Default: signature.PolicyRequirements{signature.NewPRInsecureAcceptAnything()}}
+	pc, err := signature.NewPolicyContext(policy)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, pc.Destroy()) }()
+
+	ctx := context.Background()
+	gzipAlgo := compression.Gzip
+	copiedManifest, err := Image(ctx, pc, destRef, srcRef, &Options{
+		DestinationCtx: &types.SystemContext{
+			CompressionFormat: &gzipAlgo,
+		},
+	})
+	require.NoError(t, err)
+
+	// Parse the resulting manifest and verify the sentinel layer is gone.
+	ociMan, err := manifest.OCI1FromManifest(copiedManifest)
+	require.NoError(t, err)
+
+	for i, layer := range ociMan.Layers {
+		assert.NotEqual(t, chunkedToc.ZstdChunkedSentinelMediaType, layer.MediaType,
+			"sentinel layer should have been stripped, but found at index %d", i)
+	}
+
+	// Read the config from the destination and verify sentinel DiffID is gone.
+	configBlob, err := os.ReadFile(filepath.Join(destDir, "blobs", "sha256", ociMan.Config.Digest.Encoded()))
+	require.NoError(t, err)
+	var ociConfig imgspecv1.Image
+	require.NoError(t, json.Unmarshal(configBlob, &ociConfig))
+
+	for i, diffID := range ociConfig.RootFS.DiffIDs {
+		assert.NotEqual(t, chunkedToc.ZstdChunkedSentinelDigest, diffID,
+			"sentinel DiffID should have been stripped, but found at index %d", i)
+	}
+
+	// Should have exactly 1 layer (the real one, not the sentinel).
+	assert.Len(t, ociMan.Layers, 1, "expected exactly 1 layer after sentinel stripping")
+	assert.Len(t, ociConfig.RootFS.DiffIDs, 1, "expected exactly 1 DiffID after sentinel stripping")
+}
+
+func TestStripSentinelOnDefaultCompression(t *testing.T) {
+	// When no explicit compression format is set, the default (gzip) is used.
+	// The sentinel should be stripped since the destination format differs from zstd:chunked.
+	srcDir := t.TempDir()
+	destDir := t.TempDir()
+
+	createOCILayoutWithSentinel(t, srcDir)
+
+	srcRef, err := ociLayout.ParseReference(srcDir)
+	require.NoError(t, err)
+	destRef, err := ociLayout.ParseReference(destDir)
+	require.NoError(t, err)
+
+	policy := &signature.Policy{Default: signature.PolicyRequirements{signature.NewPRInsecureAcceptAnything()}}
+	pc, err := signature.NewPolicyContext(policy)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, pc.Destroy()) }()
+
+	ctx := context.Background()
+	copiedManifest, err := Image(ctx, pc, destRef, srcRef, &Options{})
+	require.NoError(t, err)
+
+	ociMan, err := manifest.OCI1FromManifest(copiedManifest)
+	require.NoError(t, err)
+
+	for i, layer := range ociMan.Layers {
+		assert.NotEqual(t, chunkedToc.ZstdChunkedSentinelMediaType, layer.MediaType,
+			"sentinel layer should have been stripped, but found at index %d", i)
+	}
+	assert.Len(t, ociMan.Layers, 1, "expected exactly 1 layer after sentinel stripping")
 }

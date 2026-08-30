@@ -3,6 +3,7 @@ package copy
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -42,6 +43,7 @@ type imageCopier struct {
 	compressionFormat             *compressiontypes.Algorithm // Compression algorithm to use, if the user explicitly requested one, or nil.
 	compressionLevel              *int
 	requireCompressionFormatMatch bool
+	stripSentinel                 bool // Remove sentinel layer[0] and DiffID[0] from final manifest/config
 }
 
 type copySingleImageOptions struct {
@@ -56,6 +58,7 @@ type copySingleImageResult struct {
 	manifestMIMEType      string
 	manifestDigest        digest.Digest
 	compressionAlgorithms []compressiontypes.Algorithm
+	configBlob            []byte // The config as written to the destination
 }
 
 // copySingleImage copies a single (non-manifest-list) image unparsedImage, using c.policyContext to validate
@@ -241,11 +244,12 @@ func (c *copier) copySingleImage(ctx context.Context, unparsedImage *image.Unpar
 	// without actually trying to upload something and getting a types.ManifestTypeRejectedError.
 	// So, try the preferred manifest MIME type with possibly-updated blob digests, media types, and sizes if
 	// we're altering how they're compressed.  If the process succeeds, fine…
-	manifestBytes, manifestDigest, err := ic.copyUpdatedConfigAndManifest(ctx, targetInstance)
+	manifestBytes, manifestDigest, configBlob, err := ic.copyUpdatedConfigAndManifest(ctx, targetInstance)
 	wipResult := copySingleImageResult{
 		manifest:         manifestBytes,
 		manifestMIMEType: ic.manifestConversionPlan.preferredMIMEType,
 		manifestDigest:   manifestDigest,
+		configBlob:       configBlob,
 	}
 	if err != nil {
 		logrus.Debugf("Writing manifest using preferred type %s failed: %v", ic.manifestConversionPlan.preferredMIMEType, err)
@@ -276,7 +280,7 @@ func (c *copier) copySingleImage(ctx context.Context, unparsedImage *image.Unpar
 		for _, manifestMIMEType := range ic.manifestConversionPlan.otherMIMETypeCandidates {
 			logrus.Debugf("Trying to use manifest type %s…", manifestMIMEType)
 			ic.manifestUpdates.ManifestMIMEType = manifestMIMEType
-			attemptedManifest, attemptedManifestDigest, err := ic.copyUpdatedConfigAndManifest(ctx, targetInstance)
+			attemptedManifest, attemptedManifestDigest, attemptedConfigBlob, err := ic.copyUpdatedConfigAndManifest(ctx, targetInstance)
 			if err != nil {
 				logrus.Debugf("Upload of manifest type %s failed: %v", manifestMIMEType, err)
 				errs = append(errs, fmt.Sprintf("%s(%v)", manifestMIMEType, err))
@@ -288,6 +292,7 @@ func (c *copier) copySingleImage(ctx context.Context, unparsedImage *image.Unpar
 				manifest:         attemptedManifest,
 				manifestMIMEType: manifestMIMEType,
 				manifestDigest:   attemptedManifestDigest,
+				configBlob:       attemptedConfigBlob,
 			}
 			errs = nil // Mark this as a success so that we don't abort below.
 			break
@@ -458,11 +463,43 @@ func (ic *imageCopier) copyLayers(ctx context.Context) ([]compressiontypes.Algor
 	}
 	manifestLayerInfos := man.LayerInfos()
 
+	// Let the destination filter manifest layer infos before copying.
+	// Destinations that support it (e.g., c/storage) may detect storage-specific
+	// markers and return indices of layers that should be skipped.
+	type layerFilter interface {
+		FilterLayers([]manifest.LayerInfo) []int
+	}
+	filteredLayers := set.New[int]()
+	if f, ok := ic.c.dest.(layerFilter); ok {
+		for _, idx := range f.FilterLayers(manifestLayerInfos) {
+			filteredLayers.Add(idx)
+		}
+	}
+
+	// If the destination does not implement FilterLayers (non-storage), strip the
+	// sentinel layer when compression is changing away from zstd:chunked.
+	if filteredLayers.Empty() && len(manifestLayerInfos) > 0 && manifestLayerInfos[0].MediaType == chunkedToc.ZstdChunkedSentinelMediaType {
+		destFormat := ic.compressionFormat
+		if destFormat == nil {
+			destFormat = defaultCompressionFormat
+		}
+		if destFormat.Name() != compressiontypes.ZstdChunkedAlgorithmName {
+			if ic.cannotModifyManifestReason != "" {
+				return nil, fmt.Errorf("copying this image requires stripping the zstd:chunked sentinel layer, which we cannot do: %q", ic.cannotModifyManifestReason)
+			}
+			filteredLayers.Add(0)
+			ic.stripSentinel = true
+		}
+	}
+
 	data := make([]copyLayerData, len(srcInfos))
 	copyLayerHelper := func(index int, srcLayer types.BlobInfo, toEncrypt bool, pool *mpb.Progress, srcRef reference.Named) {
 		defer ic.c.concurrentBlobCopiesSemaphore.Release(1)
 		cld := copyLayerData{}
-		if !ic.c.options.DownloadForeignLayers && ic.c.dest.AcceptsForeignLayerURLs() && len(srcLayer.URLs) != 0 {
+		if filteredLayers.Contains(index) {
+			cld.destInfo = srcLayer
+			logrus.Debugf("Skipping filtered layer %q (e.g., sentinel)", srcLayer.Digest)
+		} else if !ic.c.options.DownloadForeignLayers && ic.c.dest.AcceptsForeignLayerURLs() && len(srcLayer.URLs) != 0 {
 			// DiffIDs are, currently, needed only when converting from schema1.
 			// In which case src.LayerInfos will not have URLs because schema1
 			// does not support them.
@@ -564,11 +601,11 @@ func layerDigestsDiffer(a, b []types.BlobInfo) bool {
 // copyUpdatedConfigAndManifest updates the image per ic.manifestUpdates, if necessary,
 // stores the resulting config and manifest to the destination, and returns the stored manifest
 // and its digest.
-func (ic *imageCopier) copyUpdatedConfigAndManifest(ctx context.Context, instanceDigest *digest.Digest) ([]byte, digest.Digest, error) {
+func (ic *imageCopier) copyUpdatedConfigAndManifest(ctx context.Context, instanceDigest *digest.Digest) ([]byte, digest.Digest, []byte, error) {
 	var pendingImage types.Image = ic.src
 	if !ic.noPendingManifestUpdates() {
 		if ic.cannotModifyManifestReason != "" {
-			return nil, "", fmt.Errorf("Internal error: copy needs an updated manifest but that was known to be forbidden: %q", ic.cannotModifyManifestReason)
+			return nil, "", nil, fmt.Errorf("Internal error: copy needs an updated manifest but that was known to be forbidden: %q", ic.cannotModifyManifestReason)
 		}
 		if !ic.diffIDsAreNeeded && ic.src.UpdatedImageNeedsLayerDiffIDs(*ic.manifestUpdates) {
 			// We have set ic.diffIDsAreNeeded based on the preferred MIME type returned by determineManifestConversion.
@@ -577,36 +614,111 @@ func (ic *imageCopier) copyUpdatedConfigAndManifest(ctx context.Context, instanc
 			// when ic.c.dest.SupportedManifestMIMETypes() includes both s1 and s2, the upload using s1 failed, and we are now trying s2.
 			// Supposedly s2-only registries do not exist or are extremely rare, so failing with this error message is good enough for now.
 			// If handling such registries turns out to be necessary, we could compute ic.diffIDsAreNeeded based on the full list of manifest MIME type candidates.
-			return nil, "", fmt.Errorf("Can not convert image to %s, preparing DiffIDs for this case is not supported", ic.manifestUpdates.ManifestMIMEType)
+			return nil, "", nil, fmt.Errorf("Can not convert image to %s, preparing DiffIDs for this case is not supported", ic.manifestUpdates.ManifestMIMEType)
 		}
 		pi, err := ic.src.UpdatedImage(ctx, *ic.manifestUpdates)
 		if err != nil {
-			return nil, "", fmt.Errorf("creating an updated image manifest: %w", err)
+			return nil, "", nil, fmt.Errorf("creating an updated image manifest: %w", err)
 		}
 		pendingImage = pi
 	}
 	man, _, err := pendingImage.Manifest(ctx)
 	if err != nil {
-		return nil, "", fmt.Errorf("reading manifest: %w", err)
+		return nil, "", nil, fmt.Errorf("reading manifest: %w", err)
 	}
 
-	if err := ic.copyConfig(ctx, pendingImage); err != nil {
-		return nil, "", err
+	configBlob, err := pendingImage.ConfigBlob(ctx)
+	if err != nil {
+		return nil, "", nil, fmt.Errorf("reading config blob: %w", err)
+	}
+
+	if ic.stripSentinel {
+		man, configBlob, err = ic.stripSentinelFromManifestAndConfig(ctx, man, configBlob)
+		if err != nil {
+			return nil, "", nil, err
+		}
+	} else {
+		if err := ic.copyConfig(ctx, pendingImage); err != nil {
+			return nil, "", nil, err
+		}
 	}
 
 	ic.c.Printf("Writing manifest to image destination\n")
 	manifestDigest, err := manifest.Digest(man)
 	if err != nil {
-		return nil, "", err
+		return nil, "", nil, err
 	}
 	if instanceDigest != nil {
 		instanceDigest = &manifestDigest
 	}
 	if err := ic.c.dest.PutManifest(ctx, man, instanceDigest); err != nil {
 		logrus.Debugf("Error %v while writing manifest %q", err, string(man))
-		return nil, "", fmt.Errorf("writing manifest: %w", err)
+		return nil, "", nil, fmt.Errorf("writing manifest: %w", err)
 	}
-	return man, manifestDigest, nil
+	return man, manifestDigest, configBlob, nil
+}
+
+// stripSentinelFromManifestAndConfig removes the sentinel layer (layer[0]) from
+// the OCI manifest and the corresponding DiffID (DiffIDs[0]) from the config.
+// It pushes the new config to the destination and returns the updated manifest
+// and config blobs.
+func (ic *imageCopier) stripSentinelFromManifestAndConfig(ctx context.Context, manBlob []byte, configBlob []byte) ([]byte, []byte, error) {
+	ociMan, err := manifest.OCI1FromManifest(manBlob)
+	if err != nil {
+		return nil, nil, fmt.Errorf("parsing OCI manifest for sentinel stripping: %w", err)
+	}
+	if len(ociMan.Layers) == 0 || ociMan.Layers[0].MediaType != chunkedToc.ZstdChunkedSentinelMediaType {
+		return nil, nil, errors.New("internal error: stripSentinel set but manifest layer[0] is not the sentinel")
+	}
+	ociMan.Layers = ociMan.Layers[1:]
+
+	var ociConfig imgspecv1.Image
+	if err := json.Unmarshal(configBlob, &ociConfig); err != nil {
+		return nil, nil, fmt.Errorf("parsing config for sentinel stripping: %w", err)
+	}
+	if len(ociConfig.RootFS.DiffIDs) == 0 || ociConfig.RootFS.DiffIDs[0] != chunkedToc.ZstdChunkedSentinelDigest {
+		return nil, nil, errors.New("internal error: stripSentinel set but config DiffIDs[0] is not the sentinel")
+	}
+	ociConfig.RootFS.DiffIDs = ociConfig.RootFS.DiffIDs[1:]
+
+	newConfigBlob, err := json.Marshal(ociConfig)
+	if err != nil {
+		return nil, nil, fmt.Errorf("marshaling config after sentinel stripping: %w", err)
+	}
+	configDigest := digest.FromBytes(newConfigBlob)
+
+	// Push new config to destination.
+	configBlobInfo := types.BlobInfo{
+		Digest:    configDigest,
+		Size:      int64(len(newConfigBlob)),
+		MediaType: imgspecv1.MediaTypeImageConfig,
+	}
+	reused, _, err := ic.c.dest.TryReusingBlobWithOptions(ctx, configBlobInfo,
+		private.TryReusingBlobOptions{Cache: ic.c.blobInfoCache})
+	if err != nil {
+		return nil, nil, fmt.Errorf("checking stripped config blob: %w", err)
+	}
+	if !reused {
+		_, err = ic.c.dest.PutBlobWithOptions(ctx, bytes.NewReader(newConfigBlob),
+			configBlobInfo, private.PutBlobOptions{Cache: ic.c.blobInfoCache, IsConfig: true})
+		if err != nil {
+			return nil, nil, fmt.Errorf("pushing stripped config blob: %w", err)
+		}
+	}
+
+	// Update manifest to point to the new config.
+	ociMan.Config = imgspecv1.Descriptor{
+		MediaType: imgspecv1.MediaTypeImageConfig,
+		Digest:    configDigest,
+		Size:      int64(len(newConfigBlob)),
+	}
+	newManBlob, err := ociMan.Serialize()
+	if err != nil {
+		return nil, nil, fmt.Errorf("serializing manifest after sentinel stripping: %w", err)
+	}
+
+	logrus.Debugf("Stripped zstd:chunked sentinel layer from manifest and config")
+	return newManBlob, newConfigBlob, nil
 }
 
 // copyConfig copies config.json, if any, from src to dest.

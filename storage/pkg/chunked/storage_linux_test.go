@@ -10,6 +10,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	graphdriver "go.podman.io/storage/drivers"
+	"go.podman.io/storage/pkg/archive"
 )
 
 // Mock for ImageSourceSeekable
@@ -210,4 +212,30 @@ func TestTypeToOsMode(t *testing.T) {
 			}
 		})
 	}
+}
+
+type fakeDiffer struct{}
+
+func (f *fakeDiffer) ApplyDiff(string, *archive.TarOptions, *graphdriver.DifferOptions) (graphdriver.DriverWithDifferOutput, error) {
+	return graphdriver.DriverWithDifferOutput{}, nil
+}
+func (f *fakeDiffer) Close() error { return nil }
+
+func TestSkipMitigationErrors(t *testing.T) {
+	// SkipMitigation on a non-chunkedDiffer type should fail.
+	err := SkipMitigation(&fakeDiffer{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unexpected type")
+
+	// SkipMitigation on a convert-from-raw differ should fail.
+	cd := &chunkedDiffer{convertToZstdChunked: true}
+	err = SkipMitigation(cd)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "convert-from-raw")
+
+	// SkipMitigation on a normal chunkedDiffer should succeed.
+	cd = &chunkedDiffer{}
+	err = SkipMitigation(cd)
+	require.NoError(t, err)
+	assert.True(t, cd.skipMitigation)
 }
