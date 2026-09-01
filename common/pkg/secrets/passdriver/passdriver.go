@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -168,7 +167,10 @@ func (d *Driver) gpg(ctx context.Context, in io.Reader, out io.Writer, args ...s
 	if d.GPGHomedir != "" {
 		args = append([]string{"--homedir", d.GPGHomedir}, args...)
 	}
-	cmd := exec.CommandContext(ctx, d.GPGProgram, args...)
+	cmd, err := gpgCommand(ctx, d.GPGProgram, args...)
+	if err != nil {
+		return err
+	}
 	cmd.Env = os.Environ()
 	cmd.Stdin = in
 	cmd.Stdout = out
