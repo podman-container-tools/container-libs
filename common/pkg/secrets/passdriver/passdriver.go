@@ -23,6 +23,10 @@ type driverConfig struct {
 	KeyID string
 	// GPGHomedir is the homedir where the GPG keys are stored
 	GPGHomedir string
+	// GPGProgram is the executable used for GPG operations.
+	GPGProgram string
+	// ShowGPGStderr sends GPG diagnostics to the caller's standard error.
+	ShowGPGStderr bool
 }
 
 func (cfg *driverConfig) ParseOpts(opts map[string]string) {
@@ -36,10 +40,16 @@ func (cfg *driverConfig) ParseOpts(opts map[string]string) {
 	if val, ok := opts["gpghomedir"]; ok {
 		cfg.GPGHomedir = val
 	}
+	if val, ok := opts["gpgprogram"]; ok {
+		cfg.GPGProgram = val
+	}
+	if val, ok := opts["showstderr"]; ok {
+		cfg.ShowGPGStderr = val == "true"
+	}
 }
 
 func defaultDriverConfig() *driverConfig {
-	cfg := &driverConfig{}
+	cfg := &driverConfig{GPGProgram: "gpg"}
 
 	if home, err := os.UserHomeDir(); err == nil {
 		defaultLocations := []string{
@@ -158,11 +168,15 @@ func (d *Driver) gpg(ctx context.Context, in io.Reader, out io.Writer, args ...s
 	if d.GPGHomedir != "" {
 		args = append([]string{"--homedir", d.GPGHomedir}, args...)
 	}
-	cmd := exec.CommandContext(ctx, "gpg", args...)
+	cmd := exec.CommandContext(ctx, d.GPGProgram, args...)
 	cmd.Env = os.Environ()
 	cmd.Stdin = in
 	cmd.Stdout = out
-	cmd.Stderr = io.Discard
+	if d.ShowGPGStderr {
+		cmd.Stderr = os.Stderr
+	} else {
+		cmd.Stderr = io.Discard
+	}
 	return cmd.Run()
 }
 
