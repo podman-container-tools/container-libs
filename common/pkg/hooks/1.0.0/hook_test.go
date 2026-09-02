@@ -1,18 +1,12 @@
 package hook
 
 import (
-	"errors"
-	"os"
-	"path/filepath"
-	"runtime"
 	"testing"
 
 	rspec "github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/stretchr/testify/assert"
+	current "go.podman.io/common/pkg/hooks/1.1.0"
 )
-
-// path is the path to an example hook executable.
-var path string
 
 func TestGoodRead(t *testing.T) {
 	hook, err := Read([]byte("{\"version\": \"1.0.0\", \"hook\": {\"path\": \"/a/b/c\"}, \"when\": {\"always\": true}, \"stages\": [\"prestart\"]}"))
@@ -20,12 +14,12 @@ func TestGoodRead(t *testing.T) {
 		t.Fatal(err)
 	}
 	always := true
-	assert.Equal(t, &Hook{
-		Version: Version,
+	assert.Equal(t, &current.Hook{
+		Version: current.Version,
 		Hook: rspec.Hook{
 			Path: "/a/b/c",
 		},
-		When: When{
+		When: current.When{
 			Always: &always,
 		},
 		Stages: []string{"prestart"},
@@ -38,178 +32,4 @@ func TestInvalidJSON(t *testing.T) {
 		t.Fatal("unexpected success")
 	}
 	assert.Regexp(t, "^unexpected end of JSON input$", err.Error())
-}
-
-func TestGoodValidate(t *testing.T) {
-	always := true
-	hook := &Hook{
-		Version: Version,
-		Hook: rspec.Hook{
-			Path: path,
-		},
-		When: When{
-			Always: &always,
-		},
-		Stages: []string{"prestart"},
-	}
-	err := hook.Validate([]string{})
-	if err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestNilValidation(t *testing.T) {
-	var hook *Hook
-	err := hook.Validate([]string{})
-	if err == nil {
-		t.Fatal("unexpected success")
-	}
-	assert.Regexp(t, "^nil hook$", err.Error())
-}
-
-func TestWrongVersion(t *testing.T) {
-	hook := Hook{Version: "0.1.0"}
-	err := hook.Validate([]string{})
-	if err == nil {
-		t.Fatal("unexpected success")
-	}
-	assert.Regexp(t, "^unexpected hook version \"0.1.0\" \\(expecting 1.0.0\\)$", err.Error())
-}
-
-func TestNoHookPath(t *testing.T) {
-	hook := Hook{
-		Version: "1.0.0",
-		Hook:    rspec.Hook{},
-	}
-	err := hook.Validate([]string{})
-	if err == nil {
-		t.Fatal("unexpected success")
-	}
-	assert.Regexp(t, "^missing required property: hook.path$", err.Error())
-}
-
-func TestUnknownHookPath(t *testing.T) {
-	hook := Hook{
-		Version: "1.0.0",
-		Hook: rspec.Hook{
-			Path: filepath.Join("does", "not", "exist"),
-		},
-	}
-	err := hook.Validate([]string{})
-	if err == nil {
-		t.Fatal("unexpected success")
-	}
-	assert.Regexp(t, "^(faccessat|stat) does/not/exist: no such file or directory$", err.Error())
-	if !errors.Is(err, os.ErrNotExist) {
-		t.Fatal("opaque wrapping for not-exist errors")
-	}
-}
-
-func TestNoStages(t *testing.T) {
-	hook := Hook{
-		Version: "1.0.0",
-		Hook: rspec.Hook{
-			Path: path,
-		},
-	}
-	err := hook.Validate([]string{})
-	if err == nil {
-		t.Fatal("unexpected success")
-	}
-	assert.Regexp(t, "^missing required property: stages$", err.Error())
-}
-
-func TestInvalidStage(t *testing.T) {
-	hook := Hook{
-		Version: "1.0.0",
-		Hook: rspec.Hook{
-			Path: path,
-		},
-		Stages: []string{"does-not-exist"},
-	}
-	err := hook.Validate([]string{})
-	if err == nil {
-		t.Fatal("unexpected success")
-	}
-	assert.Regexp(t, "^unknown stage \"does-not-exist\"$", err.Error())
-}
-
-func TestExtensionStage(t *testing.T) {
-	hook := Hook{
-		Version: "1.0.0",
-		Hook: rspec.Hook{
-			Path: path,
-		},
-		Stages: []string{"prestart", "b"},
-	}
-	err := hook.Validate([]string{"a", "b", "c"})
-	if err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestInvalidAnnotationKey(t *testing.T) {
-	hook := Hook{
-		Version: "1.0.0",
-		Hook: rspec.Hook{
-			Path: path,
-		},
-		When: When{
-			Annotations: map[string]string{
-				"[": "a",
-			},
-		},
-		Stages: []string{"prestart"},
-	}
-	err := hook.Validate([]string{})
-	if err == nil {
-		t.Fatal("unexpected success")
-	}
-	assert.Regexp(t, "^invalid annotation key \"\\[\": error parsing regexp: .*", err.Error())
-}
-
-func TestInvalidAnnotationValue(t *testing.T) {
-	hook := Hook{
-		Version: "1.0.0",
-		Hook: rspec.Hook{
-			Path: path,
-		},
-		When: When{
-			Annotations: map[string]string{
-				"a": "[",
-			},
-		},
-		Stages: []string{"prestart"},
-	}
-	err := hook.Validate([]string{})
-	if err == nil {
-		t.Fatal("unexpected success")
-	}
-	assert.Regexp(t, "^invalid annotation value \"\\[\": error parsing regexp: .*", err.Error())
-}
-
-func TestInvalidCommand(t *testing.T) {
-	hook := Hook{
-		Version: "1.0.0",
-		Hook: rspec.Hook{
-			Path: path,
-		},
-		When: When{
-			Commands: []string{"["},
-		},
-		Stages: []string{"prestart"},
-	}
-	err := hook.Validate([]string{})
-	if err == nil {
-		t.Fatal("unexpected success")
-	}
-	assert.Regexp(t, "^invalid command \"\\[\": error parsing regexp: .*", err.Error())
-}
-
-func init() {
-	if runtime.GOOS != "windows" {
-		path = "/bin/sh"
-	} else {
-		panic("we need a reliable executable path on Windows")
-	}
 }

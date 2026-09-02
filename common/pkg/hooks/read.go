@@ -11,7 +11,8 @@ import (
 
 	"github.com/sirupsen/logrus"
 	old "go.podman.io/common/pkg/hooks/0.1.0"
-	current "go.podman.io/common/pkg/hooks/1.0.0"
+	prev "go.podman.io/common/pkg/hooks/1.0.0"
+	current "go.podman.io/common/pkg/hooks/1.1.0"
 )
 
 type reader func(content []byte) (*current.Hook, error)
@@ -95,6 +96,7 @@ func ReadDir(path string, extensionStages []string, hooks map[string]*current.Ho
 
 func init() {
 	Readers[current.Version] = current.Read
+	Readers[prev.Version] = prev.Read
 	Readers[old.Version] = old.Read
 	Readers[""] = old.Read
 }

@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	rspec "github.com/opencontainers/runtime-spec/specs-go"
-	current "go.podman.io/common/pkg/hooks/1.0.0"
+	current "go.podman.io/common/pkg/hooks/1.1.0"
 )
 
 // Version is the hook configuration version defined in this package.

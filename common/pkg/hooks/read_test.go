@@ -9,7 +9,7 @@ import (
 
 	rspec "github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/stretchr/testify/assert"
-	current "go.podman.io/common/pkg/hooks/1.0.0"
+	current "go.podman.io/common/pkg/hooks/1.1.0"
 )
 
 func TestNoJSONSuffix(t *testing.T) {
