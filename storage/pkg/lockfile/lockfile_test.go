@@ -516,7 +516,7 @@ func TestLockfileMixedConcurrent(t *testing.T) {
 			l.Lock()
 			tmp := atomic.AddInt32(c, diff)
 			assert.True(t, tmp == diff, "counter should be %d but instead is %d", diff, tmp)
-			time.Sleep(100 * time.Millisecond)
+			time.Sleep(1 * time.Millisecond)
 			atomic.AddInt32(c, diff*(-1))
 			l.Unlock()
 		}
@@ -530,7 +530,7 @@ func TestLockfileMixedConcurrent(t *testing.T) {
 			l.RLock()
 			tmp := atomic.AddInt32(c, 1)
 			assert.True(t, tmp >= 1 && tmp < diff)
-			time.Sleep(100 * time.Millisecond)
+			time.Sleep(1 * time.Millisecond)
 			atomic.AddInt32(c, -1)
 			l.Unlock()
 		}
