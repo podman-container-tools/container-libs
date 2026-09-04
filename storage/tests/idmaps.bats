@@ -1245,3 +1245,127 @@ load helpers
 	storage --graph ${TESTDIR}/imagestore shutdown
 	storage --graph ${TESTDIR}/newstore shutdown
 }
+
+@test "idmaps-import-mapped-image-creates-one-layer" {
+	export _CONTAINERS_OVERLAY_DISABLE_IDMAP=yes
+	# Verify that importing layers with UID/GID mappings creates exactly
+	# one layer per diff (directly mapped), not an unmapped base plus a
+	# mapped copy.
+	if test -z "$(which tar 2> /dev/null)" ; then
+		skip "need tar"
+	fi
+
+	if [ "$OS" != "Linux" ]; then
+		skip "not supported on $OS"
+	fi
+	case "$STORAGE_DRIVER" in
+	btrfs|overlay*|vfs|zfs)
+		;;
+	*)
+		skip "not supported by driver $STORAGE_DRIVER"
+		;;
+	esac
+	case "$STORAGE_OPTION" in
+	*mount_program*)
+		skip "test not supported when using mount_program"
+		;;
+	esac
+
+	# Create two layer tars with files owned by root.
+	createrandom "$TESTDIR"/file1
+	chown 0:0 "$TESTDIR"/file1
+	createrandom "$TESTDIR"/file2
+	chown 0:0 "$TESTDIR"/file2
+	pushd $TESTDIR > /dev/null
+	tar cf diff1.tar file1
+	tar cf diff2.tar file2
+	popd > /dev/null
+
+	uidrange=$((($RANDOM+32767)*65536))
+	gidrange=$((($RANDOM+32767)*65536))
+
+	# Import the base layer with custom mappings.
+	run storage --debug=false import-layer -f "$TESTDIR"/diff1.tar --uidmap 0:${uidrange}:65536 --gidmap 0:${gidrange}:65536
+	echo "$output"
+	[ "$status" -eq 0 ]
+	[ "$output" != "" ]
+	layer1="$output"
+
+	# Import a second layer on top, also with custom mappings.
+	run storage --debug=false import-layer -f "$TESTDIR"/diff2.tar --uidmap 0:${uidrange}:65536 --gidmap 0:${gidrange}:65536 $layer1
+	echo "$output"
+	[ "$status" -eq 0 ]
+	[ "$output" != "" ]
+	layer2="$output"
+
+	# There must be exactly two layers total, not more.
+	run storage --debug=false layers
+	echo "$output"
+	[ "$status" -eq 0 ]
+	[ "${#lines[*]}" -eq 2 ]
+
+	# Create an image for these layers and verify only one top layer.
+	run storage --debug=false create-image $layer2
+	[ "$status" -eq 0 ]
+	image="$output"
+	run storage --debug=false image $image
+	[ "$status" -eq 0 ]
+	tops=$(grep '^Top Layer:' <<< "$output" | wc -l)
+	[ "$tops" -eq 1 ]
+
+	# Mount the top layer and verify mapped ownership.
+	run storage --debug=false mount $layer2
+	[ "$status" -eq 0 ]
+	mount="$output"
+	run stat -c %u:%g "$mount"/file1
+	[ "$status" -eq 0 ]
+	[ "$output" = "${uidrange}:${gidrange}" ]
+	run stat -c %u:%g "$mount"/file2
+	[ "$status" -eq 0 ]
+	[ "$output" = "${uidrange}:${gidrange}" ]
+
+	storage unmount $layer2
+
+	# Create a container with host mappings (no UID/GID map).
+	# The layer was imported with 0->uidrange mapping, so creating a
+	# host-mapped container reverses it: files appear as 0:0.
+	run storage --debug=false create-container --hostuidmap --hostgidmap $image
+	echo "$output"
+	[ "$status" -eq 0 ]
+	[ "$output" != "" ]
+	hostcontainer="$output"
+	run storage --debug=false mount $hostcontainer
+	echo "$output"
+	[ "$status" -eq 0 ]
+	hostmount="$output"
+	run stat -c %u:%g "$hostmount"/file1
+	[ "$status" -eq 0 ]
+	[ "$output" = "0:0" ]
+	run stat -c %u:%g "$hostmount"/file2
+	[ "$status" -eq 0 ]
+	[ "$output" = "0:0" ]
+	storage unmount $hostcontainer
+
+	# Create a container with a different mapping.
+	# Files were stored mapped to uidrange:gidrange (i.e. UID 0 inside
+	# the container was chowned to uidrange on disk).  A container with
+	# a new mapping must re-shift: UID 0 -> newuidrange.
+	newuidrange=$((($RANDOM+32767)*65536))
+	newgidrange=$((($RANDOM+32767)*65536))
+	run storage --debug=false create-container --uidmap 0:${newuidrange}:65536 --gidmap 0:${newgidrange}:65536 $image
+	echo "$output"
+	[ "$status" -eq 0 ]
+	[ "$output" != "" ]
+	newcontainer="$output"
+	run storage --debug=false mount $newcontainer
+	echo "$output"
+	[ "$status" -eq 0 ]
+	newmount="$output"
+	run stat -c %u:%g "$newmount"/file1
+	[ "$status" -eq 0 ]
+	[ "$output" = "${newuidrange}:${newgidrange}" ]
+	run stat -c %u:%g "$newmount"/file2
+	[ "$status" -eq 0 ]
+	[ "$output" = "${newuidrange}:${newgidrange}" ]
+	storage unmount $newcontainer
+}
