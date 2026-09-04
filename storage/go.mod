@@ -19,12 +19,14 @@ require (
 	github.com/moby/sys/mountinfo v0.7.2
 	github.com/moby/sys/user v0.4.1
 	github.com/opencontainers/go-digest v1.0.0
+	github.com/opencontainers/image-spec v1.1.1
 	github.com/opencontainers/runtime-spec v1.3.0
 	github.com/opencontainers/selinux v1.15.1
 	github.com/sirupsen/logrus v1.10.2
 	github.com/stretchr/testify v1.12.1
 	github.com/tchap/go-patricia/v2 v2.3.3
 	github.com/ulikunitz/xz v0.5.16
+	github.com/varlink/go v0.4.1-0.20260709160413-86facf17ea15
 	github.com/vbatts/tar-split v0.12.3
 	golang.org/x/sync v0.22.0
 	golang.org/x/sys v0.47.0
