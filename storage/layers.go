@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/klauspost/pgzip"
@@ -27,6 +28,7 @@ import (
 	drivers "go.podman.io/storage/drivers"
 	"go.podman.io/storage/internal/tempdir"
 	"go.podman.io/storage/pkg/archive"
+	"go.podman.io/storage/pkg/fileutils"
 	"go.podman.io/storage/pkg/idtools"
 	"go.podman.io/storage/pkg/ioutils"
 	"go.podman.io/storage/pkg/lockfile"
@@ -40,6 +42,8 @@ import (
 
 const (
 	tarSplitSuffix = ".tar-split.gz"
+	// compressedBlobTempPrefix is the prefix for temp files used during blob preservation.
+	compressedBlobTempPrefix = "compressed-blob.tmp"
 	// tempDirPath is the subdirectory name used for storing temporary directories during layer deletion
 	tempDirPath    = "tmp"
 	incompleteFlag = "incomplete"
@@ -231,6 +235,10 @@ type maybeStagedLayerExtraction struct {
 
 	// cleanupFuncs contains the set of tempdir cleanup function that get executed in cleanup()
 	cleanupFuncs []tempdir.CleanupTempDirFunc
+
+	// compressedBlobTempFile is the path to a temp file containing the preserved
+	// compressed blob, created during staging. Moved to the layer dir after commit.
+	compressedBlobTempFile string
 }
 
 type applyDiffResult struct {
@@ -1715,6 +1723,18 @@ func (r *layerStore) create(id string, parentLayer *Layer, names []string, mount
 					cleanupFailureContext = "committing staged layer diff"
 					return nil, -1, err
 				}
+				// Move preserved compressed blob from staging temp dir to the committed layer dir.
+				if contents.stagedLayerExtraction.compressedBlobTempFile != "" {
+					if provider, ok := r.driver.(compressedBlobPathProvider); ok {
+						if blobDst := provider.CompressedBlobPath(layer.ID); blobDst != "" {
+							if err := renameOrCopy(contents.stagedLayerExtraction.compressedBlobTempFile, blobDst); err != nil {
+								logrus.Warnf("Failed to persist compressed blob to %q: %v", blobDst, err)
+							} else if err := os.Chmod(blobDst, 0o600); err != nil {
+								logrus.Warnf("Failed to set permissions on compressed blob %q: %v", blobDst, err)
+							}
+						}
+					}
+				}
 				r.applyDiffResultToLayer(layer, contents.stagedLayerExtraction.result)
 			} else {
 				// The diff was not staged, apply it now here instead.
@@ -2604,7 +2624,16 @@ func (r *layerStore) stageWithUnlockedStore(sl *maybeStagedLayerExtraction, pare
 		}
 	}()
 
-	result, err := applyDiff(layerOptions, sl.diff, f, func(payload io.Reader) (int64, error) {
+	// Use the staging temp dir for blob preservation; the blob will be moved
+	// to the final layer directory after commitLayer. Only enable if the
+	// driver supports persisting the blob (compressedBlobPathProvider).
+	var stagedBlobPath string
+	if layerOptions != nil && layerOptions.PreserveCompressedBlob {
+		if _, ok := r.driver.(compressedBlobPathProvider); ok {
+			stagedBlobPath = filepath.Join(filepath.Dir(stagedTarSplit.Path), "compressed-blob")
+		}
+	}
+	result, err := applyDiff(layerOptions, sl.diff, f, stagedBlobPath, func(payload io.Reader) (int64, error) {
 		cleanup, stagedLayer, size, err := sl.staging.StartStagingDiffToApply(parent, drivers.ApplyDiffOpts{
 			Diff:     payload,
 			Mappings: idtools.NewIDMappingsFromMaps(layerOptions.IDMappingOptions.UIDMap, layerOptions.IDMappingOptions.GIDMap),
@@ -2624,6 +2653,13 @@ func (r *layerStore) stageWithUnlockedStore(sl *maybeStagedLayerExtraction, pare
 	}
 
 	sl.result = result
+	// Record the temp blob path only if applyDiff actually created the file
+	// (it won't for uncompressed streams or if CreateTemp failed).
+	if stagedBlobPath != "" {
+		if _, err := os.Stat(stagedBlobPath); err == nil {
+			sl.compressedBlobTempFile = stagedBlobPath
+		}
+	}
 	return nil
 }
 
@@ -2638,9 +2674,32 @@ func (sl *maybeStagedLayerExtraction) commitLayer(r *layerStore, layerID string)
 	return sl.staging.CommitStagedLayer(layerID, sl.stagedLayer)
 }
 
+// compressedBlobPathProvider is an optional driver capability for preserving
+// the original compressed stream alongside the extracted layer. The driver
+// returns the full file path where the blob should be stored, keeping the
+// driver in control of its internal directory layout.
+type compressedBlobPathProvider interface {
+	CompressedBlobPath(id string) string
+}
+
+// renameOrCopy attempts os.Rename first; if it fails with EXDEV (cross-device),
+// it falls back to fileutils.CopyFile. This handles the rare case where the
+// staging temp dir and the driver's layer dir are on different mount points.
+func renameOrCopy(src, dst string) error {
+	if err := os.Rename(src, dst); err == nil {
+		return nil
+	} else if !errors.Is(err, syscall.EXDEV) {
+		return err
+	}
+	if _, err := fileutils.CopyFile(src, dst); err != nil {
+		return err
+	}
+	return os.Remove(src)
+}
+
 // applyDiff can be called without holding any store locks so if the supplied
 // applyDriverFunc requires locking the caller must ensure proper locking.
-func applyDiff(layerOptions *LayerOptions, diff io.Reader, tarSplitFile *os.File, applyDriverFunc func(io.Reader) (int64, error)) (*applyDiffResult, error) {
+func applyDiff(layerOptions *LayerOptions, diff io.Reader, tarSplitFile *os.File, blobPath string, applyDriverFunc func(io.Reader) (int64, error)) (*applyDiffResult, error) {
 	header := make([]byte, 10240)
 	n, err := diff.Read(header)
 	if err != nil && err != io.EOF {
@@ -2673,6 +2732,35 @@ func applyDiff(layerOptions *LayerOptions, diff io.Reader, tarSplitFile *os.File
 	}
 	compressedCounter := ioutils.NewWriteCounter(compressedWriter)
 	defragmented = io.TeeReader(defragmented, compressedCounter)
+
+	// blobSuccess is declared here so the deferred closure below can observe it.
+	var blobSuccess bool
+	if blobPath != "" && layerOptions != nil && layerOptions.PreserveCompressedBlob && compression != archive.Uncompressed {
+		blobFile, cerr := os.CreateTemp(filepath.Dir(blobPath), compressedBlobTempPrefix)
+		if cerr != nil {
+			logrus.Warnf("Failed to create compressed blob temp file for %q: %v", blobPath, cerr)
+		} else {
+			defragmented = io.TeeReader(defragmented, blobFile)
+			defer func() {
+				if blobSuccess {
+					if err := blobFile.Sync(); err != nil {
+						logrus.Warnf("Failed to sync compressed blob %q: %v", blobFile.Name(), err)
+						blobSuccess = false
+					}
+				}
+				blobFile.Close()
+				if blobSuccess {
+					if err := os.Rename(blobFile.Name(), blobPath); err != nil {
+						logrus.Warnf("Failed to persist compressed blob %q: %v", blobPath, err)
+					}
+				} else {
+					if err := os.Remove(blobFile.Name()); err != nil {
+						logrus.Debugf("Failed to clean up compressed blob temp file %q: %v", blobFile.Name(), err)
+					}
+				}
+			}()
+		}
+	}
 
 	tarSplitWriter := pools.BufioWriter32KPool.Get(tarSplitFile)
 	defer pools.BufioWriter32KPool.Put(tarSplitWriter)
@@ -2771,6 +2859,7 @@ func applyDiff(layerOptions *LayerOptions, diff io.Reader, tarSplitFile *os.File
 	slices.Sort(result.gids)
 
 	result.size = size
+	blobSuccess = true
 
 	return &result, err
 }
@@ -2797,7 +2886,13 @@ func (r *layerStore) applyDiffWithOptions(to string, layerOptions *LayerOptions,
 		}
 	}()
 
-	result, err := applyDiff(layerOptions, diff, tarSplitFile, func(payload io.Reader) (int64, error) {
+	var blobPath string
+	if layerOptions != nil && layerOptions.PreserveCompressedBlob {
+		if provider, ok := r.driver.(compressedBlobPathProvider); ok {
+			blobPath = provider.CompressedBlobPath(layer.ID)
+		}
+	}
+	result, err := applyDiff(layerOptions, diff, tarSplitFile, blobPath, func(payload io.Reader) (int64, error) {
 		options := drivers.ApplyDiffOpts{
 			Diff:       payload,
 			Mappings:   r.layerMappings(layer),
