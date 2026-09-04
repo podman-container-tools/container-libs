@@ -25,15 +25,16 @@ var testUntarFns = map[string]func(string, io.Reader) error{
 }
 
 // testBreakout is a helper function that, within the provided `tmpdir` directory,
-// creates a `victim` folder with a generated `hello` file in it.
-// `untar` extracts to a directory named `dest`, the tar file created from `headers`.
+// creates a `victim` folder and a sibling `destx` folder, each with a generated
+// `hello` file. `untar` extracts to a directory named `dest`, the tar file
+// created from `headers`.
 //
 // Here are the tested scenarios:
-// - removed `victim` folder				(write)
-// - removed files from `victim` folder			(write)
-// - new files in `victim` folder			(write)
-// - modified files in `victim` folder			(write)
-// - file in `dest` with same content as `victim/hello` (read)
+// - removed `victim` or `destx` folder				(write)
+// - removed files from `victim` or `destx` folder		(write)
+// - new files in `victim` or `destx` folder			(write)
+// - modified files in `victim` or `destx` folder		(write)
+// - file in `dest` with same content as `victim/hello` or `destx/hello` (read)
 //
 // When using testBreakout make sure you cover one of the scenarios listed above.
 func testBreakout(t *testing.T, untarFn string, headers []*tar.Header) error {
@@ -44,19 +45,35 @@ func testBreakout(t *testing.T, untarFn string, headers []*tar.Header) error {
 		return err
 	}
 
+	destx := filepath.Join(tmpdir, "destx")
+	if err := os.Mkdir(destx, 0o755); err != nil {
+		return err
+	}
+	destxHello := filepath.Join(destx, "hello")
+
 	victim := filepath.Join(tmpdir, "victim")
 	if err := os.Mkdir(victim, 0o755); err != nil {
 		return err
 	}
-	hello := filepath.Join(victim, "hello")
+	victimHello := filepath.Join(victim, "hello")
+
 	helloData, err := time.Now().MarshalText()
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(hello, helloData, 0o644); err != nil {
+
+	if err := os.WriteFile(victimHello, helloData, 0o644); err != nil {
 		return err
 	}
-	helloStat, err := os.Stat(hello)
+	helloStat, err := os.Stat(victimHello)
+	if err != nil {
+		return err
+	}
+
+	if err := os.WriteFile(destxHello, helloData, 0o644); err != nil {
+		return err
+	}
+	destxHelloStat, err := os.Stat(destxHello)
 	if err != nil {
 		return err
 	}
@@ -86,37 +103,51 @@ func testBreakout(t *testing.T, untarFn string, headers []*tar.Header) error {
 		t.Logf("breakoutError: %v\n", err)
 	}
 
-	// Check victim folder
-	f, err := os.Open(victim)
+	if err := checkBreakoutSensitiveDir(victim, "hello", helloData, helloStat); err != nil {
+		return err
+	}
+	if err := checkBreakoutSensitiveDir(destx, "hello", helloData, destxHelloStat); err != nil {
+		return err
+	}
+
+	// Check that nothing in dest/ has the same content as victim/hello or destx/hello.
+	// Since those files were generated with time.Now(), it is safe to assume that any
+	// file in dest/ whose content matches exactly, managed somehow to access them.
+	return checkBreakoutNoLeakInDest(dest, []breakoutLeak{
+		{path: victimHello, data: helloData},
+		{path: destxHello, data: helloData},
+	})
+}
+
+type breakoutLeak struct {
+	path string
+	data []byte
+}
+
+func checkBreakoutSensitiveDir(dir, fileName string, helloData []byte, helloStat os.FileInfo) error {
+	f, err := os.Open(dir)
 	if err != nil {
-		// codepath taken if victim folder was removed
-		return fmt.Errorf("archive breakout: error reading %q: %w", victim, err)
+		return fmt.Errorf("archive breakout: error reading %q: %w", dir, err)
 	}
 	defer f.Close()
 
-	// Check contents of victim folder
-	//
-	// We are only interested in getting 2 files from the victim folder, because if all is well
-	// we expect only one result, the `hello` file. If there is a second result, it cannot
-	// hold the same name `hello` and we assume that a new file got created in the victim folder.
-	// That is enough to detect an archive breakout.
+	// We are only interested in getting 2 files from the directory, because if all is well
+	// we expect only one result, the sensitive file. If there is a second result, it cannot
+	// hold the same name and we assume that a new file got created in the directory.
 	names, err := f.Readdirnames(2)
 	if err != nil {
-		// codepath taken if victim is not a folder
-		return fmt.Errorf("archive breakout: error reading directory content of %q: %w", victim, err)
+		return fmt.Errorf("archive breakout: error reading directory content of %q: %w", dir, err)
 	}
 	for _, name := range names {
-		if name != "hello" {
-			// codepath taken if new file was created in victim folder
-			return fmt.Errorf("archive breakout: new file %q", name)
+		if name != fileName {
+			return fmt.Errorf("archive breakout: new file %q in %q", name, dir)
 		}
 	}
 
-	// Check victim/hello
+	hello := filepath.Join(dir, fileName)
 	f, err = os.Open(hello)
 	if err != nil {
-		// codepath taken if read permissions were removed
-		return fmt.Errorf("archive breakout: could not lstat %q: %w", hello, err)
+		return fmt.Errorf("archive breakout: could not open %q: %w", hello, err)
 	}
 	defer f.Close()
 	b, err := io.ReadAll(f)
@@ -135,11 +166,10 @@ func testBreakout(t *testing.T, untarFn string, headers []*tar.Header) error {
 		// codepath taken if hello has been modified
 		return fmt.Errorf("archive breakout: file %q has been modified. Contents: expected=%q, got=%q. FileInfo: expected=%#v, got=%#v", hello, helloData, b, helloStat, fi)
 	}
+	return nil
+}
 
-	// Check that nothing in dest/ has the same content as victim/hello.
-	// Since victim/hello was generated with time.Now(), it is safe to assume
-	// that any file whose content matches exactly victim/hello, managed somehow
-	// to access victim/hello.
+func checkBreakoutNoLeakInDest(dest string, leaks []breakoutLeak) error {
 	return filepath.WalkDir(dest, func(path string, d fs.DirEntry, err error) error {
 		if d.IsDir() {
 			if err != nil {
@@ -158,8 +188,10 @@ func testBreakout(t *testing.T, untarFn string, headers []*tar.Header) error {
 			// Houston, we have a problem. Aborting (space)walk.
 			return err
 		}
-		if bytes.Equal(helloData, b) {
-			return fmt.Errorf("archive breakout: file %q has been accessed via %q", hello, path)
+		for _, leak := range leaks {
+			if bytes.Equal(leak.data, b) {
+				return fmt.Errorf("archive breakout: file %q has been accessed via %q", leak.path, path)
+			}
 		}
 		return nil
 	})
