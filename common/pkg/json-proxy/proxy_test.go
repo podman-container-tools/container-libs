@@ -506,6 +506,32 @@ func TestProxyGetBlob(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestProxyGetEngineConfig(t *testing.T) {
+	p := newProxy(t)
+
+	v, err := p.callNoFd("GetEngineConfig", nil)
+	require.NoError(t, err)
+
+	// The reply value is a JSON object; it arrives as a map here.
+	m, ok := v.(map[string]any)
+	require.True(t, ok, "GetEngineConfig return value is %T", v)
+
+	// retry is always present. We don't assert a specific number since it
+	// comes from the host containers.conf, but it must be a non-negative
+	// integer (default 3).
+	retry, ok := m["retry"].(float64)
+	require.True(t, ok, "retry is %T", m["retry"])
+	assert.GreaterOrEqual(t, retry, float64(0))
+
+	// retry_delay_ms is optional (omitted when unset => exponential backoff).
+	// When present it must be a non-negative integer count of milliseconds.
+	if raw, present := m["retry_delay_ms"]; present {
+		delay, ok := raw.(float64)
+		require.True(t, ok, "retry_delay_ms is %T", raw)
+		assert.GreaterOrEqual(t, delay, float64(0))
+	}
+}
+
 func TestProxyPolicyVerification(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
