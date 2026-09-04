@@ -75,3 +75,66 @@ func Test_refCount(t *testing.T) {
 		})
 	}
 }
+
+func TestReadPidFile(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		create  bool
+		wantErr error
+		wantPid int
+	}{
+		{
+			name:    "valid pid",
+			content: "1234\n",
+			create:  true,
+			wantPid: 1234,
+		},
+		{
+			name:    "valid pid no newline",
+			content: "5678",
+			create:  true,
+			wantPid: 5678,
+		},
+		{
+			name:    "empty pid file",
+			content: "",
+			create:  true,
+			wantErr: errEmptyPIDFile,
+		},
+		{
+			name:    "only whitespace",
+			content: "  \n ",
+			create:  true,
+			wantErr: errEmptyPIDFile,
+		},
+		{
+			name:    "non-existent file",
+			create:  false,
+			wantErr: os.ErrNotExist,
+		},
+		{
+			name:    "invalid content",
+			content: "abc",
+			create:  true,
+			wantErr: strconv.ErrSyntax,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "pidfile")
+			if tt.create {
+				err := os.WriteFile(path, []byte(tt.content), 0o600)
+				assert.NoError(t, err)
+			}
+			pid, err := readPidFile(path)
+			if tt.wantErr != nil {
+				assert.Error(t, err)
+				assert.ErrorIs(t, err, tt.wantErr)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tt.wantPid, pid)
+			}
+		})
+	}
+}
