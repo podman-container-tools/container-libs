@@ -45,29 +45,6 @@ type StoreTransport interface {
 	SetStore(storage.Store)
 	// GetStoreIfSet returns the default store for this transport, or nil if not set/determined yet.
 	GetStoreIfSet() storage.Store
-	// GetImage retrieves the image from the transport's store that's named
-	// by the reference.
-	// Deprecated: Surprisingly, with a StoreTransport reference which contains an ID,
-	// this ignores that ID; and repeated calls of GetStoreImage with the same named reference
-	// can return different images, with no way for the caller to "freeze" the storage.Image identity
-	// without discarding the name entirely.
-	//
-	// Use storage.ResolveReference instead; note that if the image is not found, ResolveReference returns
-	// c/image/v5/storage.ErrNoSuchImage, not c/storage.ErrImageUnknown.
-	GetImage(types.ImageReference) (*storage.Image, error)
-	// GetStoreImage retrieves the image from a specified store that's named
-	// by the reference.
-	//
-	// Deprecated: Surprisingly, with a StoreTransport reference which contains an ID,
-	// this ignores that ID; and repeated calls of GetStoreImage with the same named reference
-	// can return different images, with no way for the caller to "freeze" the storage.Image identity
-	// without discarding the name entirely.
-	//
-	// Also, a StoreTransport reference already contains a store, so providing another one is redundant.
-	//
-	// Use storage.ResolveReference instead; note that if the image is not found, ResolveReference returns
-	// c/image/v5/storage.ErrNoSuchImage, not c/storage.ErrImageUnknown.
-	GetStoreImage(storage.Store, types.ImageReference) (*storage.Image, error)
 	// ParseStoreReference parses a reference, overriding any store
 	// specification that it may contain.
 	ParseStoreReference(store storage.Store, reference string) (*storageReference, error)
@@ -304,46 +281,6 @@ func (s *storageTransport) ParseReference(reference string) (types.ImageReferenc
 		store = store2
 	}
 	return s.ParseStoreReference(store, reference)
-}
-
-// Deprecated: Surprisingly, with a StoreTransport reference which contains an ID,
-// this ignores that ID; and repeated calls of GetStoreImage with the same named reference
-// can return different images, with no way for the caller to "freeze" the storage.Image identity
-// without discarding the name entirely.
-//
-// Also, a StoreTransport reference already contains a store, so providing another one is redundant.
-//
-// Use storage.ResolveReference instead; note that if the image is not found, ResolveReference returns
-// c/image/v5/storage.ErrNoSuchImage, not c/storage.ErrImageUnknown.
-func (s storageTransport) GetStoreImage(store storage.Store, ref types.ImageReference) (*storage.Image, error) {
-	dref := ref.DockerReference()
-	if dref != nil {
-		if img, err := store.Image(dref.String()); err == nil {
-			return img, nil
-		}
-	}
-	if sref, ok := ref.(*storageReference); ok {
-		tmpRef := *sref
-		if img, err := tmpRef.resolveImage(nil); err == nil {
-			return img, nil
-		}
-	}
-	return nil, storage.ErrImageUnknown
-}
-
-// Deprecated: Surprisingly, with a StoreTransport reference which contains an ID,
-// this ignores that ID; and repeated calls of GetStoreImage with the same named reference
-// can return different images, with no way for the caller to "freeze" the storage.Image identity
-// without discarding the name entirely.
-//
-// Use storage.ResolveReference instead; note that if the image is not found, ResolveReference returns
-// c/image/v5/storage.ErrNoSuchImage, not c/storage.ErrImageUnknown.
-func (s *storageTransport) GetImage(ref types.ImageReference) (*storage.Image, error) {
-	store, err := s.GetStore()
-	if err != nil {
-		return nil, err
-	}
-	return s.GetStoreImage(store, ref)
 }
 
 func (s storageTransport) ValidatePolicyConfigurationScope(scope string) error {
