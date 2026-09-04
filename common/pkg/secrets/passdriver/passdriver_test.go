@@ -3,6 +3,8 @@ package passdriver
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -11,9 +13,17 @@ import (
 
 const gpgTestID = "testing@passdriver"
 
+// setupDriver configures a driver for tests under a single temp directory, including
+// the root, sibling directory (storex) for testing prefix collisions, and gpg homedir.
 func setupDriver(t *testing.T) *Driver {
-	base := t.TempDir()
-	gpghomedir := t.TempDir()
+	t.Helper()
+	tmpdir := t.TempDir()
+	base := filepath.Join(tmpdir, "store")
+	sibling := filepath.Join(tmpdir, "storex")
+	gpghomedir := filepath.Join(tmpdir, "gpg")
+	require.NoError(t, os.MkdirAll(base, 0o755))
+	require.NoError(t, os.MkdirAll(sibling, 0o755))
+	require.NoError(t, os.MkdirAll(gpghomedir, 0o755))
 
 	driver, err := NewDriver(map[string]string{
 		"root":       base,
@@ -54,6 +64,12 @@ func TestStoreAndLookup(t *testing.T) {
 		{
 			name:        "storing into a sneaky key fails",
 			key:         "../../../sneaky",
+			value:       []byte("abc"),
+			expStoreErr: define.ErrInvalidKey,
+		},
+		{
+			name:        "storing with root path prefix collision fails",
+			key:         "../storex/marker",
 			value:       []byte("abc"),
 			expStoreErr: define.ErrInvalidKey,
 		},
@@ -109,6 +125,11 @@ func TestLookup(t *testing.T) {
 			key:    "../../../etc/shadow",
 			expErr: define.ErrInvalidKey,
 		},
+		{
+			name:   "lookup with root path prefix collision fails",
+			key:    "../storex/marker",
+			expErr: define.ErrInvalidKey,
+		},
 	}
 
 	for _, tc := range cases {
@@ -155,6 +176,11 @@ func TestDelete(t *testing.T) {
 		{
 			name:   "using a sneaky path fails",
 			key:    "../../../etc/shadow",
+			expErr: define.ErrInvalidKey,
+		},
+		{
+			name:   "delete with root path prefix collision fails",
+			key:    "../storex/marker",
 			expErr: define.ErrInvalidKey,
 		},
 	}

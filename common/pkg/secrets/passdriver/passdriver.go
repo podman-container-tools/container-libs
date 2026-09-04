@@ -171,7 +171,7 @@ func (d *Driver) getPath(id string) (string, error) {
 	if err != nil {
 		return "", define.ErrInvalidKey
 	}
-	if !strings.HasPrefix(path, d.Root) {
+	if !strings.HasPrefix(path, d.Root+string(filepath.Separator)) {
 		return "", define.ErrInvalidKey
 	}
 	return path + ".gpg", nil
