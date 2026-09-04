@@ -101,19 +101,17 @@ func nativeConnectionCreate(options ConnectionCreateOptions) error {
 	})
 }
 
-func nativeConnectionExec(options ConnectionExecOptions, input io.Reader) (*ConnectionExecReport, error) {
+func nativePrepareSSHCmd(options ConnectionExecOptions, input io.Reader) (*exec.Cmd, *bytes.Buffer, error) {
 	dst, uri, err := Validate(options.User, options.Host, options.Port, options.Identity)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	ssh, err := exec.LookPath("ssh")
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	output := &bytes.Buffer{}
-	errors := &bytes.Buffer{}
 	if host, _, ok := strings.Cut(uri.Host, "/run"); ok {
 		uri.Host = host
 	}
@@ -121,7 +119,7 @@ func nativeConnectionExec(options ConnectionExecOptions, input io.Reader) (*Conn
 	options.Args = append([]string{uri.User.String() + "@" + uri.Hostname()}, options.Args...)
 	conf, err := config.Default()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	args := []string{}
@@ -132,17 +130,65 @@ func nativeConnectionExec(options ConnectionExecOptions, input io.Reader) (*Conn
 		args = append(args, "-F", conf.Engine.SSHConfig)
 	}
 	args = append(args, options.Args...)
-	info := exec.Command(ssh, args...)
-	info.Stdout = output
-	info.Stderr = errors
+
+	stderr := &bytes.Buffer{}
+	cmd := exec.Command(ssh, args...)
+	cmd.Stderr = stderr
 	if input != nil {
-		info.Stdin = input
+		cmd.Stdin = input
 	}
-	err = info.Run()
+
+	return cmd, stderr, nil
+}
+
+func nativeConnectionExec(options ConnectionExecOptions, input io.Reader) (*ConnectionExecReport, error) {
+	cmd, stderr, err := nativePrepareSSHCmd(options, input)
 	if err != nil {
 		return nil, err
 	}
+
+	output := &bytes.Buffer{}
+	cmd.Stdout = output
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("%v: %w", stderr.String(), err)
+	}
 	return &ConnectionExecReport{Response: output.String()}, nil
+}
+
+type nativeExecOutputReader struct {
+	stdout io.ReadCloser
+	cmd    *exec.Cmd
+	stderr *bytes.Buffer
+}
+
+func (r *nativeExecOutputReader) Read(p []byte) (int, error) {
+	return r.stdout.Read(p)
+}
+
+func (r *nativeExecOutputReader) Close() error {
+	err := r.cmd.Wait()
+	if err != nil {
+		return fmt.Errorf("%v: %w", r.stderr.String(), err)
+	}
+	return nil
+}
+
+func nativeConnectionExecWithOutput(options ConnectionExecOptions, input io.Reader) (io.ReadCloser, error) {
+	cmd, stderr, err := nativePrepareSSHCmd(options, input)
+	if err != nil {
+		return nil, err
+	}
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, err
+	}
+
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+
+	return &nativeExecOutputReader{stdout: stdout, cmd: cmd, stderr: stderr}, nil
 }
 
 func nativeConnectionScp(options ConnectionScpOptions) (*ConnectionScpReport, error) {
