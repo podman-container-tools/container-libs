@@ -1,12 +1,15 @@
 package tarfile
 
 import (
+	"archive/tar"
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"strings"
 	"testing"
 
+	digest "github.com/opencontainers/go-digest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.podman.io/image/v5/manifest"
@@ -63,4 +66,64 @@ func TestSourcePrepareLayerData(t *testing.T) {
 			assert.Error(t, err, c.config)
 		}
 	}
+}
+
+func TestSourceGetBlobSymlinkLayerSizeMatchesBytesReturned(t *testing.T) {
+	ctx := context.Background()
+	cache := memory.New()
+
+	layerBytes := []byte("not empty")
+	diffID := digest.FromBytes(layerBytes)
+	configBytes := []byte(`{"rootfs":{"type":"layers","diff_ids":["` + diffID.String() + `"]}}`)
+
+	manifestBytes, err := json.Marshal([]ManifestItem{{Config: "config.json", Layers: []string{"layer-link.tar"}}})
+	require.NoError(t, err)
+
+	var tarfileBuffer bytes.Buffer
+	tw := tar.NewWriter(&tarfileBuffer)
+	for _, entry := range []struct {
+		name string
+		body []byte
+	}{
+		{name: "manifest.json", body: manifestBytes},
+		{name: "config.json", body: configBytes},
+		{name: "layer.tar", body: layerBytes},
+	} {
+		err = tw.WriteHeader(&tar.Header{
+			Name: entry.name,
+			Mode: 0o644,
+			Size: int64(len(entry.body)),
+		})
+		require.NoError(t, err)
+		_, err = tw.Write(entry.body)
+		require.NoError(t, err)
+	}
+
+	err = tw.WriteHeader(&tar.Header{
+		Name:     "layer-link.tar",
+		Typeflag: tar.TypeSymlink,
+		Linkname: "layer.tar",
+		Mode:     0o777,
+	})
+	require.NoError(t, err)
+
+	err = tw.Close()
+	require.NoError(t, err)
+
+	reader, err := NewReaderFromStream(nil, &tarfileBuffer)
+	require.NoError(t, err)
+	src := NewSource(reader, true, "transport name", nil, -1)
+	defer src.Close()
+
+	layerStream, reportedSize, err := src.GetBlob(ctx, types.BlobInfo{
+		Digest: diffID,
+		Size:   -1,
+	}, cache)
+	require.NoError(t, err)
+	defer layerStream.Close()
+
+	readBytes, err := io.ReadAll(layerStream)
+	require.NoError(t, err)
+	assert.Equal(t, layerBytes, readBytes)
+	assert.Equal(t, int64(len(layerBytes)), reportedSize)
 }
