@@ -2,6 +2,10 @@ package secrets
 
 import (
 	"bytes"
+	"context"
+	"io"
+	"os"
+	"os/exec"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -299,4 +303,124 @@ func TestSecretList(t *testing.T) {
 	allSecrets, err := manager.List()
 	require.NoError(t, err)
 	require.Len(t, allSecrets, 2)
+}
+
+// Deleting a secret tracked by the manager, which doesn't exist in the driver,
+// should succeed without error
+func TestDeletePartiallyDeletedSecret(t *testing.T) {
+	manager, opts := setup(t)
+
+	storeOpts := StoreOptions{
+		DriverOpts: opts,
+	}
+
+	// Create two secrets
+	_, err := manager.Store("mysecret", []byte("mydata"), drivertype, storeOpts)
+	require.NoError(t, err)
+	mysecret2ID, err := manager.Store("mysecret2", []byte("mydata2"), drivertype, storeOpts)
+	require.NoError(t, err)
+
+	allSecrets, err := manager.List()
+	require.NoError(t, err)
+	require.Len(t, allSecrets, 2)
+
+	// Calling delete on the manager should update the count
+	_, err = manager.Delete("mysecret")
+	require.NoError(t, err)
+
+	allSecrets, err = manager.List()
+	require.NoError(t, err)
+	require.Len(t, allSecrets, 1)
+
+	// Calling delete directly on the driver shouldn't update the manager
+	fileDriver, err := getDriver("file", opts)
+	require.NoError(t, err)
+
+	// Simulating someone manually editing the file,
+	// or another driver returning NoSuchSecret for any other reason
+	err = fileDriver.Delete(mysecret2ID)
+	require.NoError(t, err)
+
+	allSecrets, err = manager.List()
+	require.NoError(t, err)
+	require.Len(t, allSecrets, 1)
+
+	// If the driver does not have that secret, it's considered to be deleted
+	_, err = manager.Delete("mysecret2")
+	require.NoError(t, err)
+
+	allSecrets, err = manager.List()
+	require.NoError(t, err)
+	require.Len(t, allSecrets, 0)
+}
+
+// Deleting a secret tracked by the manager, which doesn't exist in the driver,
+// should succeed without error
+func TestDeletePartiallyDeletedSecretPassDriver(t *testing.T) {
+	if _, err := exec.LookPath("gpg"); err != nil {
+		t.Skip("gpg executable not found, skipping pass driver tests")
+	}
+
+	// Setup similar to passdriver_test.go tests
+	gpgRoot := t.TempDir()
+	gpgHomeDir := t.TempDir()
+
+	gpgTestID := "testing@passdriver"
+
+	opts := map[string]string{
+		"root":       gpgRoot,
+		"key":        gpgTestID,
+		"gpghomedir": gpgHomeDir,
+	}
+
+	cmd := exec.CommandContext(context.TODO(), "gpg", "--homedir", gpgHomeDir, "--batch", "--passphrase", "--quick-generate-key", gpgTestID)
+	cmd.Env = os.Environ()
+	cmd.Stdin = nil
+	cmd.Stdout = nil
+	cmd.Stderr = io.Discard
+	err := cmd.Run()
+	require.NoError(t, err)
+
+	manager, _ := setup(t)
+
+	storeOpts := StoreOptions{
+		DriverOpts: opts,
+	}
+
+	// Create two secrets
+	_, err = manager.Store("mysecret", []byte("mydata"), "pass", storeOpts)
+	require.NoError(t, err)
+	_, err = manager.Store("mysecret2", []byte("mydata2"), "pass", storeOpts)
+	require.NoError(t, err)
+
+	allSecrets, err := manager.List()
+	require.NoError(t, err)
+	require.Len(t, allSecrets, 2)
+
+	// Calling delete on the manager should update the count
+	_, err = manager.Delete("mysecret")
+	require.NoError(t, err)
+
+	allSecrets, err = manager.List()
+	require.NoError(t, err)
+	require.Len(t, allSecrets, 1)
+
+	// Simulating the gpg storage being corrupted/gone
+	err = os.RemoveAll(gpgRoot)
+	require.NoError(t, err)
+	err = os.RemoveAll(gpgHomeDir)
+	require.NoError(t, err)
+
+	// Manager shouldn't know about the gpg storage being bad
+	allSecrets, err = manager.List()
+	require.NoError(t, err)
+	require.Len(t, allSecrets, 1)
+
+	// If the driver does not have that secret, it's considered to be deleted
+	_, err = manager.Delete("mysecret2")
+	require.NoError(t, err)
+
+	allSecrets, err = manager.List()
+	require.NoError(t, err)
+	require.Len(t, allSecrets, 0)
 }
