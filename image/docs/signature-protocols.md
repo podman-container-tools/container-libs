@@ -104,6 +104,41 @@ i.e. different namespaces can not associate different sets of signatures to the 
 updating signatures requires a cluster-wide access to the `imagesignatures` resource
 (by default available to the `system:image-signer` role),
 
+## OCI Referrers API
+
+For registries supporting the OCI Distribution Spec 1.1 Referrers API,
+signatures and other artifacts attached via the `subject` field are discovered
+and written automatically. For registries that do not support the API, the
+client falls back to the OCI referrers tag schema.
+
+This mechanism is enabled by setting `use-sigstore-attachments` to `true`
+in the `registries.d` configuration (the same setting that controls the cosign tag convention).
+
+### Reading
+
+Both the referrers API and the legacy cosign tag convention are checked;
+duplicate signatures across the two sources are removed automatically.
+Only referrers with a sigstore-related artifact type (or an empty artifact type,
+for cosign v1 compatibility) are fetched; unrelated referrers (such as SBOMs) are
+skipped. At most 64 referrer manifests are processed per image to bound network
+fan-out.
+
+### Writing
+
+Signatures are always written to the legacy cosign tag convention, which is the
+primary reliable write mechanism. In addition, the client attempts to push each
+signature as an individual OCI artifact manifest with a `subject` field pointing
+to the target image manifest. The artifact uses an empty config
+(`application/vnd.oci.empty.v1+json`) and the signature payload as a single
+layer. The `artifactType` is set to the signature's MIME type.
+
+The referrers write is best-effort: if it fails (e.g. the registry does not
+support push-by-digest or artifact manifests), the error is logged and the cosign
+tag write still proceeds. When the referrers write succeeds, the client also
+updates the referrers tag schema index (a tag of the form `sha256-<hex>` without
+the `.sig` suffix) so that registries without native Referrers API support can
+still discover the signatures via the tag schema fallback.
+
 ## OpenShift-embedded registries
 
 The OpenShift-embedded registry implements the ordinary docker/distribution API,
