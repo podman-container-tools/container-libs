@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sirupsen/logrus"
 	"go.podman.io/common/pkg/secrets/define"
 	"go.podman.io/common/pkg/secrets/filedriver"
 	"go.podman.io/common/pkg/secrets/passdriver"
@@ -58,7 +59,7 @@ var secretsFile = "secrets.json"
 //
 // revive does not like the name because the package is already called secrets
 //
-//nolint:revive
+// revive does not like the name because the package is already called secrets
 type SecretsManager struct {
 	// secretsPath is the path to the db file where secrets are stored
 	secretsDBPath string
@@ -95,7 +96,7 @@ type Secret struct {
 //
 // revive does not like the name because the package is already called secrets
 //
-//nolint:revive
+// revive does not like the name because the package is already called secrets
 type SecretsDriver interface {
 	// List lists all secret ids in the secrets data store
 	List() ([]string, error)
@@ -245,14 +246,16 @@ func (s *SecretsManager) Store(name string, data []byte, driverType string, opti
 		return "", err
 	}
 
+	logrus.Tracef("Storing secret %s data using driver %s", name, driverType)
 	err = driver.Store(secr.ID, data)
 	if err != nil {
-		return "", fmt.Errorf("creating secret %s: %w", name, err)
+		return "", fmt.Errorf("driver failed to store secret %s data: %w", name, err)
 	}
 
+	logrus.Tracef("Storing secret %s metadata", name)
 	err = s.store(secr)
 	if err != nil {
-		return "", fmt.Errorf("creating secret %s: %w", name, err)
+		return "", fmt.Errorf("manager failed to store secret %s metadata: %w", name, err)
 	}
 
 	return secr.ID, nil

@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/sirupsen/logrus"
 	"go.podman.io/common/pkg/secrets/define"
 )
 
@@ -79,6 +80,7 @@ func NewDriver(opts map[string]string) (*Driver, error) {
 func (d *Driver) List() (secrets []string, err error) {
 	cmd := exec.CommandContext(context.TODO(), "/bin/sh", "-c", d.ListCommand)
 	cmd.Env = os.Environ()
+	logrus.Debugf("Shell Driver: executing command %q with env %v", cmd.String(), cmd.Env)
 	cmd.Stderr = os.Stderr
 
 	buf := &bytes.Buffer{}
@@ -109,6 +111,7 @@ func (d *Driver) Lookup(id string) ([]byte, error) {
 	cmd := exec.CommandContext(context.TODO(), "/bin/sh", "-c", d.LookupCommand)
 	cmd.Env = os.Environ()
 	cmd.Env = append(cmd.Env, "SECRET_ID="+id)
+	logrus.Debugf("Shell Driver: executing command %q with env %v", cmd.String(), cmd.Env)
 	cmd.Stderr = os.Stderr
 
 	buf := &bytes.Buffer{}
@@ -130,6 +133,7 @@ func (d *Driver) Store(id string, data []byte) error {
 	cmd := exec.CommandContext(context.TODO(), "/bin/sh", "-c", d.StoreCommand)
 	cmd.Env = os.Environ()
 	cmd.Env = append(cmd.Env, "SECRET_ID="+id)
+	logrus.Debugf("Shell Driver: executing command %q with env %v", cmd.String(), cmd.Env)
 
 	cmd.Stderr = os.Stderr
 	cmd.Stdout = os.Stdout
@@ -147,6 +151,7 @@ func (d *Driver) Delete(id string) error {
 	cmd := exec.CommandContext(context.TODO(), "/bin/sh", "-c", d.DeleteCommand)
 	cmd.Env = os.Environ()
 	cmd.Env = append(cmd.Env, "SECRET_ID="+id)
+	logrus.Debugf("Shell Driver: executing command %q with env %v", cmd.String(), cmd.Env)
 
 	cmd.Stderr = os.Stderr
 	cmd.Stdout = os.Stdout
