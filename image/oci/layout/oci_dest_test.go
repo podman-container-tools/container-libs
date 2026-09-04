@@ -13,7 +13,10 @@ import (
 	imgspecv1 "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.podman.io/image/v5/internal/imagedestination"
+	"go.podman.io/image/v5/internal/imagesource"
 	"go.podman.io/image/v5/internal/private"
+	"go.podman.io/image/v5/internal/signature"
 	"go.podman.io/image/v5/pkg/blobinfocache/memory"
 	"go.podman.io/image/v5/types"
 )
@@ -215,4 +218,160 @@ func TestPutblobFromLocalFile(t *testing.T) {
 
 	err = ociDest.CommitWithOptions(context.Background(), private.CommitOptions{})
 	require.NoError(t, err)
+}
+
+// TestPutSignaturesWithFormat tests that sigstore signatures are properly stored in OCI layout
+func TestPutSignaturesWithFormat(t *testing.T) {
+	for _, test := range []struct {
+		name               string
+		manifestDigest     digest.Digest
+		signaturesList     [][]signature.Signature
+		expectedSignatures []signature.Signature
+		expectedError      string
+	}{
+		{
+			name: "single signature, single PutSignaturesWithFormat",
+			signaturesList: [][]signature.Signature{
+				{
+					signature.SigstoreFromComponents(
+						"application/vnd.dev.cosign.simplesigning.v1+json",
+						[]byte("test-payload"),
+						map[string]string{"dev.cosignproject.cosign/signature": "test-signature"},
+					),
+				},
+			},
+			expectedSignatures: []signature.Signature{
+				signature.SigstoreFromComponents(
+					"application/vnd.dev.cosign.simplesigning.v1+json",
+					[]byte("test-payload"),
+					map[string]string{"dev.cosignproject.cosign/signature": "test-signature"},
+				),
+			},
+		},
+		{
+			name: "multiple signatures",
+			signaturesList: [][]signature.Signature{
+				{
+					signature.SigstoreFromComponents(
+						"application/vnd.dev.cosign.simplesigning.v1+json",
+						[]byte("test-payload1"),
+						map[string]string{"dev.cosignproject.cosign/signature": "test-signature1"},
+					),
+					signature.SigstoreFromComponents(
+						"application/vnd.dev.cosign.simplesigning.v1+json",
+						[]byte("test-payload2"),
+						map[string]string{"dev.cosignproject.cosign/signature": "test-signature2"},
+					),
+				},
+			},
+			expectedSignatures: []signature.Signature{
+				signature.SigstoreFromComponents(
+					"application/vnd.dev.cosign.simplesigning.v1+json",
+					[]byte("test-payload1"),
+					map[string]string{"dev.cosignproject.cosign/signature": "test-signature1"},
+				),
+				signature.SigstoreFromComponents(
+					"application/vnd.dev.cosign.simplesigning.v1+json",
+					[]byte("test-payload2"),
+					map[string]string{"dev.cosignproject.cosign/signature": "test-signature2"},
+				),
+			},
+		},
+		{
+			name: "multiple PutSignaturesWithFormat with the same image",
+			signaturesList: [][]signature.Signature{
+				{
+					signature.SigstoreFromComponents(
+						"application/vnd.dev.cosign.simplesigning.v1+json",
+						[]byte("test-payload"),
+						map[string]string{"dev.cosignproject.cosign/signature": "test-signature"},
+					),
+				},
+				{
+					signature.SigstoreFromComponents(
+						"application/vnd.dev.cosign.simplesigning.v1+json",
+						[]byte("test-payload"),
+						map[string]string{"dev.cosignproject.cosign/signature": "test-signature"},
+					),
+				},
+			},
+			expectedSignatures: []signature.Signature{
+				signature.SigstoreFromComponents(
+					"application/vnd.dev.cosign.simplesigning.v1+json",
+					[]byte("test-payload"),
+					map[string]string{"dev.cosignproject.cosign/signature": "test-signature"},
+				),
+			},
+		},
+		{
+			name: "multiple PutSignaturesWithFormat with the different images",
+			signaturesList: [][]signature.Signature{
+				{
+					signature.SigstoreFromComponents(
+						"application/vnd.dev.cosign.simplesigning.v1+json",
+						[]byte("test-payload1"),
+						map[string]string{"dev.cosignproject.cosign/signature": "test-signature1"},
+					),
+				},
+				{
+					signature.SigstoreFromComponents(
+						"application/vnd.dev.cosign.simplesigning.v1+json",
+						[]byte("test-payload2"),
+						map[string]string{"dev.cosignproject.cosign/signature": "test-signature2"},
+					),
+				},
+			},
+			expectedSignatures: []signature.Signature{
+				signature.SigstoreFromComponents(
+					"application/vnd.dev.cosign.simplesigning.v1+json",
+					[]byte("test-payload1"),
+					map[string]string{"dev.cosignproject.cosign/signature": "test-signature1"},
+				),
+				signature.SigstoreFromComponents(
+					"application/vnd.dev.cosign.simplesigning.v1+json",
+					[]byte("test-payload2"),
+					map[string]string{"dev.cosignproject.cosign/signature": "test-signature2"},
+				),
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			ref, err := NewReference(tmpDir, "latest")
+			require.NoError(t, err)
+			ociRef := ref.(ociReference)
+			putTestManifest(t, ociRef, tmpDir)
+
+			dest, err := ref.NewImageDestination(context.Background(), nil)
+			require.NoError(t, err)
+			defer dest.Close()
+			ociDest := imagedestination.FromPublic(dest)
+
+			// get digest of the manifest
+			desc, _, err := ociRef.getManifestDescriptor()
+			require.NoError(t, err)
+
+			for _, sigs := range test.signaturesList {
+				err = ociDest.PutSignaturesWithFormat(context.Background(), sigs, &desc.Digest)
+				if test.expectedError != "" {
+					require.Error(t, err)
+					require.Contains(t, err.Error(), test.expectedError)
+					continue
+				}
+				require.NoError(t, err)
+				err = ociDest.Commit(context.Background(), nil)
+				require.NoError(t, err)
+			}
+
+			src, err := ref.NewImageSource(context.Background(), nil)
+			require.NoError(t, err)
+			ociSrc := imagesource.FromPublic(src)
+			sign, err := ociSrc.GetSignaturesWithFormat(context.Background(), &desc.Digest)
+			require.NoError(t, err)
+
+			for i, sig := range test.expectedSignatures {
+				require.Equal(t, sig, sign[i])
+			}
+		})
+	}
 }
