@@ -3,6 +3,7 @@ package archive
 import (
 	"archive/tar"
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -1310,4 +1311,82 @@ func TestTarErrorHandling(t *testing.T) {
 	}); !errors.Is(err, dest.err) {
 		t.Fatalf("Did not propagate error; got %v", err)
 	}
+}
+
+// makeVfsCap builds a "security.capability" value of the given revision. When
+// rootid is >= 0 a v3 value (24 bytes) is produced, otherwise a v2 value (20
+// bytes). The permitted/inheritable sets and effective flag are stored so the
+// test can check they survive normalization.
+func makeVfsCap(rootid int) []byte {
+	magic := uint32(vfsCapRevision2)
+	size := vfsCapDataSizeV2
+	if rootid >= 0 {
+		magic = vfsCapRevision3
+		size = vfsCapDataSizeV3
+	}
+	magic |= 0x01 // VFS_CAP_FLAGS_EFFECTIVE
+	b := make([]byte, size)
+	binary.LittleEndian.PutUint32(b[0:4], magic)
+	binary.LittleEndian.PutUint32(b[4:8], 0x000001ff)   // permitted, low word
+	binary.LittleEndian.PutUint32(b[12:16], 0x000001ff) // inheritable, low word
+	if rootid >= 0 {
+		binary.LittleEndian.PutUint32(b[vfsCapRootIDOffset:], uint32(rootid))
+	}
+	return b
+}
+
+func TestNormalizeCapabilityRootID(t *testing.T) {
+	// container 0..65535 maps to host 1000000..1065535
+	mappings := idtools.NewIDMappingsFromMaps(
+		[]idtools.IDMap{{ContainerID: 0, HostID: 1000000, Size: 65536}},
+		[]idtools.IDMap{{ContainerID: 0, HostID: 1000000, Size: 65536}},
+	)
+
+	t.Run("v3 owned by container root (host id 1000000) is downgraded to v2 and keeps its flags", func(t *testing.T) {
+		out, err := normalizeCapabilityRootID(mappings, makeVfsCap(1000000))
+		require.NoError(t, err)
+		require.Len(t, out, vfsCapDataSizeV2)
+		magic := binary.LittleEndian.Uint32(out[0:4])
+		assert.Equal(t, uint32(vfsCapRevision2), magic&vfsCapRevisionMask)
+		assert.Equal(t, uint32(0x01), magic&0x01, "effective flag preserved")
+		assert.Equal(t, uint32(0x000001ff), binary.LittleEndian.Uint32(out[4:8]), "permitted set preserved")
+		assert.Equal(t, uint32(0x000001ff), binary.LittleEndian.Uint32(out[12:16]), "inheritable set preserved")
+	})
+
+	t.Run("v3 owned by a non-root container id keeps v3 with the container rootid", func(t *testing.T) {
+		out, err := normalizeCapabilityRootID(mappings, makeVfsCap(1000123))
+		require.NoError(t, err)
+		require.Len(t, out, vfsCapDataSizeV3)
+		assert.Equal(t, uint32(vfsCapRevision3), binary.LittleEndian.Uint32(out[0:4])&vfsCapRevisionMask)
+		assert.Equal(t, uint32(123), binary.LittleEndian.Uint32(out[vfsCapRootIDOffset:]))
+	})
+
+	t.Run("v3 with an unmapped rootid is an error", func(t *testing.T) {
+		_, err := normalizeCapabilityRootID(mappings, makeVfsCap(5))
+		assert.Error(t, err)
+	})
+
+	t.Run("v2 value is returned unchanged", func(t *testing.T) {
+		in := makeVfsCap(-1)
+		out, err := normalizeCapabilityRootID(mappings, in)
+		require.NoError(t, err)
+		assert.Equal(t, in, out)
+	})
+
+	t.Run("empty mappings return the value unchanged", func(t *testing.T) {
+		in := makeVfsCap(1000000)
+		out, err := normalizeCapabilityRootID(&idtools.IDMappings{}, in)
+		require.NoError(t, err)
+		assert.Equal(t, in, out)
+		out, err = normalizeCapabilityRootID(nil, in)
+		require.NoError(t, err)
+		assert.Equal(t, in, out)
+	})
+
+	t.Run("malformed value is returned unchanged", func(t *testing.T) {
+		in := []byte{0x00, 0x01, 0x02}
+		out, err := normalizeCapabilityRootID(mappings, in)
+		require.NoError(t, err)
+		assert.Equal(t, in, out)
+	})
 }
