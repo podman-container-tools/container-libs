@@ -47,3 +47,21 @@ func TestValidate(t *testing.T) {
 	require.Nil(t, err)
 	require.Equal(t, dst.URI, "ssh://testhost:22/var/run/podman/podman.sock")
 }
+
+func TestHostWithSSHScheme(t *testing.T) {
+	// golangConnectionDial/Exec/Scp normalize their host through this helper.
+	require.Equal(t, "ssh://10.0.0.27", hostWithSSHScheme("10.0.0.27"))
+	require.Equal(t, "ssh://10.0.0.27", hostWithSSHScheme("ssh://10.0.0.27")) // idempotent
+
+	// The normalized host validates to the intended dial target.
+	_, uri, err := Validate(nil, hostWithSSHScheme("10.0.0.27"), 22, "")
+	require.NoError(t, err)
+	require.Equal(t, "10.0.0.27:22", uri.Host)
+	require.Empty(t, uri.Path)
+
+	// A bare host, on the other hand, is parsed as a path and the dial target
+	// degrades to ":22" -- the bug the helper fixes (#46).
+	_, broken, err := Validate(nil, "10.0.0.27", 22, "")
+	require.NoError(t, err)
+	require.Equal(t, ":22", broken.Host)
+}
