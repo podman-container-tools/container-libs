@@ -353,6 +353,10 @@ type rwLayerStore interface {
 	// Caller MUST call all returned cleanup functions outside of the locks.
 	deferredDelete(id string) ([]tempdir.CleanupTempDirFunc, error)
 
+	// deferredDeleteMultiple deletes several layers with one pair of metadata saves.
+	// Caller MUST call all returned cleanup functions outside of the locks.
+	deferredDeleteMultiple(ids []string) ([]tempdir.CleanupTempDirFunc, error)
+
 	// Wipe deletes all layers.
 	Wipe() error
 
@@ -1056,10 +1060,19 @@ func (r *layerStore) load(lockedForWriting bool) (bool, error) {
 				layersToDelete = append(layersToDelete, layer)
 			}
 		}
+		// Delete children before parents: removing a layer that still has a child
+		// breaks the driver's model, and on snapshot-based drivers it fails
+		// outright. r.layers cannot be relied on for this -- it is the
+		// concatenation of the per-location JSON files, so creation order only
+		// holds within one location. A layer is always created after its parent,
+		// so newest-first is child-first; Wipe() orders bulk deletion the same way.
+		slices.SortFunc(layersToDelete, func(a, b *Layer) int {
+			return -a.Created.Compare(b.Created)
+		})
 		// Now actually delete the layers
 		for _, layer := range layersToDelete {
 			logrus.Warnf("Found incomplete layer %q, deleting it", layer.ID)
-			cleanFunctions, err := r.internalDelete(layer.ID)
+			cleanFunctions, err := r.internalDelete(layer)
 			defer func() {
 				if err := tempdir.CleanupTemporaryDirectories(cleanFunctions...); err != nil {
 					logrus.Errorf("Error cleaning up temporary directories: %v", err)
@@ -2099,20 +2112,12 @@ func layerHasIncompleteFlag(layer *Layer) bool {
 // Requires startWriting.
 // Caller MUST run all returned cleanup functions after this, EVEN IF the function returns an error.
 // Ideally outside of the startWriting.
-func (r *layerStore) internalDelete(id string) ([]tempdir.CleanupTempDirFunc, error) {
+func (r *layerStore) internalDelete(layer *Layer) ([]tempdir.CleanupTempDirFunc, error) {
 	if !r.lockfile.IsReadWrite() {
 		return nil, fmt.Errorf("not allowed to delete layers at %q: %w", r.layerdir, ErrStoreIsReadOnly)
 	}
-	layer, ok := r.lookup(id)
-	if !ok {
-		return nil, ErrLayerUnknown
-	}
 	// Ensure that if we are interrupted, the layer will be cleaned up.
-	if !layerHasIncompleteFlag(layer) {
-		if layer.Flags == nil {
-			layer.Flags = make(map[string]any)
-		}
-		layer.Flags[incompleteFlag] = true
+	if markIncomplete(layer) {
 		if err := r.saveFor(layer, false); err != nil {
 			return nil, err
 		}
@@ -2124,7 +2129,7 @@ func (r *layerStore) internalDelete(id string) ([]tempdir.CleanupTempDirFunc, er
 	if err != nil {
 		return nil, err
 	}
-	id = layer.ID
+	id := layer.ID
 	cleanFunc, err := r.driver.DeferredRemove(id)
 	cleanFunctions = append(cleanFunctions, cleanFunc)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -2196,23 +2201,101 @@ func (r *layerStore) deferredDelete(id string) ([]tempdir.CleanupTempDirFunc, er
 		return nil, ErrLayerUnknown
 	}
 	id = layer.ID
-	// The layer may already have been explicitly unmounted, but if not, we
-	// should try to clean that up before we start deleting anything at the
-	// driver level.
-	for {
-		_, err := r.unmount(id, false, true)
-		if err == ErrLayerNotMounted {
-			break
-		}
-		if err != nil {
-			return nil, err
-		}
+	if err := r.unmountAll(id); err != nil {
+		return nil, err
 	}
-	cleanFunctions, err := r.internalDelete(id)
+	cleanFunctions, err := r.internalDelete(layer)
 	if err != nil {
 		return cleanFunctions, err
 	}
 	return cleanFunctions, r.saveFor(layer, false)
+}
+
+// unmountAll unmounts id until it is no longer mounted. The layer may already
+// have been explicitly unmounted, but if not, we should clean that up before
+// deleting anything at the driver level. It does not write layers.json.
+func (r *layerStore) unmountAll(id string) error {
+	for {
+		_, err := r.unmount(id, false, true)
+		if err == ErrLayerNotMounted {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+	}
+}
+
+// markIncomplete flags layer for cleanup by load()'s recovery scan if it is not
+// flagged already, and reports whether it changed anything.
+func markIncomplete(layer *Layer) bool {
+	if layerHasIncompleteFlag(layer) {
+		return false
+	}
+	if layer.Flags == nil {
+		layer.Flags = make(map[string]any)
+	}
+	layer.Flags[incompleteFlag] = true
+	return true
+}
+
+// deferredDeleteMultiple deletes ids using one save to mark every layer incomplete
+// before any destructive work and one save afterwards, instead of the two saves per
+// layer a loop over deferredDelete costs. Mirrors load()'s recovery loop.
+//
+// Requires startWriting.
+// Caller MUST run all returned cleanup functions after this, EVEN IF the function returns an error.
+// Ideally outside of the startWriting.
+func (r *layerStore) deferredDeleteMultiple(ids []string) ([]tempdir.CleanupTempDirFunc, error) {
+	if !r.lockfile.IsReadWrite() {
+		return nil, fmt.Errorf("not allowed to delete layers at %q: %w", r.layerdir, ErrStoreIsReadOnly)
+	}
+	layers := make([]*Layer, 0, len(ids))
+	var marked layerLocations
+	for _, id := range ids {
+		layer, ok := r.lookup(id)
+		if !ok {
+			return nil, ErrLayerUnknown
+		}
+		if err := r.unmountAll(layer.ID); err != nil {
+			return nil, err
+		}
+		// Mark every layer before deleting any of them. This is not redundant
+		// with internalDelete's own marking: because the flag is already set,
+		// internalDelete skips its per-layer save, which is what reduces the
+		// whole operation to two saves instead of two per layer. Removing this
+		// silently restores the per-layer saves.
+		if markIncomplete(layer) {
+			marked |= layer.location
+		}
+		layers = append(layers, layer)
+	}
+	if marked != 0 {
+		if err := r.save(marked, false); err != nil {
+			return nil, err
+		}
+	}
+
+	cleanFunctions := []tempdir.CleanupTempDirFunc{}
+	var deleted layerLocations
+	var firstErr error
+	for _, layer := range layers {
+		cf, err := r.internalDelete(layer)
+		cleanFunctions = append(cleanFunctions, cf...)
+		if err != nil {
+			firstErr = err
+			break
+		}
+		deleted |= layer.location
+	}
+	// Save even on error, so layers deleted before it have their metadata
+	// removed -- the same reason load()'s recovery loop saves unconditionally.
+	if deleted != 0 {
+		if err := r.save(deleted, false); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return cleanFunctions, firstErr
 }
 
 // Requires startReading or startWriting.
