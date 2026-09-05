@@ -494,6 +494,9 @@ func (as *ArtifactStore) Add(ctx context.Context, dest ArtifactReference, artifa
 	return &artifactManifestDigest, nil
 }
 
+// getArtifactAndImageSource looks up the given artifact and returns an
+// ImageSource for it, the caller must close the ImageSource.
+// note: getArtifactAndImageSource must be called while under a store lock
 func getArtifactAndImageSource(ctx context.Context, as *ArtifactStore, asr ArtifactStoreReference, options *libartTypes.FilterBlobOptions) (*Artifact, types.ImageSource, error) {
 	if len(options.Digest) > 0 && len(options.Title) > 0 {
 		return nil, nil, errors.New("cannot specify both digest and title")
@@ -516,9 +519,9 @@ func getArtifactAndImageSource(ctx context.Context, as *ArtifactStore, asr Artif
 
 // BlobMountPaths allows the caller to access the file names from the store and how they should be mounted.
 func (as *ArtifactStore) BlobMountPaths(ctx context.Context, asr ArtifactStoreReference, options *libartTypes.BlobMountPathOptions) ([]libartTypes.BlobMountPath, error) {
-	// FIX ME
-	// LOCKING BUG: getArtifactAndImageSource assumes a locked ArtifactStore
+	as.lock.RLock()
 	arty, imgSrc, err := getArtifactAndImageSource(ctx, as, asr, &options.FilterBlobOptions)
+	as.lock.Unlock()
 	if err != nil {
 		return nil, err
 	}
@@ -575,9 +578,9 @@ func (as *ArtifactStore) BlobMountPaths(ctx context.Context, asr ArtifactStoreRe
 
 // Extract an artifact to local file or directory.
 func (as *ArtifactStore) Extract(ctx context.Context, nameOrDigest ArtifactStoreReference, target string, options *libartTypes.ExtractOptions) error {
-	// FIX ME
-	// LOCKING BUG: getArtifactAndImageSource assumes a locked ArtifactStore
+	as.lock.RLock()
 	arty, imgSrc, err := getArtifactAndImageSource(ctx, as, nameOrDigest, &options.FilterBlobOptions)
+	as.lock.Unlock()
 	if err != nil {
 		return err
 	}
@@ -648,9 +651,9 @@ func (as *ArtifactStore) ExtractTarStream(ctx context.Context, w io.Writer, asr 
 		options = &libartTypes.ExtractOptions{}
 	}
 
-	// FIX ME
-	// LOCKING BUG: getArtifactAndImageSource assumes a locked ArtifactStore
+	as.lock.RLock()
 	arty, imgSrc, err := getArtifactAndImageSource(ctx, as, asr, &options.FilterBlobOptions)
+	as.lock.Unlock()
 	if err != nil {
 		return err
 	}
