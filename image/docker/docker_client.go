@@ -482,7 +482,7 @@ func SearchRegistry(ctx context.Context, sys *types.SystemContext, registry, ima
 
 // makeRequest creates and executes a http.Request with the specified parameters, adding authentication and TLS options for the Docker client.
 // The host name and schema is taken from the client or autodetected, and the path is relative to it, i.e. the path usually starts with /v2/.
-func (c *dockerClient) makeRequest(ctx context.Context, method, path string, headers map[string][]string, stream io.Reader, auth sendAuth, extraScope *authScope) (*http.Response, error) {
+func (c *dockerClient) makeRequest(ctx context.Context, method, path string, headers map[string][]string, stream io.Reader, auth sendAuth, extraScopes []authScope) (*http.Response, error) {
 	if err := c.detectProperties(ctx); err != nil {
 		return nil, err
 	}
@@ -491,7 +491,7 @@ func (c *dockerClient) makeRequest(ctx context.Context, method, path string, hea
 	if err != nil {
 		return nil, err
 	}
-	return c.makeRequestToResolvedURL(ctx, method, requestURL, headers, stream, -1, auth, extraScope)
+	return c.makeRequestToResolvedURL(ctx, method, requestURL, headers, stream, -1, auth, extraScopes)
 }
 
 // resolveRequestURL turns a path for c.makeRequest into a full URL.
@@ -513,14 +513,14 @@ func (c *dockerClient) resolveRequestURL(path string) (*url.URL, error) {
 // Checks if the auth headers in the response contain an indication of a failed
 // authorization because of an "insufficient_scope" error. If that's the case,
 // returns the required scope to be used for fetching a new token.
-func needsRetryWithUpdatedScope(res *http.Response) (bool, *authScope) {
+func needsRetryWithUpdatedScope(res *http.Response) (bool, []authScope) {
 	if res.StatusCode == http.StatusUnauthorized {
 		for challenge := range iterateAuthHeader(res.Header) {
 			if challenge.Scheme == "bearer" {
 				if errmsg, ok := challenge.Parameters["error"]; ok && errmsg == "insufficient_scope" {
 					if scope, ok := challenge.Parameters["scope"]; ok && scope != "" {
-						if newScope, err := parseAuthScope(scope); err == nil {
-							return true, newScope
+						if newScopes, err := parseAuthScopes(scope); err == nil {
+							return true, newScopes
 						} else {
 							logrus.WithFields(logrus.Fields{
 								"error":     err,
@@ -567,11 +567,11 @@ func parseRetryAfter(res *http.Response, fallbackDelay time.Duration) time.Durat
 // makeRequest should generally be preferred.
 // In case of an HTTP 429 status code in the response, it may automatically retry a few times.
 // TODO(runcom): too many arguments here, use a struct
-func (c *dockerClient) makeRequestToResolvedURL(ctx context.Context, method string, requestURL *url.URL, headers map[string][]string, stream io.Reader, streamLen int64, auth sendAuth, extraScope *authScope) (*http.Response, error) {
+func (c *dockerClient) makeRequestToResolvedURL(ctx context.Context, method string, requestURL *url.URL, headers map[string][]string, stream io.Reader, streamLen int64, auth sendAuth, extraScopes []authScope) (*http.Response, error) {
 	delay := backoffInitialDelay
 	attempts := 0
 	for {
-		res, err := c.makeRequestToResolvedURLOnce(ctx, method, requestURL, headers, stream, streamLen, auth, extraScope)
+		res, err := c.makeRequestToResolvedURLOnce(ctx, method, requestURL, headers, stream, streamLen, auth, extraScopes)
 		if err != nil {
 			return nil, err
 		}
@@ -590,17 +590,15 @@ func (c *dockerClient) makeRequestToResolvedURL(ctx context.Context, method stri
 		// We also cannot retry with a body (stream != nil) as stream
 		// was already read
 		if attempts == 1 && stream == nil && auth != noAuth {
-			if retry, newScope := needsRetryWithUpdatedScope(res); retry {
+			if retry, newScopes := needsRetryWithUpdatedScope(res); retry {
 				logrus.Debug("Detected insufficient_scope error, will retry request with updated scope")
 				res.Body.Close()
-				// Note: This retry ignores extraScope. That’s, strictly speaking, incorrect, but we don’t currently
-				// expect the insufficient_scope errors to happen for those callers. If that changes, we can add support
-				// for more than one extra scope.
-				res, err = c.makeRequestToResolvedURLOnce(ctx, method, requestURL, headers, stream, streamLen, auth, newScope)
+				// Retry with the scope set the server asked for, replacing what we came in with.
+				res, err = c.makeRequestToResolvedURLOnce(ctx, method, requestURL, headers, stream, streamLen, auth, newScopes)
 				if err != nil {
 					return nil, err
 				}
-				extraScope = newScope
+				extraScopes = newScopes
 			}
 		}
 
@@ -628,7 +626,7 @@ func (c *dockerClient) makeRequestToResolvedURL(ctx context.Context, method stri
 // streamLen, if not -1, specifies the length of the data expected on stream.
 // makeRequest should generally be preferred.
 // Note that no exponential back off is performed when receiving an http 429 status code.
-func (c *dockerClient) makeRequestToResolvedURLOnce(ctx context.Context, method string, resolvedURL *url.URL, headers map[string][]string, stream io.Reader, streamLen int64, auth sendAuth, extraScope *authScope) (*http.Response, error) {
+func (c *dockerClient) makeRequestToResolvedURLOnce(ctx context.Context, method string, resolvedURL *url.URL, headers map[string][]string, stream io.Reader, streamLen int64, auth sendAuth, extraScopes []authScope) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, method, resolvedURL.String(), stream)
 	if err != nil {
 		return nil, err
@@ -644,7 +642,7 @@ func (c *dockerClient) makeRequestToResolvedURLOnce(ctx context.Context, method 
 	}
 	req.Header.Add("User-Agent", c.userAgent)
 	if auth == v2Auth {
-		if err := c.setupRequestAuth(req, extraScope); err != nil {
+		if err := c.setupRequestAuth(req, extraScopes); err != nil {
 			return nil, err
 		}
 	}
@@ -734,7 +732,7 @@ func parseRegistryWarningHeader(header string) string {
 // 2) gcr.io is sending 401 without a WWW-Authenticate header in the real request
 //
 // debugging: https://github.com/containers/image/pull/211#issuecomment-273426236 and follows up
-func (c *dockerClient) setupRequestAuth(req *http.Request, extraScope *authScope) error {
+func (c *dockerClient) setupRequestAuth(req *http.Request, extraScopes []authScope) error {
 	if len(c.challenges) == 0 {
 		return nil
 	}
@@ -746,7 +744,7 @@ func (c *dockerClient) setupRequestAuth(req *http.Request, extraScope *authScope
 			req.SetBasicAuth(c.auth.Username, c.auth.Password)
 			return nil
 		case "bearer":
-			token, err := c.obtainBearerToken(req.Context(), challenge, extraScope)
+			token, err := c.obtainBearerToken(req.Context(), challenge, extraScopes)
 			if err != nil {
 				return err
 			}
@@ -761,28 +759,30 @@ func (c *dockerClient) setupRequestAuth(req *http.Request, extraScope *authScope
 }
 
 // obtainBearerToken gets an "Authorization: Bearer" token if one is available, or obtains a fresh one.
-func (c *dockerClient) obtainBearerToken(ctx context.Context, challenge challenge, extraScope *authScope) (string, error) {
+func (c *dockerClient) obtainBearerToken(ctx context.Context, challenge challenge, extraScopes []authScope) (string, error) {
 	if c.registryToken != "" {
 		return c.registryToken, nil
 	}
 
-	cacheKey := ""
-	scopes := []authScope{c.scope}
-	if extraScope != nil {
-		// Using ':' as a separator here is unambiguous because getBearerToken below
-		// uses the same separator when formatting a remote request (and because
-		// repository names that we create can't contain colons, and extraScope values
-		// coming from a server come from `parseAuthScope`, which also splits on colons).
-		cacheKey = fmt.Sprintf("%s:%s:%s", extraScope.resourceType, extraScope.remoteName, extraScope.actions)
-		if colonCount := strings.Count(cacheKey, ":"); colonCount != 2 {
+	scopes := append([]authScope{c.scope}, extraScopes...)
+
+	// Cache key is the extra-scope set, so a token for one set is not reused for another.
+	cacheKeyParts := make([]string, 0, len(extraScopes))
+	for _, extraScope := range extraScopes {
+		// ':' is a safe separator: getBearerToken joins on it too, and none of the
+		// scope components contains one.
+		part := fmt.Sprintf("%s:%s:%s", extraScope.resourceType, extraScope.remoteName, extraScope.actions)
+		if colonCount := strings.Count(part, ":"); colonCount != 2 {
 			return "", fmt.Errorf(
-				"Internal error: there must be exactly 2 colons in the cacheKey ('%s') but got %d",
-				cacheKey,
+				"Internal error: there must be exactly 2 colons in each cache key part ('%s') but got %d",
+				part,
 				colonCount,
 			)
 		}
-		scopes = append(scopes, *extraScope)
+		cacheKeyParts = append(cacheKeyParts, part)
 	}
+	// Space-join the per-scope parts ("" when there are none).
+	cacheKey := strings.Join(cacheKeyParts, " ")
 
 	token, newEntry, err := func() (*bearerToken, bool, error) { // A scope for defer
 		c.tokenCacheLock.Lock()

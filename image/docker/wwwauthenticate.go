@@ -74,16 +74,26 @@ func iterateAuthHeader(header http.Header) iter.Seq[challenge] {
 	}
 }
 
-// parseAuthScope parses an authentication scope string of the form `$resource:$remote:$actions`
-func parseAuthScope(scopeStr string) (*authScope, error) {
-	if parts := strings.Split(scopeStr, ":"); len(parts) == 3 {
-		return &authScope{
+// parseAuthScopes parses an authentication scope challenge value: a space-separated
+// list of `$resource:$remote:$actions` tokens (a cross-repo blob mount yields two).
+func parseAuthScopes(scopesStr string) ([]authScope, error) {
+	fields := strings.Fields(scopesStr)
+	if len(fields) == 0 {
+		return nil, fmt.Errorf("error parsing auth scope: '%s'", scopesStr)
+	}
+	scopes := make([]authScope, 0, len(fields))
+	for _, scopeStr := range fields {
+		parts := strings.Split(scopeStr, ":")
+		if len(parts) != 3 {
+			return nil, fmt.Errorf("error parsing auth scope: '%s'", scopeStr)
+		}
+		scopes = append(scopes, authScope{
 			resourceType: parts[0],
 			remoteName:   parts[1],
 			actions:      parts[2],
-		}, nil
+		})
 	}
-	return nil, fmt.Errorf("error parsing auth scope: '%s'", scopeStr)
+	return scopes, nil
 }
 
 // NOTE: This is not a fully compliant parser per RFC 7235:
