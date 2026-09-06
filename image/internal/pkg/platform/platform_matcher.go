@@ -207,9 +207,9 @@ var compatibility = map[string][]string{
 	"arm64": {"v8"},
 }
 
-// WantedPlatforms returns all compatible platforms with the platform specifics possibly overridden by user,
-// the most compatible platform is first.
-// If some option (arch, os, variant) is not present, a value from current platform is detected.
+// WantedPlatforms returns candidate platforms in selection order, with values overridden by ctx.
+// Variant detection applies only to the current architecture. ARM detection is automatic;
+// amd64 detection requires DetectPlatformVariant.
 func WantedPlatforms(ctx *types.SystemContext) []imgspecv1.Platform {
 	// Note that this does not use Platform.OSFeatures and Platform.OSVersion at all.
 	// The fields are not specified by the OCI specification, as of version 1.1, usefully enough
@@ -217,14 +217,10 @@ func WantedPlatforms(ctx *types.SystemContext) []imgspecv1.Platform {
 
 	wantedArch := runtime.GOARCH
 	wantedVariant := ""
+	detectAmd64Variant := ctx != nil && ctx.DetectPlatformVariant
 	if ctx != nil && ctx.ArchitectureChoice != "" {
 		wantedArch = ctx.ArchitectureChoice
-	} else {
-		// Only auto-detect the variant if we are using the default architecture.
-		// If the user has specified the ArchitectureChoice, don't autodetect, even if
-		// ctx.ArchitectureChoice == runtime.GOARCH, because we have no idea whether the runtime.GOARCH
-		// value is relevant to the use case, and if we do autodetect a variant,
-		// ctx.VariantChoice can't be used to override it back to "".
+	} else if shouldDetectVariant(wantedArch, detectAmd64Variant) {
 		wantedVariant = getCPUVariant(runtime.GOOS, runtime.GOARCH)
 	}
 	if ctx != nil && ctx.VariantChoice != "" {
@@ -272,6 +268,10 @@ func WantedPlatforms(ctx *types.SystemContext) []imgspecv1.Platform {
 		})
 	}
 	return res
+}
+
+func shouldDetectVariant(arch string, detectAmd64Variant bool) bool {
+	return arch != "amd64" || detectAmd64Variant
 }
 
 // normalizeAmd64Variant treats "v1" as equivalent to "" for amd64,

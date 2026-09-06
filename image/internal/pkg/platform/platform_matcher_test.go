@@ -2,6 +2,7 @@ package platform
 
 import (
 	"fmt"
+	"runtime"
 	"testing"
 
 	imgspecv1 "github.com/opencontainers/image-spec/specs-go/v1"
@@ -15,7 +16,7 @@ func TestWantedPlatforms(t *testing.T) {
 		expected []imgspecv1.Platform
 	}{
 		{ // amd64 without variant accepts baseline only
-			types.SystemContext{ArchitectureChoice: "amd64", OSChoice: "linux"},
+			types.SystemContext{ArchitectureChoice: "amd64", OSChoice: "linux", DetectPlatformVariant: true},
 			[]imgspecv1.Platform{
 				{OS: "linux", Architecture: "amd64", Variant: ""},
 			},
@@ -177,5 +178,41 @@ func TestClassifyAmd64Variant(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			assert.Equal(t, c.expected, classifyAmd64Variant(c.flags))
 		})
+	}
+}
+
+func TestDetectPlatformVariant(t *testing.T) {
+	if runtime.GOARCH != "amd64" || runtime.GOOS != "linux" {
+		t.Skip("amd64/linux-only test")
+	}
+
+	baseline := WantedPlatforms(new(types.SystemContext))
+	assert.Equal(t, []imgspecv1.Platform{
+		{OS: runtime.GOOS, Architecture: "amd64", Variant: ""},
+	}, baseline, "without DetectPlatformVariant, only baseline is returned")
+
+	detected := WantedPlatforms(&types.SystemContext{DetectPlatformVariant: true})
+	expectedVariant := normalizeAmd64Variant("amd64", getCPUVariant(runtime.GOOS, runtime.GOARCH))
+	assert.Equal(t, expectedVariant, detected[0].Variant, "first entry should match the detected variant")
+	assert.Empty(t, detected[len(detected)-1].Variant, "last entry should be the baseline fallback")
+	if expectedVariant == "" {
+		assert.Equal(t, baseline, detected, "v1 detection should produce only the canonical baseline")
+	} else {
+		assert.Greater(t, len(detected), 1, "higher variants should include a baseline fallback")
+	}
+}
+
+func TestShouldDetectVariant(t *testing.T) {
+	for _, c := range []struct {
+		arch               string
+		detectAmd64Variant bool
+		expected           bool
+	}{
+		{"amd64", false, false},
+		{"amd64", true, true},
+		{"arm", false, true},
+		{"arm64", false, true},
+	} {
+		assert.Equal(t, c.expected, shouldDetectVariant(c.arch, c.detectAmd64Variant), c.arch)
 	}
 }
