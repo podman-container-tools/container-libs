@@ -101,6 +101,13 @@ func collectFileInfo(sourceDir string, idMappings *idtools.IDMappings) (*FileInf
 		info.stat = s
 		info.capability, _ = system.Lgetxattr(path, "security.capability")
 
+		if d.Type()&os.ModeSymlink != 0 {
+			info.target, err = os.Readlink(path)
+			if err != nil {
+				return err
+			}
+		}
+
 		parent.children[info.name] = info
 
 		return nil
