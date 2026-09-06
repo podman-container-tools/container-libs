@@ -73,6 +73,10 @@ func getCPUVariantDarwinWindows(arch string) string {
 		variant = "v8"
 	case "arm":
 		variant = "v7"
+	case "amd64":
+		// No detection implemented for macOS/Windows. Return the
+		// baseline so WantedPlatforms never advertises higher levels.
+		variant = "v1"
 	default:
 		variant = ""
 	}
@@ -132,12 +136,64 @@ func getCPUVariantArm() string {
 	return variant
 }
 
+// classifyAmd64Variant determines the x86-64 microarchitecture level
+// from a set of CPU feature flags as reported in /proc/cpuinfo.
+// Levels follow the System V psABI amendment and match GOAMD64.
+func classifyAmd64Variant(flags map[string]bool) string {
+	hasAll := func(required ...string) bool {
+		for _, r := range required {
+			if !flags[r] {
+				return false
+			}
+		}
+		return true
+	}
+
+	// x86-64-v2: CMPXCHG16B, LAHF-SAHF, POPCNT, SSE3, SSE4.1, SSE4.2, SSSE3
+	v2 := hasAll("cx16", "lahf_lm", "popcnt", "pni", "sse4_1", "sse4_2", "ssse3")
+	// x86-64-v3: v2 + AVX, AVX2, BMI1, BMI2, F16C, FMA, LZCNT, MOVBE, OSXSAVE
+	v3 := v2 && hasAll("avx", "avx2", "bmi1", "bmi2", "f16c", "fma", "abm", "movbe", "xsave")
+	// x86-64-v4: v3 + AVX-512 (F, BW, CD, DQ, VL)
+	v4 := v3 && hasAll("avx512f", "avx512bw", "avx512cd", "avx512dq", "avx512vl")
+
+	switch {
+	case v4:
+		return "v4"
+	case v3:
+		return "v3"
+	case v2:
+		return "v2"
+	default:
+		return "v1"
+	}
+}
+
+// getCPUVariantAmd64 reads /proc/cpuinfo flags and returns the highest
+// x86-64 microarchitecture level the host CPU supports.
+func getCPUVariantAmd64() string {
+	flagLine, err := getCPUInfo("flags")
+	if err != nil {
+		logrus.Debugf("Failed to read CPU flags, defaulting to x86-64 baseline: %v", err)
+		return "v1"
+	}
+
+	flags := make(map[string]bool)
+	for _, f := range strings.Fields(flagLine) {
+		flags[f] = true
+	}
+
+	return classifyAmd64Variant(flags)
+}
+
 func getCPUVariant(os string, arch string) string {
 	if os == "darwin" || os == "windows" {
 		return getCPUVariantDarwinWindows(arch)
 	}
 	if arch == "arm" || arch == "arm64" {
 		return getCPUVariantArm()
+	}
+	if arch == "amd64" {
+		return getCPUVariantAmd64()
 	}
 	return ""
 }
@@ -146,6 +202,7 @@ func getCPUVariant(os string, arch string) string {
 // order from most capable (most restrictive) to least capable (most compatible).
 // Architectures that don’t have variants should not have an entry here.
 var compatibility = map[string][]string{
+	"amd64": {"v4", "v3", "v2"},
 	"arm":   {"v8", "v7", "v6", "v5"},
 	"arm64": {"v8"},
 }
@@ -173,6 +230,7 @@ func WantedPlatforms(ctx *types.SystemContext) []imgspecv1.Platform {
 	if ctx != nil && ctx.VariantChoice != "" {
 		wantedVariant = ctx.VariantChoice
 	}
+	wantedVariant = normalizeAmd64Variant(wantedArch, wantedVariant)
 
 	wantedOS := runtime.GOOS
 	if ctx != nil && ctx.OSChoice != "" {
@@ -198,8 +256,10 @@ func WantedPlatforms(ctx *types.SystemContext) []imgspecv1.Platform {
 		// Make sure to have a candidate with an empty variant as well.
 		variants = append(variants, "")
 		// If available add the entire compatibility matrix for the specific architecture.
-		if possibleVariants, ok := compatibility[wantedArch]; ok {
-			variants = append(variants, possibleVariants...)
+		if wantedArch != "amd64" {
+			if possibleVariants, ok := compatibility[wantedArch]; ok {
+				variants = append(variants, possibleVariants...)
+			}
 		}
 	}
 
@@ -214,10 +274,19 @@ func WantedPlatforms(ctx *types.SystemContext) []imgspecv1.Platform {
 	return res
 }
 
+// normalizeAmd64Variant treats "v1" as equivalent to "" for amd64,
+// because v1 is the baseline with no additional requirements.
+func normalizeAmd64Variant(arch, variant string) string {
+	if arch == "amd64" && variant == "v1" {
+		return ""
+	}
+	return variant
+}
+
 // MatchesPlatform returns true if a platform descriptor from a multi-arch image matches
 // an item from the return value of WantedPlatforms.
 func MatchesPlatform(image imgspecv1.Platform, wanted imgspecv1.Platform) bool {
 	return image.Architecture == wanted.Architecture &&
 		image.OS == wanted.OS &&
-		image.Variant == wanted.Variant
+		normalizeAmd64Variant(image.Architecture, image.Variant) == normalizeAmd64Variant(wanted.Architecture, wanted.Variant)
 }
