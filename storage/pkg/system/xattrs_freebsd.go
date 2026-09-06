@@ -1,6 +1,7 @@
 package system
 
 import (
+	"errors"
 	"strings"
 
 	"golang.org/x/sys/unix"
@@ -65,12 +66,27 @@ func Lsetxattr(path string, attr string, value []byte, flags int) error {
 
 // Llistxattr lists extended attributes associated with the given path
 // in the file system.
+//
+// Namespaces the caller lacks the privilege to read are skipped rather than
+// treated as an error, so that the attributes which are readable are still
+// returned. Reading the "system" namespace requires privilege on FreeBSD
+// (PRIV_VFS_EXTATTR_SYSTEM), which an unprivileged process does not have, and
+// which a jailed process only holds when the jail is configured with
+// allow.extattr; without it, extattr_list_link(2) fails with EPERM for that
+// namespace alone. This mirrors llistxattr(2) on Linux, which omits names the
+// caller cannot see instead of failing.
+//
+// Only EPERM is skipped. Anything else, EACCES included, describes the file
+// rather than the namespace and is still reported.
 func Llistxattr(path string) ([]string, error) {
 	attrs := []string{}
 
 	for namespaceName, namespace := range namespaceMap {
 		namespaceAttrs, err := ExtattrListLink(path, namespace)
 		if err != nil {
+			if errors.Is(err, unix.EPERM) {
+				continue
+			}
 			return nil, err
 		}
 
