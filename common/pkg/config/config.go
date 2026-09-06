@@ -142,6 +142,9 @@ type ContainersConfig struct {
 	// EnvHost Pass all host environment variables into the container.
 	EnvHost bool `toml:"env_host,omitempty"`
 
+	// EnvMerge preprocess the environment variables list for the container.
+	EnvMerge configfile.Slice `toml:"env_merge,omitempty"`
+
 	// HostContainersInternalIP is used to set a specific host.containers.internal ip.
 	HostContainersInternalIP string `toml:"host_containers_internal_ip,omitempty"`
 

@@ -226,6 +226,14 @@ overwriting values specified on the command line when the container was created.
 
 Pass all host environment variables into the container.
 
+**env_merge**=[]
+
+Preprocess default environment variables for the container.
+Works the same as the **--env-merge** command line option.
+The value of existing variables in the image will be used for substitution.
+
+Example: `env_merge=["PATH=${PATH}:/custom/bin"]`
+
 **host_containers_internal_ip**=""
 
 Set the IP address the container should expect to connect to the host. The IP
