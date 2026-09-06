@@ -106,10 +106,17 @@ func (n *Netns) getPath(path string) string {
 
 // getOrCreateNetns returns the rootless netns, if it created a new one the
 // returned bool is set to true.
-func (n *Netns) getOrCreateNetns() (netns.NetNS, bool, error) {
+func (n *Netns) getOrCreateNetns(create bool) (netns.NetNS, bool, error) {
 	nsPath := n.getPath(rootlessNetnsDir)
 	nsRef, err := netns.GetNS(nsPath)
 	if err == nil {
+		if !create {
+			if err := n.deserializeInfo(); err != nil {
+				return nil, false, wrapError("deserialize info", err)
+			}
+			return nsRef, false, nil
+		}
+
 		pidPath := n.getPath(rootlessNetNsConnPidFile)
 		pid, err := readPidFile(pidPath)
 		if err == nil {
@@ -134,6 +141,10 @@ func (n *Netns) getOrCreateNetns() (netns.NetNS, bool, error) {
 		}
 		// In case of errors continue and setup the network cmd again.
 	} else {
+		if !create {
+			return nil, false, err
+		}
+
 		// Special case, the file might exist already but is not a valid netns.
 		// One reason could be that a previous setup was killed between creating
 		// the file and mounting it. Or if the file is not on tmpfs (deleted on boot)
@@ -548,8 +559,8 @@ func (n *Netns) setupMounts() error {
 	return nil
 }
 
-func (n *Netns) runInner(toRun func() error, cleanup bool) (err error) {
-	nsRef, newNs, err := n.getOrCreateNetns()
+func (n *Netns) runInner(toRun func() error, cleanup bool, create bool) (err error) {
+	nsRef, newNs, err := n.getOrCreateNetns(create)
 	if err != nil {
 		return err
 	}
@@ -577,7 +588,7 @@ func (n *Netns) runInner(toRun func() error, cleanup bool) (err error) {
 }
 
 func (n *Netns) Setup(nets int, toRun func() error) error {
-	err := n.runInner(toRun, true)
+	err := n.runInner(toRun, true, true)
 	if err != nil {
 		return err
 	}
@@ -586,7 +597,7 @@ func (n *Netns) Setup(nets int, toRun func() error) error {
 }
 
 func (n *Netns) Teardown(nets int, toRun func() error) error {
-	err := n.runInner(toRun, true)
+	err := n.runInner(toRun, true, false)
 	if err != nil {
 		return err
 	}
@@ -623,7 +634,7 @@ func (n *Netns) Run(lock *lockfile.LockFile, toRun func() error) error {
 		return err
 	}
 
-	inErr := n.runInner(inner, false)
+	inErr := n.runInner(inner, false, true)
 	// make sure to always reset the ref counter afterwards
 	count, err := refCount(n.dir, -1)
 	if err != nil {
