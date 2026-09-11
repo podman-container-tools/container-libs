@@ -36,6 +36,7 @@ import (
 	"go.podman.io/storage/pkg/directory"
 	"go.podman.io/storage/pkg/fileutils"
 	"go.podman.io/storage/pkg/fsutils"
+	"go.podman.io/storage/pkg/ioutils"
 	"go.podman.io/storage/pkg/idmap"
 	"go.podman.io/storage/pkg/idtools"
 	"go.podman.io/storage/pkg/mount"
@@ -2308,6 +2309,10 @@ func (d *Driver) ApplyDiffFromStagingDirectory(id, parent string, diffOutput *gr
 	}
 	if err := os.RemoveAll(diffPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
+	}
+
+	if err := ioutils.SyncDirectoryContents(stagingDirectory); err != nil {
+		return fmt.Errorf("sync staging directory before rename: %w", err)
 	}
 
 	return os.Rename(stagingDirectory, diffPath)
