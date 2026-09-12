@@ -3,10 +3,12 @@ package systemd
 import (
 	"context"
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
 	"sync"
+	"time"
 
 	systemdDbus "github.com/coreos/go-systemd/v22/dbus"
 	"github.com/godbus/dbus/v5"
@@ -14,6 +16,9 @@ import (
 	"go.podman.io/common/pkg/cgroups"
 	"go.podman.io/storage/pkg/unshare"
 )
+
+// Limit scope startup even for callers that do not have a context.
+const scopeStartupTimeout = 10 * time.Second
 
 var (
 	runsOnSystemdOnce sync.Once
@@ -85,6 +90,9 @@ func MovePauseProcessToScope(pausePidPath string) {
 		if err == nil {
 			return
 		}
+		if errors.Is(err, context.DeadlineExceeded) {
+			break
+		}
 	}
 
 	if err != nil {
@@ -99,17 +107,28 @@ func MovePauseProcessToScope(pausePidPath string) {
 }
 
 // RunUnderSystemdScope adds the specified pid to a systemd scope.
-func RunUnderSystemdScope(pid int, slice string, unitName string) error {
+// Authentication, the method reply, and job completion share a 10-second timeout.
+func RunUnderSystemdScope(pid int, slice string, unitName string) (retErr error) {
+	ctx, cancel := context.WithTimeout(context.Background(), scopeStartupTimeout)
+	defer cancel()
+	defer func() {
+		// Cancellation closes the D-Bus connections, which can surface as a
+		// socket error. Preserve the deadline error so callers can avoid retries.
+		if ctx.Err() != nil {
+			retErr = ctx.Err()
+		}
+	}()
+
 	var conn *systemdDbus.Conn
 	var err error
 
 	if unshare.GetRootlessUID() != 0 {
-		conn, err = cgroups.UserConnection(unshare.GetRootlessUID())
+		conn, err = cgroups.UserConnectionContext(ctx, unshare.GetRootlessUID())
 		if err != nil {
 			return err
 		}
 	} else {
-		conn, err = systemdDbus.NewWithContext(context.Background())
+		conn, err = systemdDbus.NewWithContext(ctx)
 		if err != nil {
 			return err
 		}
@@ -121,11 +140,15 @@ func RunUnderSystemdScope(pid int, slice string, unitName string) error {
 		newProp("Delegate", true),
 		newProp("DefaultDependencies", false),
 	}
-	ch := make(chan string)
-	_, err = conn.StartTransientUnitContext(context.Background(), unitName, "replace", properties, ch)
+	// A late completion must not block go-systemd's signal dispatcher.
+	ch := make(chan string, 1)
+	_, err = conn.StartTransientUnitContext(ctx, unitName, "replace", properties, ch)
 	if err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		// On errors check if the cgroup already exists, if it does move the process there
-		if props, err := conn.GetUnitTypePropertiesContext(context.Background(), unitName, "Scope"); err == nil {
+		if props, err := conn.GetUnitTypePropertiesContext(ctx, unitName, "Scope"); err == nil {
 			if cgroup, ok := props["ControlGroup"].(string); ok && cgroup != "" {
 				if err := cgroups.MoveUnderCgroup(cgroup, "", []uint32{uint32(pid)}); err == nil {
 					return nil
@@ -136,10 +159,12 @@ func RunUnderSystemdScope(pid int, slice string, unitName string) error {
 		return err
 	}
 
-	// Block until job is started
-	<-ch
-
-	return nil
+	select {
+	case <-ch:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func newProp(name string, units any) systemdDbus.Property {
