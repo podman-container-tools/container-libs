@@ -13,7 +13,7 @@ require (
 	github.com/json-iterator/go v1.1.12
 	github.com/klauspost/compress v1.20.0
 	github.com/klauspost/pgzip v1.2.6
-	github.com/mattn/go-shellwords v1.0.14
+	github.com/mattn/go-shellwords v1.0.15
 	github.com/mistifyio/go-zfs/v4 v4.0.0
 	github.com/moby/sys/capability v0.4.0
 	github.com/moby/sys/mountinfo v0.7.2
