@@ -256,6 +256,7 @@ func dbusAuthConnection(ctx context.Context, uid int, createBus func(opts ...dbu
 		return nil, err
 	}
 	if err := conn.Hello(); err != nil {
+		conn.Close()
 		return nil, err
 	}
 
@@ -486,7 +487,7 @@ func IsCgroup2UnifiedMode() (bool, error) {
 
 // UserConnection returns an user connection to D-BUS.
 func UserConnection(uid int) (*systemdDbus.Conn, error) {
-return UserConnectionContext(context.Background(), uid)
+	return UserConnectionContext(context.Background(), uid)
 }
 
 // UserConnectionContext returns a user connection to D-Bus. The context controls
