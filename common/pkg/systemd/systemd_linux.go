@@ -90,6 +90,9 @@ func MovePauseProcessToScope(pausePidPath string) {
 		if err == nil {
 			return
 		}
+		if errors.Is(err, context.DeadlineExceeded) {
+			break
+		}
 	}
 
 	if err != nil {
