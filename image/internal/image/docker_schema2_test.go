@@ -251,12 +251,11 @@ func TestManifestSchema2Inspect(t *testing.T) {
 	m := manifestSchema2FromComponentsLikeFixture(configJSON)
 	ii, err := m.Inspect(context.Background())
 	require.NoError(t, err)
-	created := time.Date(2016, 9, 23, 23, 20, 45, 789764590, time.UTC)
 
 	var emptyAnnotations map[string]string
 	assert.Equal(t, types.ImageInspectInfo{
 		Tag:           "",
-		Created:       &created,
+		Created:       new(time.Date(2016, 9, 23, 23, 20, 45, 789764590, time.UTC)),
 		DockerVersion: "1.12.1",
 		Labels:        map[string]string{},
 		Architecture:  "amd64",

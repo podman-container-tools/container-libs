@@ -28,7 +28,7 @@ func shortPathToLongPath(shortPath string) (string, error) {
 	if len == 0 {
 		return "", fmt.Errorf("failed to get buffer size for path: %s", shortPath)
 	}
-	longPathPtr := &(make([]uint16, len)[0])
+	longPathPtr := &make([]uint16, len)[0]
 	_, err = windows.GetLongPathName(shortPathPtr, longPathPtr, len)
 	if err != nil {
 		return "", err

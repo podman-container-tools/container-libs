@@ -162,7 +162,6 @@ func TestRunCancel(t *testing.T) {
 		Path: path,
 		Args: []string{"sh", "-c", "echo waiting; sleep 2; echo done"},
 	}
-	one := 1
 	for _, tt := range []struct {
 		name              string
 		contextTimeout    time.Duration
@@ -184,7 +183,7 @@ func TestRunCancel(t *testing.T) {
 		},
 		{
 			name:              "hook timeout",
-			hookTimeout:       &one,
+			hookTimeout:       new(1),
 			expectedStdout:    "waiting\n",
 			expectedHookError: "^executing \\[sh -c echo waiting; sleep 2; echo done]: signal: killed$",
 			expectedRunError:  context.DeadlineExceeded,

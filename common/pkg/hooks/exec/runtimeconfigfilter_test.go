@@ -17,7 +17,6 @@ func TestRuntimeConfigFilter(t *testing.T) {
 	unexpectedEndOfJSONInput := json.Unmarshal([]byte("{\n"), &discardedParsingDestination) // this should force the error
 	fileMode := os.FileMode(0o600)
 	rootUint32 := uint32(0)
-	binUser := int(1)
 	for _, tt := range []struct {
 		name                   string
 		contextTimeout         time.Duration
@@ -195,7 +194,7 @@ func TestRuntimeConfigFilter(t *testing.T) {
 				{
 					Path:    path,
 					Args:    []string{"sh", "-c", "sleep 2"},
-					Timeout: &binUser,
+					Timeout: new(1),
 				},
 			},
 			input: &spec.Spec{

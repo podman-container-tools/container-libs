@@ -263,11 +263,10 @@ func TestManifestSchema1Inspect(t *testing.T) {
 	} {
 		ii, err := m.Inspect(context.Background())
 		require.NoError(t, err)
-		created := time.Date(2018, 1, 25, 0, 37, 48, 268558000, time.UTC)
 		var emptyAnnotations map[string]string
 		assert.Equal(t, types.ImageInspectInfo{
 			Tag:           "latest",
-			Created:       &created,
+			Created:       new(time.Date(2018, 1, 25, 0, 37, 48, 268558000, time.UTC)),
 			DockerVersion: "1.12.6",
 			Labels: map[string]string{
 				"Kolla-SHA":                "5.0.0-39-g6f1b947b",

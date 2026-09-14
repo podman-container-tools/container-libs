@@ -55,9 +55,6 @@ func TestUntrustedSigstorePayloadMarshalJSON(t *testing.T) {
 	assert.Error(t, err)
 
 	// Success
-	// Use intermediate variables for these values so that we can take their addresses.
-	creatorID := "CREATOR"
-	timestamp := int64(1484683104)
 	for _, c := range []struct {
 		input    UntrustedSigstorePayload
 		expected string
@@ -66,8 +63,8 @@ func TestUntrustedSigstorePayloadMarshalJSON(t *testing.T) {
 			UntrustedSigstorePayload{
 				untrustedDockerManifestDigest: testDigest,
 				untrustedDockerReference:      "reference#@!",
-				untrustedCreatorID:            &creatorID,
-				untrustedTimestamp:            &timestamp,
+				untrustedCreatorID:            new("CREATOR"),
+				untrustedTimestamp:            new(int64(1484683104)),
 			},
 			"{\"critical\":{\"identity\":{\"docker-reference\":\"reference#@!\"},\"image\":{\"docker-manifest-digest\":\"" + testDigest + "\"},\"type\":\"cosign container image signature\"},\"optional\":{\"creator\":\"CREATOR\",\"timestamp\":1484683104}}",
 		},

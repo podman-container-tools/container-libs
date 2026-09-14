@@ -7,7 +7,7 @@ permissions:
   contents: read
 
 env:
-  LINT_VERSION: v2.12.2
+  LINT_VERSION: v2.13.1
 
 jobs:
   basic:

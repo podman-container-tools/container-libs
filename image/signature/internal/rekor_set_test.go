@@ -168,11 +168,6 @@ func TestUntrustedRekorPayloadUnmarshalJSON(t *testing.T) {
 	}
 }
 
-// stringPtr returns a pointer to the provided string value.
-func stringPtr(s string) *string {
-	return &s
-}
-
 func TestVerifyRekorSET(t *testing.T) {
 	cosignRekorKeyPEM, err := os.ReadFile("testdata/rekor.pub")
 	require.NoError(t, err)
@@ -266,8 +261,8 @@ func TestVerifyRekorSET(t *testing.T) {
 	validHashedRekordSpec, err := json.Marshal(RekorHashedrekordV001Schema{
 		Data: &RekorHashedrekordV001SchemaData{
 			Hash: &RekorHashedrekordV001SchemaDataHash{
-				Algorithm: stringPtr(RekorHashedrekordV001SchemaDataHashAlgorithmSha256),
-				Value:     stringPtr(hex.EncodeToString(cosignPayloadSHA256[:])),
+				Algorithm: new(RekorHashedrekordV001SchemaDataHashAlgorithmSha256),
+				Value:     new(hex.EncodeToString(cosignPayloadSHA256[:])),
 			},
 		},
 		Signature: &RekorHashedrekordV001SchemaSignature{
@@ -279,7 +274,7 @@ func TestVerifyRekorSET(t *testing.T) {
 	})
 	require.NoError(t, err)
 	validHashedRekord := RekorHashedrekord{
-		APIVersion: stringPtr(RekorHashedRekordV001APIVersion),
+		APIVersion: new(RekorHashedRekordV001APIVersion),
 		Spec:       validHashedRekordSpec,
 	}
 	validHashedRekordJSON, err := json.Marshal(validHashedRekord)

@@ -50,8 +50,7 @@ func newGraphDriver(t testing.TB, name string, options []string, root string, ru
 		if errors.Is(err, graphdriver.ErrNotSupported) || errors.Is(err, graphdriver.ErrPrerequisites) || errors.Is(err, graphdriver.ErrIncompatibleFS) {
 			t.Skipf("Driver %s not supported", name)
 		}
-		var unixErr unix.Errno
-		if errors.As(err, &unixErr) && unixErr == unix.EPERM {
+		if unixErr, ok := errors.AsType[unix.Errno](err); ok && unixErr == unix.EPERM {
 			t.Skipf("Insufficient permission to test %s", name)
 		}
 		t.Fatal(err)

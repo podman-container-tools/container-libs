@@ -20,11 +20,6 @@ const (
 	configAppendFalse = `array=["10", {append=false}]`
 )
 
-var (
-	bTrue  = true
-	bFalse = false
-)
-
 func loadConfigs(configs []string) (*testConfig, error) {
 	var config testConfig
 	for _, c := range configs {
@@ -44,18 +39,18 @@ func TestSliceLoading(t *testing.T) {
 	}{
 		// Load single configs
 		{[]string{configDefault}, []string{"1", "2", "3"}, nil, ""},
-		{[]string{configAppendFront}, []string{"4", "5", "6"}, &bTrue, ""},
-		{[]string{configAppendMid}, []string{"7", "8"}, &bTrue, ""},
-		{[]string{configAppendBack}, []string{"9"}, &bTrue, ""},
-		{[]string{configAppendFalse}, []string{"10"}, &bFalse, ""},
+		{[]string{configAppendFront}, []string{"4", "5", "6"}, new(true), ""},
+		{[]string{configAppendMid}, []string{"7", "8"}, new(true), ""},
+		{[]string{configAppendBack}, []string{"9"}, new(true), ""},
+		{[]string{configAppendFalse}, []string{"10"}, new(false), ""},
 		// Append=true
-		{[]string{configDefault, configAppendFront}, []string{"1", "2", "3", "4", "5", "6"}, &bTrue, ""},
-		{[]string{configAppendFront, configDefault}, []string{"4", "5", "6", "1", "2", "3"}, &bTrue, ""}, // The attribute is sticky unless explicitly being turned off in a later config
-		{[]string{configAppendFront, configDefault, configAppendBack}, []string{"4", "5", "6", "1", "2", "3", "9"}, &bTrue, ""},
+		{[]string{configDefault, configAppendFront}, []string{"1", "2", "3", "4", "5", "6"}, new(true), ""},
+		{[]string{configAppendFront, configDefault}, []string{"4", "5", "6", "1", "2", "3"}, new(true), ""}, // The attribute is sticky unless explicitly being turned off in a later config
+		{[]string{configAppendFront, configDefault, configAppendBack}, []string{"4", "5", "6", "1", "2", "3", "9"}, new(true), ""},
 		// Append=false
-		{[]string{configDefault, configAppendFalse}, []string{"10"}, &bFalse, ""},
-		{[]string{configDefault, configAppendMid, configAppendFalse}, []string{"10"}, &bFalse, ""},
-		{[]string{configDefault, configAppendFalse, configAppendMid}, []string{"10", "7", "8"}, &bTrue, ""}, // Append can be re-enabled by a later config
+		{[]string{configDefault, configAppendFalse}, []string{"10"}, new(false), ""},
+		{[]string{configDefault, configAppendMid, configAppendFalse}, []string{"10"}, new(false), ""},
+		{[]string{configDefault, configAppendFalse, configAppendMid}, []string{"10", "7", "8"}, new(true), ""}, // Append can be re-enabled by a later config
 
 		// Error checks
 		{[]string{`array=["1", false]`}, nil, nil, `unsupported item in attributed string slice: false`},
@@ -93,13 +88,13 @@ func TestSliceEncoding(t *testing.T) {
 			[]string{configAppendFront},
 			"array = [\"4\", \"5\", \"6\", {append = true}]\n",
 			[]string{"4", "5", "6"},
-			&bTrue,
+			new(true),
 		},
 		{
 			[]string{configAppendFront, configAppendFalse},
 			"array = [\"10\", {append = false}]\n",
 			[]string{"10"},
-			&bFalse,
+			new(false),
 		},
 	} {
 		// 1) Load the configs

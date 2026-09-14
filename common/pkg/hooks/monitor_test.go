@@ -154,12 +154,11 @@ func TestMonitorTwoDirGood(t *testing.T) {
 
 	primaryPath := filepath.Join(primaryDir, "a.json")
 	primaryJSON := fmt.Appendf(nil, "{\"version\": \"1.0.0\", \"hook\": {\"path\": \"%s\", \"timeout\": 1}, \"when\": {\"always\": true}, \"stages\": [\"prestart\"]}", path)
-	one := 1
 	primaryInjected := &rspec.Hooks{
 		CreateRuntime: []rspec.Hook{
 			{
 				Path:    path,
-				Timeout: &one,
+				Timeout: new(1),
 			},
 		},
 	}

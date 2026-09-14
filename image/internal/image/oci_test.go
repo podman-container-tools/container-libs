@@ -299,7 +299,6 @@ func TestManifestOCI1EmbeddedDockerReferenceConflicts(t *testing.T) {
 
 func TestManifestOCI1Inspect(t *testing.T) {
 	var emptyAnnotations map[string]string
-	created := time.Date(2016, 9, 23, 23, 20, 45, 789764590, time.UTC)
 
 	configJSON, err := os.ReadFile("fixtures/oci1-config.json")
 	require.NoError(t, err)
@@ -314,7 +313,7 @@ func TestManifestOCI1Inspect(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, types.ImageInspectInfo{
 			Tag:           "",
-			Created:       &created,
+			Created:       new(time.Date(2016, 9, 23, 23, 20, 45, 789764590, time.UTC)),
 			DockerVersion: "1.12.1",
 			Labels:        map[string]string{},
 			Architecture:  "amd64",

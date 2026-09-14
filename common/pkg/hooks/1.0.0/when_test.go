@@ -49,8 +49,7 @@ func TestAlways(t *testing.T) {
 }
 
 func TestHasBindMountsAnd(t *testing.T) {
-	hasBindMounts := true
-	when := When{HasBindMounts: &hasBindMounts}
+	when := When{HasBindMounts: new(true)}
 	config := &rspec.Spec{}
 	for _, b := range []bool{false, true} {
 		containerHasBindMounts := b
@@ -65,8 +64,7 @@ func TestHasBindMountsAnd(t *testing.T) {
 }
 
 func TestHasBindMountsOr(t *testing.T) {
-	hasBindMounts := true
-	when := When{HasBindMounts: &hasBindMounts, Or: true}
+	when := When{HasBindMounts: new(true), Or: true}
 	config := &rspec.Spec{}
 	for _, b := range []bool{false, true} {
 		containerHasBindMounts := b
@@ -209,9 +207,8 @@ func TestCommandsEmptyProcessArgs(t *testing.T) {
 }
 
 func TestHasBindMountsAndCommands(t *testing.T) {
-	hasBindMounts := true
 	when := When{
-		HasBindMounts: &hasBindMounts,
+		HasBindMounts: new(true),
 		Commands: []string{
 			"^/bin/sh$",
 		},

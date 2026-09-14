@@ -37,7 +37,7 @@ func TestStorageReferenceTransport(t *testing.T) {
 	transport := ref.Transport()
 	st, ok := transport.(*storageTransport)
 	require.True(t, ok)
-	assert.Equal(t, *(Transport.(*storageTransport)), *st)
+	assert.Equal(t, *Transport.(*storageTransport), *st)
 }
 
 // A common list of reference formats to test for the various ImageReference methods.

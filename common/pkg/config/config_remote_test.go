@@ -100,5 +100,4 @@ var _ = Describe("Config Remote", func() {
 		// Then
 		gomega.Expect(err).To(gomega.BeNil())
 	})
-
 })

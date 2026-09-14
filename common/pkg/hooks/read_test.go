@@ -41,14 +41,13 @@ func TestGoodFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	always := true
 	assert.Equal(t, &current.Hook{
 		Version: current.Version,
 		Hook: rspec.Hook{
 			Path: path,
 		},
 		When: current.When{
-			Always: &always,
+			Always: new(true),
 		},
 		Stages: []string{"prestart"},
 	}, hook)
@@ -75,14 +74,13 @@ func TestGoodBytes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	always := true
 	assert.Equal(t, &current.Hook{
 		Version: current.Version,
 		Hook: rspec.Hook{
 			Path: "/a/b/c",
 		},
 		When: current.When{
-			Always: &always,
+			Always: new(true),
 		},
 		Stages: []string{"prestart"},
 	}, hook)
@@ -132,7 +130,6 @@ func TestGoodDir(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	always := true
 	assert.Equal(t, map[string]*current.Hook{
 		"a.json": {
 			Version: current.Version,
@@ -140,7 +137,7 @@ func TestGoodDir(t *testing.T) {
 				Path: path,
 			},
 			When: current.When{
-				Always: &always,
+				Always: new(true),
 			},
 			Stages: []string{"prestart"},
 		},

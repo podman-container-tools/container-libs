@@ -12,12 +12,17 @@ import (
 
 // isNotFoundImageError checks if an error indicates that an image was not found.
 func isNotFoundImageError(err error) bool {
-	var layoutImageNotFoundError ocilayout.ImageNotFoundError
-	var archiveImageNotFoundError ociarchive.ImageNotFoundError
-	return isDockerManifestUnknownError(err) ||
-		errors.Is(err, storage.ErrNoSuchImage) ||
-		errors.As(err, &layoutImageNotFoundError) ||
-		errors.As(err, &archiveImageNotFoundError)
+	if isDockerManifestUnknownError(err) ||
+		errors.Is(err, storage.ErrNoSuchImage) {
+		return true
+	}
+	if _, ok := errors.AsType[ocilayout.ImageNotFoundError](err); ok {
+		return true
+	}
+	if _, ok := errors.AsType[ociarchive.ImageNotFoundError](err); ok {
+		return true
+	}
+	return false
 }
 
 // isDockerManifestUnknownError checks if an error is a Docker manifest unknown error.

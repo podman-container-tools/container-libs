@@ -48,34 +48,31 @@ func TestGoodNew(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	one := 1
-	two := 2
-	three := 3
 	assert.Equal(t, &rspec.Hooks{
 		CreateRuntime: []rspec.Hook{
 			{
 				Path:    path,
-				Timeout: &one,
+				Timeout: new(1),
 			},
 			{
 				Path:    path,
-				Timeout: &two,
+				Timeout: new(2),
 			},
 			{
 				Path:    path,
-				Timeout: &three,
+				Timeout: new(3),
 			},
 		},
 		Poststart: []rspec.Hook{
 			{
 				Path:    path,
-				Timeout: &one,
+				Timeout: new(1),
 			},
 		},
 		Poststop: []rspec.Hook{
 			{
 				Path:    path,
-				Timeout: &one,
+				Timeout: new(1),
 			},
 		},
 	}, config.Hooks)
@@ -133,7 +130,6 @@ func TestBrokenMatch(t *testing.T) {
 }
 
 func TestInvalidStage(t *testing.T) {
-	always := true
 	manager := Manager{
 		hooks: map[string]*current.Hook{
 			"a.json": {
@@ -142,7 +138,7 @@ func TestInvalidStage(t *testing.T) {
 					Path: "/a/b/c",
 				},
 				When: current.When{
-					Always: &always,
+					Always: new(true),
 				},
 				Stages: []string{"does-not-exist"},
 			},
@@ -159,7 +155,6 @@ func TestInvalidStage(t *testing.T) {
 }
 
 func TestExtensionStage(t *testing.T) {
-	always := true
 	manager := Manager{
 		hooks: map[string]*current.Hook{
 			"a.json": {
@@ -168,7 +163,7 @@ func TestExtensionStage(t *testing.T) {
 					Path: "/a/b/c",
 				},
 				When: current.When{
-					Always: &always,
+					Always: new(true),
 				},
 				Stages: []string{"prestart", "poststop", "a", "b"},
 			},

@@ -37,21 +37,27 @@ run_storage() {
 
     SUDO="sudo -E env PATH=$PATH GOPATH=$(go env GOPATH) HOME=$HOME"
 
+    TESTFLAGS=
+    if [[ "$DISTRO_NAME" == "fedora-current" ]]; then
+        # Only run go unit tests with -race on fedora, they seem to run OOM on debian.
+        TESTFLAGS=-race
+    fi
+
     case "$VARIANT" in
         overlay)
-            $SUDO make STORAGE_DRIVER=overlay local-test-integration local-test-unit
+            $SUDO make STORAGE_DRIVER=overlay "TESTFLAGS=$TESTFLAGS" local-test-integration local-test-unit
             ;;
         overlay-transient)
-            $SUDO make STORAGE_DRIVER=overlay STORAGE_TRANSIENT=1 local-test-integration local-test-unit
+            $SUDO make STORAGE_DRIVER=overlay STORAGE_TRANSIENT=1 local-test-integration
             ;;
         fuse-overlay)
-            $SUDO make STORAGE_DRIVER=overlay STORAGE_OPTION=overlay.mount_program=/usr/bin/fuse-overlayfs local-test-integration local-test-unit
+            $SUDO make STORAGE_DRIVER=overlay STORAGE_OPTION=overlay.mount_program=/usr/bin/fuse-overlayfs local-test-integration
             ;;
         fuse-overlay-whiteout)
-            $SUDO FUSE_OVERLAYFS_DISABLE_OVL_WHITEOUT=1 make STORAGE_DRIVER=overlay STORAGE_OPTION=overlay.mount_program=/usr/bin/fuse-overlayfs local-test-integration local-test-unit
+            $SUDO FUSE_OVERLAYFS_DISABLE_OVL_WHITEOUT=1 make STORAGE_DRIVER=overlay STORAGE_OPTION=overlay.mount_program=/usr/bin/fuse-overlayfs local-test-integration
             ;;
         vfs)
-            $SUDO make STORAGE_DRIVER=vfs local-test-integration local-test-unit
+            $SUDO make STORAGE_DRIVER=vfs local-test-integration
             ;;
         btrfs)
             if [[ "$(./hack/btrfs_tag.sh)" =~ exclude_graphdriver_btrfs ]]; then
@@ -75,7 +81,7 @@ run_storage() {
             fallocate -l 1G btrfs.img
             sudo mkfs.btrfs btrfs.img
             sudo mount -o loop btrfs.img $tmpdir
-            $SUDO TMPDIR="$tmpdir" make STORAGE_DRIVER=btrfs local-test-integration local-test-unit
+            $SUDO TMPDIR="$tmpdir" make STORAGE_DRIVER=btrfs local-test-integration
             ;;
         *)
             die "Unknown storage variant: $VARIANT"

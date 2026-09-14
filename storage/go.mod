@@ -1,4 +1,4 @@
-go 1.25.0
+go 1.26.0
 
 // Warning: Ensure the "go" and "toolchain" versions match exactly to prevent unwanted auto-updates.
 // That generally means there should be no toolchain directive present.

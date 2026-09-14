@@ -129,7 +129,7 @@ func TestPolicyContextRequirementsForImageRefNotRegisteredTransport(t *testing.T
 	ref, err := reference.ParseNormalizedNamed("registry.access.redhat.com/rhel7:latest")
 	require.NoError(t, err)
 	reqs := pc.requirementsForImageRef(pcImageReferenceMock{transportName: "docker", ref: ref})
-	assert.True(t, &(reqs[0]) == &(pr[0]))
+	assert.True(t, &reqs[0] == &pr[0])
 	assert.True(t, len(reqs) == len(pr))
 }
 
@@ -201,7 +201,7 @@ func TestPolicyContextRequirementsForImageRef(t *testing.T) {
 		// Do not use assert.Equal, which would do a deep contents comparison; we want to compare
 		// the pointers. Also, == does not work on slices; so test that the slices start at the
 		// same element and have the same length.
-		assert.True(t, &(reqs[0]) == &(expected[0]), comment)
+		assert.True(t, &reqs[0] == &expected[0], comment)
 		assert.True(t, len(reqs) == len(expected), comment)
 	}
 }

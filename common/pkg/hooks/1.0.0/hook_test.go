@@ -19,14 +19,13 @@ func TestGoodRead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	always := true
 	assert.Equal(t, &Hook{
 		Version: Version,
 		Hook: rspec.Hook{
 			Path: "/a/b/c",
 		},
 		When: When{
-			Always: &always,
+			Always: new(true),
 		},
 		Stages: []string{"prestart"},
 	}, hook)
@@ -41,14 +40,13 @@ func TestInvalidJSON(t *testing.T) {
 }
 
 func TestGoodValidate(t *testing.T) {
-	always := true
 	hook := &Hook{
 		Version: Version,
 		Hook: rspec.Hook{
 			Path: path,
 		},
 		When: When{
-			Always: &always,
+			Always: new(true),
 		},
 		Stages: []string{"prestart"},
 	}
