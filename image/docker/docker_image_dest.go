@@ -230,13 +230,13 @@ func (d *dockerImageDestination) PutBlobWithOptions(ctx context.Context, stream 
 // blobExists returns true iff repo contains a blob with digest, and if so, also its size.
 // If the destination does not contain the blob, or it is unknown, blobExists ordinarily returns (false, -1, nil);
 // it returns a non-nil error only on an unexpected failure.
-func (d *dockerImageDestination) blobExists(ctx context.Context, repo reference.Named, digest digest.Digest, extraScope *authScope) (bool, int64, error) {
+func (d *dockerImageDestination) blobExists(ctx context.Context, repo reference.Named, digest digest.Digest, extraScopes []authScope) (bool, int64, error) {
 	if err := digest.Validate(); err != nil { // Make sure digest.String() does not contain any unexpected characters
 		return false, -1, err
 	}
 	checkPath := fmt.Sprintf(blobsPath, reference.Path(repo), digest.String())
 	logrus.Debugf("Checking %s", checkPath)
-	res, err := d.c.makeRequest(ctx, http.MethodHead, checkPath, nil, nil, v2Auth, extraScope)
+	res, err := d.c.makeRequest(ctx, http.MethodHead, checkPath, nil, nil, v2Auth, extraScopes)
 	if err != nil {
 		return false, -1, err
 	}
@@ -261,7 +261,7 @@ func (d *dockerImageDestination) blobExists(ctx context.Context, repo reference.
 }
 
 // mountBlob tries to mount blob srcDigest from srcRepo to the current destination.
-func (d *dockerImageDestination) mountBlob(ctx context.Context, srcRepo reference.Named, srcDigest digest.Digest, extraScope *authScope) error {
+func (d *dockerImageDestination) mountBlob(ctx context.Context, srcRepo reference.Named, srcDigest digest.Digest, extraScopes []authScope) error {
 	u := url.URL{
 		Path: fmt.Sprintf(blobUploadPath, reference.Path(d.ref.ref)),
 		RawQuery: url.Values{
@@ -270,7 +270,7 @@ func (d *dockerImageDestination) mountBlob(ctx context.Context, srcRepo referenc
 		}.Encode(),
 	}
 	logrus.Debugf("Trying to mount %s", u.Redacted())
-	res, err := d.c.makeRequest(ctx, http.MethodPost, u.String(), nil, nil, v2Auth, extraScope)
+	res, err := d.c.makeRequest(ctx, http.MethodPost, u.String(), nil, nil, v2Auth, extraScopes)
 	if err != nil {
 		return err
 	}
@@ -288,7 +288,7 @@ func (d *dockerImageDestination) mountBlob(ctx context.Context, srcRepo referenc
 			return fmt.Errorf("determining upload URL after a mount attempt: %w", err)
 		}
 		logrus.Debugf("... started an upload instead of mounting, trying to cancel at %s", uploadLocation.Redacted())
-		res2, err := d.c.makeRequestToResolvedURL(ctx, http.MethodDelete, uploadLocation, nil, nil, -1, v2Auth, extraScope)
+		res2, err := d.c.makeRequestToResolvedURL(ctx, http.MethodDelete, uploadLocation, nil, nil, -1, v2Auth, extraScopes)
 		if err != nil {
 			logrus.Debugf("Error trying to cancel an inadvertent upload: %s", err)
 		} else {
@@ -411,11 +411,11 @@ func (d *dockerImageDestination) TryReusingBlobWithOptions(ctx context.Context, 
 
 		// Checking candidateRepo, and mounting from it, requires an
 		// expanded token scope.
-		extraScope := &authScope{
+		extraScopes := []authScope{{
 			resourceType: "repository",
 			remoteName:   reference.Path(candidateRepo),
 			actions:      "pull",
-		}
+		}}
 		// This existence check is not, strictly speaking, necessary: We only _really_ need it to get the blob size, and we could record that in the cache instead.
 		// But a "failed" d.mountBlob currently leaves around an unterminated server-side upload, which we would try to cancel.
 		// So, without this existence check, it would be 1 request on success, 2 requests on failure; with it, it is 2 requests on success, 1 request on failure.
@@ -423,7 +423,7 @@ func (d *dockerImageDestination) TryReusingBlobWithOptions(ctx context.Context, 
 		// Even worse, docker/distribution does not actually reasonably implement canceling uploads
 		// (it would require a "delete" action in the token, and Quay does not give that to anyone, so we can't ask);
 		// so, be a nice client and don't create unnecessary upload sessions on the server.
-		exists, size, err := d.blobExists(ctx, candidateRepo, candidate.Digest, extraScope)
+		exists, size, err := d.blobExists(ctx, candidateRepo, candidate.Digest, extraScopes)
 		if err != nil {
 			logrus.Debugf("... Failed: %v", err)
 			continue
@@ -433,7 +433,7 @@ func (d *dockerImageDestination) TryReusingBlobWithOptions(ctx context.Context, 
 			continue // logrus.Debug() already happened in blobExists
 		}
 		if candidateRepo.Name() != d.ref.ref.Name() {
-			if err := d.mountBlob(ctx, candidateRepo, candidate.Digest, extraScope); err != nil {
+			if err := d.mountBlob(ctx, candidateRepo, candidate.Digest, extraScopes); err != nil {
 				logrus.Debugf("... Mount failed: %v", err)
 				continue
 			}
