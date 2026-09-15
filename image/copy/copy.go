@@ -106,7 +106,7 @@ type Options struct {
 	SignPassphrase                   string          // Passphrase to use when signing with the key ID from `SignBy`.
 	SignBySigstorePrivateKeyFile     string          // If non-empty, asks for a signature to be added during the copy, using a sigstore private key file at the provided path.
 	SignSigstorePrivateKeyPassphrase []byte          // Passphrase to use when signing with `SignBySigstorePrivateKeyFile`.
-	SignIdentity                     reference.Named // Identify to use when signing, defaults to the docker reference of the destination
+	SignIdentity                     reference.Named // Identity to use when signing, defaults to the docker reference of the destination
 
 	ReportWriter     io.Writer
 	SourceCtx        *types.SystemContext
