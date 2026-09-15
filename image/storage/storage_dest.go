@@ -68,6 +68,8 @@ type storageImageDestination struct {
 	signatureses          map[digest.Digest][]byte // Instance signature contents, temporary
 	metadata              storageImageMetadata     // Metadata contents being built
 
+	preserveCompressedBlobs bool // Save original compressed blobs alongside extracted layers
+
 	// Mapping from layer (by index) to the associated ID in the storage.
 	// It's protected *implicitly* since `commitLayer()`, at any given
 	// time, can only be executed by *one* goroutine.  Please refer to
@@ -163,9 +165,10 @@ func newImageDestination(sys *types.SystemContext, imageRef storageReference) (*
 			HasThreadSafePutBlob:           true,
 		}),
 
-		imageRef:     imageRef,
-		directory:    directory,
-		signatureses: make(map[digest.Digest][]byte),
+		imageRef:                imageRef,
+		directory:               directory,
+		preserveCompressedBlobs: sys != nil && sys.PreserveCompressedBlobs,
+		signatureses:            make(map[digest.Digest][]byte),
 		metadata: storageImageMetadata{
 			SignatureSizes:  []int{},
 			SignaturesSizes: make(map[digest.Digest][]int),
@@ -1272,7 +1275,8 @@ func (s *storageImageDestination) createNewLayer(index int, trusted trustedLayer
 		OriginalDigest: trustedOriginalDigest,
 		OriginalSize:   trustedOriginalSize, // nil in many cases
 		// This might be "" if trusted.layerIdentifiedByTOC; in that case PutLayer will compute the value from the stream.
-		UncompressedDigest: trusted.diffID,
+		UncompressedDigest:     trusted.diffID,
+		PreserveCompressedBlob: s.preserveCompressedBlobs,
 	}, file)
 	if err != nil && !errors.Is(err, storage.ErrDuplicateID) {
 		return nil, fmt.Errorf("adding layer with blob %s: %w", trusted.logString(), err)
