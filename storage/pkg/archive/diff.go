@@ -37,6 +37,9 @@ func UnpackLayer(dest string, layer io.Reader, options *TarOptions) (size int64,
 	aufsHardlinks := make(map[string]*tar.Header)
 	buffer := make([]byte, 1<<20)
 
+	// Normalize dest, to simplify path checking later
+	dest = filepath.Clean(dest)
+
 	// Iterate through the files in the archive.
 	for {
 		hdr, err := tr.Next()
@@ -120,7 +123,7 @@ func UnpackLayer(dest string, layer io.Reader, options *TarOptions) (size int64,
 		}
 
 		// Note as these operations are platform specific, so must the slash be.
-		if strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		if rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
 			return 0, breakoutError(fmt.Errorf("%q is outside of %q", hdr.Name, dest))
 		}
 		base := filepath.Base(path)
