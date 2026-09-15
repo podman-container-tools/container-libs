@@ -107,8 +107,6 @@ func TestValidateShortName(t *testing.T) {
 
 func TestResolveShortNameAlias(t *testing.T) {
 	tmp := filepath.Join(t.TempDir(), "aliases.conf")
-	err := os.WriteFile(tmp, []byte{}, 0o644)
-	require.NoError(t, err)
 
 	sys := &types.SystemContext{
 		SystemRegistriesConfPath:    "testdata/aliases.conf",
@@ -158,6 +156,10 @@ func TestResolveShortNameAlias(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, value)
 	assert.Equal(t, "testdata/aliases.conf", path)
+
+	// User conf file is missing, lock file should be omitted for reads.
+	assert.NoFileExists(t, tmp)
+	assert.NoFileExists(t, tmp+".lock")
 }
 
 func TestAliasesWithDropInConfigs(t *testing.T) {
