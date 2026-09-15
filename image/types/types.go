@@ -679,6 +679,12 @@ type SystemContext struct {
 	// If set, this takes precedence over DockerProxyURL. The function should return the proxy URL to use,
 	// or nil if no proxy should be used for the given request.
 	DockerProxy func(reqURL *url.URL) (*url.URL, error)
+	// DockerReadTimeout is the maximum duration a single read from a registry
+	// connection can block without returning any data before the connection is
+	// considered stalled. When triggered, the read returns a timeout error
+	// which allows the download to be resumed with a Range request.
+	// If zero, no per-read deadline is enforced.
+	DockerReadTimeout time.Duration
 
 	// === docker/daemon.Transport overrides ===
 	// A directory containing a CA certificate (ending with ".crt"),
