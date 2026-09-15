@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 2,
+  "mediaType": "application/vnd.oci.image.manifest.v1+json",
+  "config": {
+    "mediaType": "application/vnd.oci.image.config.v1+json",
+    "digest": "sha256:06047b0580a020bb2d90af148a0d76459d390fea17f70e5af3c5833321d1939c",
+    "size": 153
+  },
+  "layers": [
+    {
+      "mediaType": "application/vnd.dev.cosign.simplesigning.v1+json",
+      "digest": "sha256:6bc6d9a506e2c6452307700aa79e5a8331095c422999387f9d52351009fcd801",
+      "size": 13,
+      "annotations": {
+        "dev.cosignproject.cosign/signature": "test-signature"
+      }
+    }
+  ],
+  "subject": {
+    "mediaType": "application/vnd.oci.image.manifest.v1+json",
+    "digest": "sha256:f6d60fd529b234d3e28837e15294d935f55da58ce57c4f9218cad38d0be82ce3",
+    "size": 1506,
+    "annotations": {
+      "org.opencontainers.image.ref.name": "latest"
+    }
+  }
+}
