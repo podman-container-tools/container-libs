@@ -888,11 +888,70 @@ func (d *destinationFile) Close() error {
 	return nil
 }
 
-func closeDestinationFiles(files chan *destinationFile, errors chan error) {
-	for f := range files {
-		errors <- f.Close()
+const maxPendingDestinationFiles = 3
+
+type destinationFileCloser interface {
+	Close() error
+}
+
+// destinationFileCloserQueue closes destination files asynchronously.
+//
+// The closing goroutine must never block while a queued destination file is
+// still open: an open writable file holds syscall.ForkLock.RLock(), and a
+// concurrent composefs generation waiting for syscall.ForkLock.Lock() would
+// then deadlock with the workers that can no longer acquire the read lock.
+// Close results are therefore accumulated in memory instead of being handed
+// back over a channel the producer might not be draining.
+type destinationFileCloserQueue struct {
+	files chan destinationFileCloser
+	done  sync.WaitGroup
+
+	mutex sync.Mutex
+	err   error
+}
+
+func newDestinationFileCloser() *destinationFileCloserQueue {
+	c := &destinationFileCloserQueue{
+		files: make(chan destinationFileCloser, maxPendingDestinationFiles),
 	}
-	close(errors)
+	c.done.Add(1)
+	go c.closeDestinationFiles()
+	return c
+}
+
+func (c *destinationFileCloserQueue) closeDestinationFiles() {
+	defer c.done.Done()
+	for f := range c.files {
+		if err := f.Close(); err != nil {
+			c.mutex.Lock()
+			if c.err == nil {
+				c.err = err
+			}
+			c.mutex.Unlock()
+		}
+	}
+}
+
+// Err returns the first error reported by an asynchronous close so far, if any.
+func (c *destinationFileCloserQueue) Err() error {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	return c.err
+}
+
+// Add hands f over to the closing goroutine; f must not be used afterwards.
+// It returns the first error reported by an already completed close, if any.
+func (c *destinationFileCloserQueue) Add(f destinationFileCloser) error {
+	c.files <- f
+	return c.Err()
+}
+
+// Wait closes the queue, waits for the pending files to be closed and returns
+// the first error encountered.  No file may be added afterwards.
+func (c *destinationFileCloserQueue) Wait() error {
+	close(c.files)
+	c.done.Wait()
+	return c.Err()
 }
 
 func (c *chunkedDiffer) recordFsVerity(path string, roFile *os.File) error {
@@ -931,16 +990,10 @@ func (c *chunkedDiffer) recordFsVerity(path string, roFile *os.File) error {
 func (c *chunkedDiffer) storeMissingFiles(streams chan io.ReadCloser, errs chan error, dirfd int, missingParts []missingPart, options *archive.TarOptions) (Err error) {
 	var destFile *destinationFile
 
-	filesToClose := make(chan *destinationFile, 3)
-	closeFilesErrors := make(chan error, 2)
-
-	go closeDestinationFiles(filesToClose, closeFilesErrors)
+	filesToClose := newDestinationFileCloser()
 	defer func() {
-		close(filesToClose)
-		for e := range closeFilesErrors {
-			if e != nil && Err == nil {
-				Err = e
-			}
+		if e := filesToClose.Wait(); e != nil && Err == nil {
+			Err = e
 		}
 	}()
 
@@ -1014,19 +1067,12 @@ func (c *chunkedDiffer) storeMissingFiles(streams chan io.ReadCloser, errs chan 
 			if destFile == nil || destFile.metadata.Name != mf.File.Name {
 				var err error
 				if destFile != nil {
-				cleanup:
-					for {
-						select {
-						case err = <-closeFilesErrors:
-							if err != nil {
-								Err = err
-								goto exit
-							}
-						default:
-							break cleanup
-						}
+					err = filesToClose.Add(destFile)
+					destFile = nil
+					if err != nil {
+						Err = err
+						goto exit
 					}
-					filesToClose <- destFile
 				}
 				recordFsVerity := c.recordFsVerity
 				if c.useFsVerity == graphdriver.DifferFsVerityDisabled {
