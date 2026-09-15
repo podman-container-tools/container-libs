@@ -1053,17 +1053,19 @@ func (c *chunkedDiffer) storeMissingFiles(streams chan io.ReadCloser, errs chan 
 	exit:
 		if part != nil {
 			part.Close()
-			if Err != nil {
-				break
-			}
+		}
+		if Err != nil {
+			break
 		}
 	}
 
 	if destFile != nil {
-		return destFile.Close()
+		if err := destFile.Close(); err != nil && Err == nil {
+			Err = err
+		}
 	}
 
-	return nil
+	return Err
 }
 
 func mergeMissingChunks(missingParts []missingPart, target int) []missingPart {
