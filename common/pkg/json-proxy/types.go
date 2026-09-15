@@ -17,7 +17,7 @@ import (
 // departure from the original code which used HTTP.
 //
 // When bumping this, please also update the man page.
-const protocolVersion = "0.2.8"
+const protocolVersion = "0.2.9"
 
 // maxMsgSize is the current limit on a packet size.
 // Note that all non-metadata (i.e. payload data) is sent over a pipe.
