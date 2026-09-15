@@ -167,7 +167,13 @@ type prSigstoreSignedFulcio struct {
 	// OIDCIssuer specifies the expected OIDC issuer, recorded by Fulcio into the generated certificates.
 	OIDCIssuer string `json:"oidcIssuer,omitempty"`
 	// SubjectEmail specifies the expected email address of the authenticated OIDC identity, recorded by Fulcio into the generated certificates.
+	// At least one of SubjectEmail and BuildSignerURI must be specified.
 	SubjectEmail string `json:"subjectEmail,omitempty"`
+	// BuildSignerURI specifies the expected BuildSignerURI value (OID 1.3.6.1.4.1.57264.1.9) for workflow-based signatures.
+	// This is typically a URI identifying the CI workflow that signed the image, e.g.
+	// "https://github.com/org/repo/.github/workflows/build.yml@refs/heads/main".
+	// At least one of SubjectEmail and BuildSignerURI must be specified.
+	BuildSignerURI string `json:"buildSignerURI,omitempty"`
 }
 
 // PRSigstoreSignedPKI contains PKI configuration options for a "sigstoreSigned" PolicyRequirement.

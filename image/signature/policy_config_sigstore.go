@@ -384,6 +384,18 @@ func PRSigstoreSignedFulcioWithSubjectEmail(subjectEmail string) PRSigstoreSigne
 	}
 }
 
+// PRSigstoreSignedFulcioWithBuildSignerURI specifies a value for the "buildSignerURI" field when calling NewPRSigstoreSignedFulcio.
+// This is used for verifying workflow-based identity in CI-generated signatures (e.g., GitHub Actions).
+func PRSigstoreSignedFulcioWithBuildSignerURI(buildSignerURI string) PRSigstoreSignedFulcioOption {
+	return func(f *prSigstoreSignedFulcio) error {
+		if f.BuildSignerURI != "" {
+			return InvalidPolicyFormatError(`"buildSignerURI" already specified`)
+		}
+		f.BuildSignerURI = buildSignerURI
+		return nil
+	}
+}
+
 // newPRSigstoreSignedFulcio is NewPRSigstoreSignedFulcio, except it returns the private type
 func newPRSigstoreSignedFulcio(options ...PRSigstoreSignedFulcioOption) (*prSigstoreSignedFulcio, error) {
 	res := prSigstoreSignedFulcio{}
@@ -402,8 +414,8 @@ func newPRSigstoreSignedFulcio(options ...PRSigstoreSignedFulcioOption) (*prSigs
 	if res.OIDCIssuer == "" {
 		return nil, InvalidPolicyFormatError("oidcIssuer not specified")
 	}
-	if res.SubjectEmail == "" {
-		return nil, InvalidPolicyFormatError("subjectEmail not specified")
+	if res.SubjectEmail == "" && res.BuildSignerURI == "" {
+		return nil, InvalidPolicyFormatError("at least one of subjectEmail or buildSignerURI must be specified")
 	}
 
 	return &res, nil
@@ -420,7 +432,7 @@ var _ json.Unmarshaler = (*prSigstoreSignedFulcio)(nil)
 func (f *prSigstoreSignedFulcio) UnmarshalJSON(data []byte) error {
 	*f = prSigstoreSignedFulcio{}
 	var tmp prSigstoreSignedFulcio
-	var gotCAPath, gotCAData, gotOIDCIssuer, gotSubjectEmail bool // = false...
+	var gotCAPath, gotCAData, gotOIDCIssuer, gotSubjectEmail, gotBuildSignerURI bool // = false...
 	if err := internal.ParanoidUnmarshalJSONObject(data, func(key string) any {
 		switch key {
 		case "caPath":
@@ -435,6 +447,9 @@ func (f *prSigstoreSignedFulcio) UnmarshalJSON(data []byte) error {
 		case "subjectEmail":
 			gotSubjectEmail = true
 			return &tmp.SubjectEmail
+		case "buildSignerURI":
+			gotBuildSignerURI = true
+			return &tmp.BuildSignerURI
 		default:
 			return nil
 		}
@@ -454,6 +469,9 @@ func (f *prSigstoreSignedFulcio) UnmarshalJSON(data []byte) error {
 	}
 	if gotSubjectEmail {
 		opts = append(opts, PRSigstoreSignedFulcioWithSubjectEmail(tmp.SubjectEmail))
+	}
+	if gotBuildSignerURI {
+		opts = append(opts, PRSigstoreSignedFulcioWithBuildSignerURI(tmp.BuildSignerURI))
 	}
 
 	res, err := newPRSigstoreSignedFulcio(opts...)
