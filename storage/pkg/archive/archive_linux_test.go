@@ -2,6 +2,7 @@ package archive
 
 import (
 	"archive/tar"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.podman.io/storage/pkg/fileutils"
+	"go.podman.io/storage/pkg/idtools"
 	"go.podman.io/storage/pkg/system"
 	"golang.org/x/sys/unix"
 )
@@ -473,4 +475,146 @@ func assertAtime(t *testing.T, atime time.Time, fi os.FileInfo) {
 	t.Helper()
 	st := fi.Sys().(*syscall.Stat_t)
 	assert.Equal(t, atime, time.Unix(st.Atim.Sec, st.Atim.Nsec))
+}
+
+func TestOverlayTarWhiteoutIDMappings(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		owner   idtools.IDPair
+		mapSize int
+		chown   *idtools.IDPair
+	}{
+		{"root", idtools.IDPair{UID: 0, GID: 0}, 65535, nil},
+		{"unmapped UID", idtools.IDPair{UID: 9, GID: 1}, 8, nil},
+		{"unmapped GID", idtools.IDPair{UID: 1, GID: 9}, 8, nil},
+		{"unmapped nonzero IDs", idtools.IDPair{UID: 9, GID: 10}, 8, nil},
+		{"mapped IDs", idtools.IDPair{UID: 2, GID: 3}, 8, nil},
+		{"forced owner", idtools.IDPair{UID: 0, GID: 0}, 65535, &idtools.IDPair{UID: 21, GID: 22}},
+		{"forced owner with nonzero IDs", idtools.IDPair{UID: 9, GID: 10}, 8, &idtools.IDPair{UID: 21, GID: 22}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "removed")
+			require.NoError(t, system.Mknod(path, unix.S_IFCHR, 0))
+			require.NoError(t, os.Chown(path, tc.owner.UID, tc.owner.GID))
+
+			idMaps := []idtools.IDMap{{ContainerID: 0, HostID: 1, Size: tc.mapSize}}
+			reader, err := TarWithOptions(path, &TarOptions{
+				WhiteoutFormat: OverlayWhiteoutFormat,
+				UIDMaps:        idMaps,
+				GIDMaps:        idMaps,
+				ChownOpts:      tc.chown,
+			})
+			require.NoError(t, err)
+			defer reader.Close()
+			tr := tar.NewReader(reader)
+			hdr, err := tr.Next()
+			require.NoError(t, err)
+			require.Equal(t, WhiteoutPrefix+"removed", hdr.Name)
+			require.Equal(t, byte(tar.TypeReg), hdr.Typeflag)
+			require.Zero(t, hdr.Size)
+			require.Zero(t, hdr.Mode)
+			owner := idtools.IDPair{}
+			if tc.chown != nil {
+				owner = *tc.chown
+			}
+			require.Equal(t, owner.UID, hdr.Uid)
+			require.Equal(t, owner.GID, hdr.Gid)
+			require.Empty(t, hdr.Uname)
+			require.Empty(t, hdr.Gname)
+			_, err = tr.Next()
+			require.ErrorIs(t, err, io.EOF)
+		})
+	}
+}
+
+func TestOverlayTarFileAndDirectoryIDMappings(t *testing.T) {
+	src, lower := t.TempDir(), t.TempDir()
+	for _, name := range []string{"directory", "opaque"} {
+		require.NoError(t, os.Mkdir(filepath.Join(src, name), 0o700))
+		require.NoError(t, os.Mkdir(filepath.Join(lower, name), 0o700))
+	}
+	require.NoError(t, system.Lsetxattr(filepath.Join(src, "opaque"), getOverlayOpaqueXattrName(), []byte("y"), 0))
+	require.NoError(t, os.WriteFile(filepath.Join(src, "file"), []byte("contents"), 0o600))
+
+	for _, forceChown := range []bool{false, true} {
+		t.Run(fmt.Sprintf("forceChown=%t", forceChown), func(t *testing.T) {
+			opts := &TarOptions{
+				WhiteoutFormat: OverlayWhiteoutFormat,
+				WhiteoutData:   []string{lower},
+				UIDMaps:        []idtools.IDMap{{ContainerID: 7, HostID: os.Getuid(), Size: 1}},
+				GIDMaps:        []idtools.IDMap{{ContainerID: 11, HostID: os.Getgid(), Size: 1}},
+			}
+			owner := idtools.IDPair{UID: 7, GID: 11}
+			if forceChown {
+				owner = idtools.IDPair{UID: 21, GID: 22}
+				opts.ChownOpts = &owner
+			}
+			reader, err := TarWithOptions(src, opts)
+			require.NoError(t, err)
+			defer reader.Close()
+			tr := tar.NewReader(reader)
+			var names []string
+			for {
+				hdr, err := tr.Next()
+				if err == io.EOF {
+					break
+				}
+				require.NoError(t, err)
+				names = append(names, hdr.Name)
+				require.Equal(t, owner.UID, hdr.Uid, hdr.Name)
+				require.Equal(t, owner.GID, hdr.Gid, hdr.Name)
+				if forceChown {
+					require.Empty(t, hdr.Uname, hdr.Name)
+					require.Empty(t, hdr.Gname, hdr.Name)
+				}
+			}
+			require.ElementsMatch(t, []string{"directory/", "file", "opaque/", "opaque/" + WhiteoutOpaqueDir}, names)
+		})
+	}
+}
+
+func TestPrepareAddFileUnmappedIDs(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		directory   bool
+		unmappedUID bool
+	}{
+		{"file UID", false, true},
+		{"file GID", false, false},
+		{"directory UID", true, true},
+		{"directory GID", true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rootPath := t.TempDir()
+			path := filepath.Join(rootPath, "entry")
+			if tc.directory {
+				require.NoError(t, os.Mkdir(path, 0o700))
+			} else {
+				require.NoError(t, os.WriteFile(path, nil, 0o600))
+			}
+			root, err := os.OpenRoot(rootPath)
+			require.NoError(t, err)
+			defer root.Close()
+
+			uid, gid := os.Getuid(), os.Getgid()
+			unmappedID := gid
+			if tc.unmappedUID {
+				unmappedID = uid
+				uid++
+			} else {
+				gid++
+			}
+			for _, chown := range []*idtools.IDPair{nil, {UID: 21, GID: 22}} {
+				ta := &tarWriter{
+					IDMappings: idtools.NewIDMappingsFromMaps(
+						[]idtools.IDMap{{ContainerID: 0, HostID: uid, Size: 1}},
+						[]idtools.IDMap{{ContainerID: 0, HostID: gid, Size: 1}}),
+					whiteoutConverter: getWhiteoutConverter(OverlayWhiteoutFormat, nil, nil),
+					ChownOpts:         chown,
+				}
+				_, err := ta.prepareAddFile(root, "entry", "entry")
+				require.EqualError(t, err, fmt.Sprintf("host ID %d cannot be mapped to a container ID", unmappedID))
+			}
+		})
+	}
 }
