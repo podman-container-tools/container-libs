@@ -4,10 +4,19 @@
 package jsonproxy
 
 import (
+	"os"
+
 	"github.com/sirupsen/logrus"
 	"go.podman.io/image/v5/signature"
 	"go.podman.io/image/v5/types"
 )
+
+// splitFDStreamStore is the subset of storage.SplitFDStreamStore needed
+// by the json-proxy.  Keeping a local interface avoids a hard dependency
+// on go.podman.io/storage for consumers that do not use splitfdstream.
+type splitFDStreamStore interface {
+	SplitFDStreamSocket() (*os.File, error)
+}
 
 // options holds the internal configuration for a Manager.
 type options struct {

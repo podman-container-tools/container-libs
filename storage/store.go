@@ -32,6 +32,7 @@ import (
 	"go.podman.io/storage/pkg/idtools"
 	"go.podman.io/storage/pkg/ioutils"
 	"go.podman.io/storage/pkg/lockfile"
+	"go.podman.io/storage/pkg/splitfdstream"
 	"go.podman.io/storage/pkg/stringutils"
 	"go.podman.io/storage/pkg/system"
 	"go.podman.io/storage/types"
@@ -509,6 +510,12 @@ type Store interface {
 	// Image returns a specific image.
 	Image(id string) (*Image, error)
 
+	// ResolveImageID resolves an image reference to its actual ID and top layer ID.
+	ResolveImageID(id string) (string, string, error)
+
+	// LayerParent returns the parent layer ID for the given layer.
+	LayerParent(id string) (string, error)
+
 	// ImagesByTopLayer returns a list of images which reference the specified
 	// layer as their top layer.  They will have different IDs and names
 	// and may have different metadata, big data items, and flags.
@@ -610,6 +617,15 @@ type Store interface {
 
 	// Dedup deduplicates layers in the store.
 	Dedup(DedupArgs) (drivers.DedupResult, error)
+}
+
+// SplitFDStreamStore extends the Store interface with splitfdstream capabilities.
+// This API is experimental and can be changed without bumping the major version number.
+type SplitFDStreamStore interface {
+	Store
+
+	// SplitFDStreamSocket returns a socket for splitfdstream operations.
+	SplitFDStreamSocket() (*os.File, error)
 }
 
 // AdditionalLayer represents a layer that is contained in the additional layer store
@@ -817,9 +833,14 @@ type store struct {
 	layerStoreUseGetters    rwLayerStore   // Almost all users should use the provided accessors instead of accessing this field directly.
 	roLayerStoresUseGetters []roLayerStore // Almost all users should use the provided accessors instead of accessing this field directly.
 
-	// FIXME: The following fields need locking, and don’t have it.
+	// FIXME: The following fields need locking, and don't have it.
 	additionalUIDs *idSet // Set by getAvailableIDs()
 	additionalGIDs *idSet // Set by getAvailableIDs()
+
+	// varlinkServer manages the varlink service for splitdirfdstream operations.
+	// This API is experimental and can be changed without bumping the major version number.
+	// Protected by graphLock (via startUsingGraphDriver).
+	varlinkServer *splitfdstream.VarlinkServer
 }
 
 // GetStore attempts to find an already-created Store object matching the
@@ -3635,6 +3656,22 @@ func (s *store) Image(id string) (*Image, error) {
 	return nil, fmt.Errorf("locating image with ID %q: %w", id, ErrImageUnknown)
 }
 
+func (s *store) ResolveImageID(id string) (string, string, error) {
+	img, err := s.Image(id)
+	if err != nil {
+		return "", "", err
+	}
+	return img.ID, img.TopLayer, nil
+}
+
+func (s *store) LayerParent(id string) (string, error) {
+	l, err := s.Layer(id)
+	if err != nil {
+		return "", err
+	}
+	return l.Parent, nil
+}
+
 func (s *store) ImagesByTopLayer(id string) ([]*Image, error) {
 	layer, err := s.Layer(id)
 	if err != nil {
@@ -3885,7 +3922,10 @@ func (s *store) Shutdown(force bool) ([]string, error) {
 		// Do the Cleanup() only after we are sure that the change was recorded with RecordWrite(), so that
 		// the next user picks it.
 		if err == nil {
-			err = s.graphDriver.Cleanup()
+			if s.varlinkServer != nil {
+				err = s.varlinkServer.Stop()
+			}
+			err = errors.Join(err, s.graphDriver.Cleanup())
 		}
 	}
 	return mounted, err
@@ -4118,4 +4158,51 @@ func (s *store) Dedup(req DedupArgs) (drivers.DedupResult, error) {
 		}
 		return rlstore.dedup(r)
 	})
+}
+
+// SplitFDStreamSocket returns a UNIX socket for splitdirfdstream operations.
+// Varlink requests for layer streaming are sent over this socket.
+// The caller is responsible for closing the returned file when done.
+// This API is experimental and can be changed without bumping the major version number.
+func (s *store) SplitFDStreamSocket() (*os.File, error) {
+	if err := s.startUsingGraphDriver(); err != nil {
+		return nil, err
+	}
+	defer s.stopUsingGraphDriver()
+
+	if _, ok := s.graphDriver.(splitfdstream.SplitDirFDStreamDriver); !ok {
+		return nil, fmt.Errorf("driver %s does not support splitdirfdstream operations: %w", s.graphDriver.String(), drivers.ErrNotSupported)
+	}
+
+	clientConn, serverConn, err := splitfdstream.CreateSocketPair()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create socket pair: %w", err)
+	}
+
+	clientFile, err := clientConn.File()
+	if err != nil {
+		clientConn.Close()
+		serverConn.Close()
+		return nil, fmt.Errorf("failed to get file from connection: %w", err)
+	}
+	clientConn.Close()
+
+	if s.varlinkServer == nil {
+		var svcErr error
+		s.varlinkServer, svcErr = splitfdstream.NewVarlinkServer(func() (splitfdstream.SplitDirFDStreamDriver, func(), error) {
+			if err := s.startUsingGraphDriver(); err != nil {
+				return nil, nil, err
+			}
+			return s.graphDriver.(splitfdstream.SplitDirFDStreamDriver), s.stopUsingGraphDriver, nil
+		}, s)
+		if svcErr != nil {
+			clientFile.Close()
+			serverConn.Close()
+			return nil, fmt.Errorf("failed to create varlink server: %w", svcErr)
+		}
+	}
+
+	s.varlinkServer.HandleConnection(serverConn)
+
+	return clientFile, nil
 }
