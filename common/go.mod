@@ -2,7 +2,7 @@ module go.podman.io/common
 
 // Warning: Ensure the "go" and "toolchain" versions match exactly to prevent unwanted auto-updates
 
-go 1.26.0
+go 1.27.0
 
 require (
 	github.com/checkpoint-restore/checkpointctl v1.6.0
