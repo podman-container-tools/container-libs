@@ -3,15 +3,30 @@
 package signature
 
 import (
+	"bytes"
 	"context"
+	"crypto"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/mldsa"
+	"crypto/rand"
+	"crypto/x509"
 	"encoding/base64"
+	"encoding/pem"
+	"fmt"
 	"os"
+	"path/filepath"
 	"testing"
 
+	"github.com/secure-systems-lab/go-securesystemslib/encrypted"
+	"github.com/sigstore/sigstore/pkg/cryptoutils"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.podman.io/image/v5/docker/reference"
 	"go.podman.io/image/v5/internal/signature"
+	internalSigner "go.podman.io/image/v5/internal/signer"
+	"go.podman.io/image/v5/signature/sigstore"
 )
 
 func TestPRSigstoreSignedFulcioPrepareTrustRoot(t *testing.T) {
@@ -1061,4 +1076,130 @@ func TestPRSigstoreSignedVerifiesSignatures(t *testing.T) {
 	)
 	require.NoError(t, err)
 	require.True(t, pr.verifiesSignatures())
+}
+
+// writeMLDSASignedImage creates a directory image containing unsignedManifest, and a signature created
+// with an ML-DSA private key over signedManifest and signedIdentity.
+func writeMLDSASignedImage(t *testing.T, key *mldsa.PrivateKey, unsignedManifest, signedManifest []byte, signedIdentity string) string {
+	t.Helper()
+	passphrase := []byte("some passphrase")
+	pkcs8, err := x509.MarshalPKCS8PrivateKey(key)
+	require.NoError(t, err)
+	encryptedKey, err := encrypted.Encrypt(pkcs8, passphrase)
+	require.NoError(t, err)
+	keyFile := filepath.Join(t.TempDir(), "mldsa.key")
+	err = os.WriteFile(keyFile, pem.EncodeToMemory(&pem.Block{Type: "ENCRYPTED SIGSTORE PRIVATE KEY", Bytes: encryptedKey}), 0o600)
+	require.NoError(t, err)
+
+	s, err := sigstore.NewSigner(sigstore.WithPrivateKeyFile(keyFile, passphrase))
+	require.NoError(t, err)
+	defer s.Close()
+	ref, err := reference.ParseNormalizedNamed(signedIdentity)
+	require.NoError(t, err)
+	sig, err := internalSigner.SignImageManifest(context.Background(), s, signedManifest, ref)
+	require.NoError(t, err)
+	sigBlob, err := signature.Blob(sig)
+	require.NoError(t, err)
+
+	dir := t.TempDir()
+	err = os.WriteFile(filepath.Join(dir, "manifest.json"), unsignedManifest, 0o644)
+	require.NoError(t, err)
+	err = os.WriteFile(filepath.Join(dir, "signature-1"), sigBlob, 0o644)
+	require.NoError(t, err)
+	return dir
+}
+
+func TestPRSigstoreSignedMLDSA(t *testing.T) {
+	const identity = "example.com/mldsa/image:latest"
+	testManifest, err := os.ReadFile("fixtures/dir-img-unsigned/manifest.json")
+	require.NoError(t, err)
+	otherManifest := bytes.Replace(testManifest, []byte(`"schemaVersion": 2`), []byte(`"schemaVersion":  2`), 1)
+	require.NotEqual(t, testManifest, otherManifest)
+
+	publicKeyPEM := func(key crypto.PublicKey) []byte {
+		keyPEM, err := cryptoutils.MarshalPublicKeyToPEM(key)
+		require.NoError(t, err)
+		return keyPEM
+	}
+	ecdsaKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+
+	for _, params := range []mldsa.Parameters{mldsa.MLDSA44(), mldsa.MLDSA65(), mldsa.MLDSA87()} {
+		t.Run(params.String(), func(t *testing.T) {
+			key, err := mldsa.GenerateKey(params)
+			require.NoError(t, err)
+			otherKey, err := mldsa.GenerateKey(params)
+			require.NoError(t, err)
+			signedDir := writeMLDSASignedImage(t, key, testManifest, testManifest, identity)
+
+			// A valid signature is accepted.
+			pr, err := NewPRSigstoreSigned(
+				PRSigstoreSignedWithKeyData(publicKeyPEM(key.Public())),
+				PRSigstoreSignedWithSignedIdentity(NewPRMMatchExact()),
+			)
+			require.NoError(t, err)
+			allowed, err := pr.isRunningImageAllowed(context.Background(), dirImageMock(t, signedDir, identity))
+			assertRunningAllowed(t, allowed, err)
+
+			// A valid signature is accepted if any of the trusted keys matches.
+			pr, err = NewPRSigstoreSigned(
+				PRSigstoreSignedWithKeyDatas([][]byte{publicKeyPEM(ecdsaKey.Public()), publicKeyPEM(key.Public())}),
+				PRSigstoreSignedWithSignedIdentity(NewPRMMatchExact()),
+			)
+			require.NoError(t, err)
+			allowed, err = pr.isRunningImageAllowed(context.Background(), dirImageMock(t, signedDir, identity))
+			assertRunningAllowed(t, allowed, err)
+
+			// A signature is rejected with a different ML-DSA key, or an ECDSA key.
+			for _, trustedKey := range []crypto.PublicKey{otherKey.Public(), ecdsaKey.Public()} {
+				pr, err = NewPRSigstoreSigned(
+					PRSigstoreSignedWithKeyData(publicKeyPEM(trustedKey)),
+					PRSigstoreSignedWithSignedIdentity(NewPRMMatchExact()),
+				)
+				require.NoError(t, err)
+				allowed, err = pr.isRunningImageAllowed(context.Background(), dirImageMock(t, signedDir, identity))
+				assertRunningRejected(t, allowed, err)
+				assert.ErrorContains(t, err, "cryptographic signature verification failed")
+			}
+
+			// A signature for a different identity is rejected.
+			pr, err = NewPRSigstoreSigned(
+				PRSigstoreSignedWithKeyData(publicKeyPEM(key.Public())),
+				PRSigstoreSignedWithSignedIdentity(NewPRMMatchExact()),
+			)
+			require.NoError(t, err)
+			allowed, err = pr.isRunningImageAllowed(context.Background(), dirImageMock(t, signedDir, "example.com/mldsa/other:latest"))
+			assertRunningRejectedPolicyRequirement(t, allowed, err)
+
+			// A signature for a different manifest is rejected.
+			mismatchedDir := writeMLDSASignedImage(t, key, testManifest, otherManifest, identity)
+			allowed, err = pr.isRunningImageAllowed(context.Background(), dirImageMock(t, mismatchedDir, identity))
+			assertRunningRejectedPolicyRequirement(t, allowed, err)
+
+			// The same checks work through a policy loaded from JSON and the public PolicyContext API.
+			for _, c := range []struct {
+				name      string
+				publicKey crypto.PublicKey
+				allowed   bool
+			}{
+				{name: "trusted key", publicKey: key.Public(), allowed: true},
+				{name: "untrusted key", publicKey: otherKey.Public(), allowed: false},
+			} {
+				policy, err := NewPolicyFromBytes(fmt.Appendf(nil,
+					`{"default":[{"type":"reject"}],"transports":{"docker":{"example.com/mldsa":[{"type":"sigstoreSigned","keyData":%q,"signedIdentity":{"type":"matchExact"}}]}}}`,
+					base64.StdEncoding.EncodeToString(publicKeyPEM(c.publicKey))))
+				require.NoError(t, err, c.name)
+				pc, err := NewPolicyContext(policy)
+				require.NoError(t, err, c.name)
+				allowed, err := pc.IsRunningImageAllowed(context.Background(), pcImageMock(t, signedDir, identity))
+				assert.Equal(t, c.allowed, allowed, c.name)
+				if c.allowed {
+					assert.NoError(t, err, c.name)
+				} else {
+					assert.ErrorContains(t, err, "cryptographic signature verification failed", c.name)
+				}
+				require.NoError(t, pc.Destroy(), c.name)
+			}
+		})
+	}
 }
