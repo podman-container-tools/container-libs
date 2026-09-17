@@ -10,7 +10,6 @@ import (
 	"os"
 
 	"github.com/opencontainers/go-digest"
-	imgspecs "github.com/opencontainers/image-spec/specs-go"
 	imgspecv1 "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/sirupsen/logrus"
 	"github.com/sylabs/sif/v2/pkg/sif"
@@ -96,11 +95,9 @@ func newImageSource(ctx context.Context, sys *types.SystemContext, ref sifRefere
 
 	created := sifImg.ModifiedAt()
 	config := imgspecv1.Image{
-		Created: &created,
-		Platform: imgspecv1.Platform{
-			Architecture: sifImg.PrimaryArch(),
-			OS:           "linux",
-		},
+		Created:      &created,
+		Architecture: sifImg.PrimaryArch(),
+		OS:           "linux",
 		Config: imgspecv1.ImageConfig{
 			Cmd: commandLine,
 		},
@@ -128,8 +125,8 @@ func newImageSource(ctx context.Context, sys *types.SystemContext, ref sifRefere
 	configDigest := digest.Canonical.FromBytes(configBytes)
 
 	manifest := imgspecv1.Manifest{
-		Versioned: imgspecs.Versioned{SchemaVersion: 2},
-		MediaType: imgspecv1.MediaTypeImageManifest,
+		SchemaVersion: 2,
+		MediaType:     imgspecv1.MediaTypeImageManifest,
 		Config: imgspecv1.Descriptor{
 			Digest:    configDigest,
 			Size:      int64(len(configBytes)),

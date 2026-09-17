@@ -100,10 +100,8 @@ func newImageSource(ctx context.Context, sys *types.SystemContext, ref dockerRef
 		// No configuration was found for the provided reference, so use the
 		// equivalent of a default configuration.
 		registry = &sysregistriesv2.Registry{
-			Endpoint: sysregistriesv2.Endpoint{
-				Location: ref.ref.String(),
-			},
-			Prefix: ref.ref.String(),
+			Location: ref.ref.String(),
+			Prefix:   ref.ref.String(),
 		}
 	}
 

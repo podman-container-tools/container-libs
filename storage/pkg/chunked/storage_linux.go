@@ -513,12 +513,10 @@ func canDedupFileWithHardLink(file *fileMetadata, fd int, s os.FileInfo) bool {
 	}
 	// fill only the attributes used by canDedupMetadataWithHardLink.
 	otherFile := fileMetadata{
-		FileMetadata: minimal.FileMetadata{
-			UID:    int(st.Uid),
-			GID:    int(st.Gid),
-			Mode:   int64(st.Mode),
-			Xattrs: xattrs,
-		},
+		UID:    int(st.Uid),
+		GID:    int(st.Gid),
+		Mode:   int64(st.Mode),
+		Xattrs: xattrs,
 	}
 	return canDedupMetadataWithHardLink(file, &otherFile)
 }

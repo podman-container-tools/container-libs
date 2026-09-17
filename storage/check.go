@@ -855,14 +855,12 @@ func newCheckDirectory(uid, gid int, size int64, mode os.FileMode, mtime int64) 
 	return &checkDirectory{
 		directory: make(map[string]*checkDirectory),
 		file:      make(map[string]checkFileInfo),
-		checkFileInfo: checkFileInfo{
-			typeflag: tar.TypeDir,
-			uid:      uid,
-			gid:      gid,
-			size:     size,
-			mode:     mode,
-			mtime:    mtime,
-		},
+		typeflag:  tar.TypeDir,
+		uid:       uid,
+		gid:       gid,
+		size:      size,
+		mode:      mode,
+		mtime:     mtime,
 	}
 }
 

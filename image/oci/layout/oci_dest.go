@@ -13,7 +13,6 @@ import (
 	"slices"
 
 	digest "github.com/opencontainers/go-digest"
-	imgspec "github.com/opencontainers/image-spec/specs-go"
 	imgspecv1 "github.com/opencontainers/image-spec/specs-go/v1"
 	"go.podman.io/image/v5/internal/imagedestination/impl"
 	"go.podman.io/image/v5/internal/imagedestination/stubs"
@@ -50,9 +49,9 @@ func newImageDestination(sys *types.SystemContext, ref ociReference) (private.Im
 		}
 	} else {
 		index = &imgspecv1.Index{
-			Versioned:   imgspec.Versioned{SchemaVersion: 2},
-			MediaType:   imgspecv1.MediaTypeImageIndex,
-			Annotations: make(map[string]string),
+			SchemaVersion: 2,
+			MediaType:     imgspecv1.MediaTypeImageIndex,
+			Annotations:   make(map[string]string),
 		}
 	}
 

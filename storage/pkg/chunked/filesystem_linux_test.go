@@ -113,10 +113,8 @@ func TestSafeMkdir(t *testing.T) {
 	rootFd := int(rootFile.Fd())
 
 	metadata := fileMetadata{
-		FileMetadata: minimal.FileMetadata{
-			Type: minimal.TypeDir,
-			Mode: 0o755,
-		},
+		Type: minimal.TypeDir,
+		Mode: 0o755,
 	}
 	options := &archive.TarOptions{
 		// Allow the test to run without privileges
@@ -152,13 +150,11 @@ func TestSafeLink(t *testing.T) {
 	assert.NoError(t, err)
 
 	metadata := fileMetadata{
-		FileMetadata: minimal.FileMetadata{
-			Name: linkName,
-			// try to create outside the root
-			Linkname: "../../" + existingFile,
-			Type:     minimal.TypeReg,
-			Mode:     0o755,
-		},
+		Name: linkName,
+		// try to create outside the root
+		Linkname: "../../" + existingFile,
+		Type:     minimal.TypeReg,
+		Mode:     0o755,
 	}
 	options := &archive.TarOptions{
 		// Allow the test to run without privileges
@@ -204,13 +200,11 @@ func TestSafeSymlink(t *testing.T) {
 	existingFile := path.Base(file.Name())
 
 	metadata := fileMetadata{
-		FileMetadata: minimal.FileMetadata{
-			Name: linkName,
-			// try to create outside the root
-			Linkname: "../../" + existingFile,
-			Type:     minimal.TypeReg,
-			Mode:     0o755,
-		},
+		Name: linkName,
+		// try to create outside the root
+		Linkname: "../../" + existingFile,
+		Type:     minimal.TypeReg,
+		Mode:     0o755,
 	}
 
 	err = safeSymlink(rootFd, &metadata)
@@ -278,11 +272,9 @@ func TestCopyFileContent(t *testing.T) {
 	require.NoError(t, err)
 
 	metadata := fileMetadata{
-		FileMetadata: minimal.FileMetadata{
-			Name: "new-file",
-			Type: minimal.TypeDir,
-			Mode: 0o755,
-		},
+		Name: "new-file",
+		Type: minimal.TypeDir,
+		Mode: 0o755,
 	}
 
 	newFile, newSize, err := copyFileContent(int(file.Fd()), &metadata, rootFd, 0o755, false, false)
@@ -302,11 +294,9 @@ func TestCopyFileContent(t *testing.T) {
 	assert.NotEqual(t, st.Ino, st2.Ino)
 
 	metadataCopyHardLinks := fileMetadata{
-		FileMetadata: minimal.FileMetadata{
-			Name: "new-file2",
-			Type: minimal.TypeDir,
-			Mode: 0o755,
-		},
+		Name: "new-file2",
+		Type: minimal.TypeDir,
+		Mode: 0o755,
 	}
 
 	newFile, newSize, err = copyFileContent(int(file.Fd()), &metadataCopyHardLinks, rootFd, 0o755, true, false)

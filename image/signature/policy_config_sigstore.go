@@ -146,7 +146,7 @@ func PRSigstoreSignedWithSignedIdentity(signedIdentity PolicyReferenceMatch) PRS
 // newPRSigstoreSigned is NewPRSigstoreSigned, except it returns the private type.
 func newPRSigstoreSigned(options ...PRSigstoreSignedOption) (*prSigstoreSigned, error) {
 	res := prSigstoreSigned{
-		prCommon: prCommon{Type: prTypeSigstoreSigned},
+		Type: prTypeSigstoreSigned,
 	}
 	for _, o := range options {
 		if err := o(&res); err != nil {

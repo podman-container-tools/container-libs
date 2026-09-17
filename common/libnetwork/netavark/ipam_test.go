@@ -85,10 +85,8 @@ var _ = Describe("IPAM", func() {
 		opts = &types.NetworkOptions{
 			ContainerID: "otherID",
 			Networks: []types.NamedPerNetworkOptions{{
-				Name: netName,
-				PerNetworkOptions: types.PerNetworkOptions{
-					StaticIPs: []net.IP{net.ParseIP("10.88.0.2")},
-				},
+				Name:      netName,
+				StaticIPs: []net.IP{net.ParseIP("10.88.0.2")},
 			}},
 		}
 		err = networkInterface.allocIPs(opts)
@@ -116,10 +114,8 @@ var _ = Describe("IPAM", func() {
 		opts := &types.NetworkOptions{
 			ContainerID: "someContainerID",
 			Networks: []types.NamedPerNetworkOptions{{
-				Name: netName,
-				PerNetworkOptions: types.PerNetworkOptions{
-					StaticIPs: []net.IP{net.ParseIP("10.0.0.1")},
-				},
+				Name:      netName,
+				StaticIPs: []net.IP{net.ParseIP("10.0.0.1")},
 			}},
 		}
 
@@ -645,8 +641,8 @@ var _ = Describe("IPAM", func() {
 			opts := &types.NetworkOptions{
 				ContainerID: "someContainerID",
 				Networks: []types.NamedPerNetworkOptions{{
-					Name:              netName,
-					PerNetworkOptions: types.PerNetworkOptions{StaticIPs: staticIPs},
+					Name:      netName,
+					StaticIPs: staticIPs,
 				}},
 			}
 

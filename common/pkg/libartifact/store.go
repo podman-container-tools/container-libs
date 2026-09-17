@@ -19,7 +19,6 @@ import (
 	"time"
 
 	"github.com/opencontainers/go-digest"
-	"github.com/opencontainers/image-spec/specs-go"
 	specV1 "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/sirupsen/logrus"
 	"go.podman.io/common/libimage"
@@ -286,12 +285,12 @@ func createNewArtifactManifest(options *libartTypes.AddOptions) specV1.Manifest 
 	annotations[specV1.AnnotationCreated] = time.Now().UTC().Format(time.RFC3339Nano)
 
 	return specV1.Manifest{
-		Versioned:    specs.Versioned{SchemaVersion: ManifestSchemaVersion},
-		MediaType:    specV1.MediaTypeImageManifest,
-		ArtifactType: options.ArtifactMIMEType, // TODO This should probably be configurable once the CLI is capable
-		Config:       specV1.DescriptorEmptyJSON,
-		Layers:       make([]specV1.Descriptor, 0),
-		Annotations:  annotations,
+		SchemaVersion: ManifestSchemaVersion,
+		MediaType:     specV1.MediaTypeImageManifest,
+		ArtifactType:  options.ArtifactMIMEType, // TODO This should probably be configurable once the CLI is capable
+		Config:        specV1.DescriptorEmptyJSON,
+		Layers:        make([]specV1.Descriptor, 0),
+		Annotations:   annotations,
 	}
 }
 
@@ -846,8 +845,8 @@ func (as *ArtifactStore) createEmptyManifest() error {
 	as.lock.Lock()
 	defer as.lock.Unlock()
 	index := specV1.Index{
-		MediaType: specV1.MediaTypeImageIndex,
-		Versioned: specs.Versioned{SchemaVersion: ManifestSchemaVersion},
+		MediaType:     specV1.MediaTypeImageIndex,
+		SchemaVersion: ManifestSchemaVersion,
 	}
 	rawData, err := json.Marshal(&index)
 	if err != nil {

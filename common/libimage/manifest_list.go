@@ -14,7 +14,6 @@ import (
 
 	structcopier "github.com/jinzhu/copier"
 	"github.com/opencontainers/go-digest"
-	imgspec "github.com/opencontainers/image-spec/specs-go"
 	imgspecv1 "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/sirupsen/logrus"
 	"go.podman.io/common/libimage/define"
@@ -173,10 +172,8 @@ func (i *Image) ConvertToManifestList(ctx context.Context) (*ManifestList, error
 
 	// Build the index for the layout.
 	index := imgspecv1.Index{
-		Versioned: imgspec.Versioned{
-			SchemaVersion: 2,
-		},
-		MediaType: imgspecv1.MediaTypeImageIndex,
+		SchemaVersion: 2,
+		MediaType:     imgspecv1.MediaTypeImageIndex,
 		Manifests: []imgspecv1.Descriptor{{
 			MediaType: imgspecv1.MediaTypeImageIndex,
 			Digest:    listDigest,
@@ -411,12 +408,10 @@ func (m *ManifestList) Inspect() (*define.ManifestListData, error) {
 				Variant:      platform.Variant,
 				OSFeatures:   osFeatures,
 			},
-			Schema2Descriptor: manifest.Schema2Descriptor{
-				MediaType: ociFormat.Subject.MediaType,
-				Digest:    ociFormat.Subject.Digest,
-				Size:      ociFormat.Subject.Size,
-				URLs:      ociFormat.Subject.URLs,
-			},
+			MediaType:    ociFormat.Subject.MediaType,
+			Digest:       ociFormat.Subject.Digest,
+			Size:         ociFormat.Subject.Size,
+			URLs:         ociFormat.Subject.URLs,
 			Annotations:  ociFormat.Subject.Annotations,
 			ArtifactType: ociFormat.Subject.ArtifactType,
 			Data:         ociFormat.Subject.Data,

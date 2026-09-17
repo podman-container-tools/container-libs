@@ -136,7 +136,7 @@ func (m *Schema1) LayerInfos() []LayerInfo {
 	layers := make([]LayerInfo, 0, len(m.FSLayers))
 	for i, layer := range slices.Backward(m.FSLayers) { // NOTE: This includes empty layers (where m.History.V1Compatibility->ThrowAway)
 		layers = append(layers, LayerInfo{
-			BlobInfo:   types.BlobInfo{Digest: layer.BlobSum, Size: -1},
+			Digest: layer.BlobSum, Size: -1,
 			EmptyLayer: m.ExtractedV1Compatibility[i].ThrowAway,
 		})
 	}

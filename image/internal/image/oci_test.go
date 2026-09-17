@@ -404,11 +404,9 @@ func newOCI1ImageSource(t *testing.T, configFixture string, dockerRef string) *o
 	require.NoError(t, err)
 
 	return &oci1ImageSource{
-		configBlobImageSource: configBlobImageSource{
-			expectedDigest: digest.FromBytes(realConfigJSON),
-			f: func() (io.ReadCloser, int64, error) {
-				return io.NopCloser(bytes.NewReader(realConfigJSON)), int64(len(realConfigJSON)), nil
-			},
+		expectedDigest: digest.FromBytes(realConfigJSON),
+		f: func() (io.ReadCloser, int64, error) {
+			return io.NopCloser(bytes.NewReader(realConfigJSON)), int64(len(realConfigJSON)), nil
 		},
 		ref: ref,
 	}

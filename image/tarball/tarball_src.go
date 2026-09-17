@@ -13,7 +13,6 @@ import (
 	"time"
 
 	digest "github.com/opencontainers/go-digest"
-	imgspecs "github.com/opencontainers/image-spec/specs-go"
 	imgspecv1 "github.com/opencontainers/image-spec/specs-go/v1"
 	"go.podman.io/image/v5/internal/imagesource/impl"
 	"go.podman.io/image/v5/internal/imagesource/stubs"
@@ -179,8 +178,8 @@ func (r *tarballReference) NewImageSource(ctx context.Context, sys *types.System
 
 	// Populate a manifest with the configuration blob and the layers.
 	manifest := imgspecv1.Manifest{
-		Versioned: imgspecs.Versioned{SchemaVersion: 2},
-		MediaType: imgspecv1.MediaTypeImageManifest,
+		SchemaVersion: 2,
+		MediaType:     imgspecv1.MediaTypeImageManifest,
 		Config: imgspecv1.Descriptor{
 			Digest:    configID,
 			Size:      int64(len(configBytes)),

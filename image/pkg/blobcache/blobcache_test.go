@@ -13,7 +13,6 @@ import (
 	"testing"
 
 	digest "github.com/opencontainers/go-digest"
-	specs "github.com/opencontainers/image-spec/specs-go"
 	v1 "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/sirupsen/logrus"
 	cp "go.podman.io/image/v5/copy"
@@ -88,8 +87,8 @@ func pushImageThroughCache(t *testing.T, cacheDir string, blobBytes []byte, diff
 		Size:   int64(len(configBytes)),
 	}
 	m := v1.Manifest{
-		Versioned: specs.Versioned{SchemaVersion: 2},
-		MediaType: v1.MediaTypeImageManifest,
+		SchemaVersion: 2,
+		MediaType:     v1.MediaTypeImageManifest,
 		Config: v1.Descriptor{
 			MediaType: v1.MediaTypeImageConfig,
 			Digest:    configInfo.Digest,
