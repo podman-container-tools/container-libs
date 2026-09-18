@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // This is just a smoke test for the common expected header formats,
@@ -41,5 +42,36 @@ func TestParseValueAndParams(t *testing.T) {
 		scope, params := parseValueAndParams(c.input)
 		assert.Equal(t, c.scope, scope, c.input)
 		assert.Equal(t, c.params, params, c.input)
+	}
+}
+
+func TestParseAuthScopes(t *testing.T) {
+	for _, c := range []struct {
+		input    string
+		expected []authScope // nil when an error is expected
+	}{
+		{"", nil},
+		{"   ", nil},
+		{"repository:foo", nil},
+		{"repository:foo:pull extra", nil}, // a malformed later token rejects the whole value
+		{
+			"repository:foo:pull",
+			[]authScope{{"repository", "foo", "pull"}},
+		},
+		{
+			"  repository:group/dest:pull,push   repository:other/src:pull  ",
+			[]authScope{
+				{"repository", "group/dest", "pull,push"},
+				{"repository", "other/src", "pull"},
+			},
+		},
+	} {
+		scopes, err := parseAuthScopes(c.input)
+		if c.expected == nil {
+			assert.Error(t, err, c.input)
+		} else {
+			require.NoError(t, err, c.input)
+			assert.Equal(t, c.expected, scopes, c.input)
+		}
 	}
 }
