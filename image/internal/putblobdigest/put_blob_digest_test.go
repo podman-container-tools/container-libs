@@ -73,3 +73,30 @@ func TestDigestIfCanonicalUnknown(t *testing.T) {
 		},
 	})
 }
+
+func TestDigestIfAlgorithmUnknown(t *testing.T) {
+	testDigester(t, func(r io.Reader, bi types.BlobInfo) (Digester, io.Reader) {
+		return DigestIfAlgorithmUnknown(r, bi, digest.SHA512)
+	}, []testCase{
+		{
+			inputDigest:    digest.Digest("sha512:uninspected-value"),
+			computesDigest: false,
+			expectedDigest: digest.Digest("sha512:uninspected-value"),
+		},
+		{
+			inputDigest:    digest.Digest("sha256:uninspected-value"),
+			computesDigest: true,
+			expectedDigest: digest.SHA512.FromBytes(testData),
+		},
+		{
+			inputDigest:    digest.Digest("unknown-algorithm:uninspected-value"),
+			computesDigest: true,
+			expectedDigest: digest.SHA512.FromBytes(testData),
+		},
+		{
+			inputDigest:    "",
+			computesDigest: true,
+			expectedDigest: digest.SHA512.FromBytes(testData),
+		},
+	})
+}
