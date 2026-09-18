@@ -612,8 +612,13 @@ type SystemContext struct {
 	ArchitectureChoice string
 	// If not "", overrides the use of platform.GOOS when choosing an image or verifying OS match.
 	OSChoice string
-	// If not "", overrides the use of detected ARM platform variant when choosing an image or verifying variant match.
+	// If not "", overrides the use of detected platform variant (ARM or x86-64) when choosing an image or verifying variant match.
 	VariantChoice string
+	// DetectPlatformVariant enables host amd64 microarchitecture detection when ArchitectureChoice is "".
+	// If enabled, image selection prefers the detected level and falls back to less restrictive levels.
+	// If disabled, amd64 selection uses the baseline unless VariantChoice is set.
+	// This field does not affect ARM variant detection. VariantChoice overrides the detected level.
+	DetectPlatformVariant bool
 	// If not "", overrides the system's default directory containing a blob info cache.
 	BlobInfoCacheDir string
 	// Additional tags when creating or copying a docker-archive.
