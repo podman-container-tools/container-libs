@@ -1,10 +1,13 @@
 package docker
 
 import (
+	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -293,6 +296,71 @@ func TestHandle206Response(t *testing.T) {
 		{[]byte(nil), nil},
 	}
 	verifyGetBlobAtOutput(t, streams, errs, expected)
+}
+
+type readerWithDataAndError struct {
+	data []byte
+	err  error
+}
+
+func (r *readerWithDataAndError) Read(p []byte) (int, error) {
+	if r.data == nil {
+		return 0, r.err
+	}
+	n := copy(p, r.data)
+	r.data = nil
+	return n, r.err
+}
+
+func (r *readerWithDataAndError) Close() error {
+	return nil
+}
+
+func TestBufferedNetworkReader(t *testing.T) {
+	readErr := errors.New("read error")
+	reader := makeBufferedNetworkReader(&readerWithDataAndError{
+		data: bytes.Repeat([]byte("x"), 16*1024),
+		err:  readErr,
+	}, 1, 16*1024)
+	defer reader.Close()
+
+	buf := make([]byte, 4*1024)
+	if n, err := reader.Read(nil); n != 0 || err != nil {
+		t.Fatalf("Read(nil) = (%d, %v), want (0, nil)", n, err)
+	}
+	for range 4 {
+		n, err := reader.Read(buf)
+		if n != len(buf) || err != nil {
+			t.Fatalf("Read() = (%d, %v), want (%d, nil)", n, err, len(buf))
+		}
+	}
+
+	n, err := reader.Read(buf)
+	if n != 0 || !errors.Is(err, readErr) {
+		t.Fatalf("Read() = (%d, %v), want (0, %v)", n, err, readErr)
+	}
+	// The error is sticky, it is not masked by io.EOF on later reads.
+	if _, err := reader.Read(buf); !errors.Is(err, readErr) {
+		t.Fatalf("Read() = %v, want %v", err, readErr)
+	}
+}
+
+func TestBufferedNetworkReaderMultipart(t *testing.T) {
+	const boundary = "AAA"
+	prefix := []byte("--" + boundary + "\r\n\r\n")
+	body := append(prefix, bytes.Repeat([]byte("x"), 16*1024-len(prefix))...)
+	reader := makeBufferedNetworkReader(&readerWithDataAndError{
+		data: body,
+		err:  errors.New("read error"),
+	}, 1, 16*1024)
+	defer reader.Close()
+
+	mr := multipart.NewReader(bufio.NewReaderSize(reader, 4*1024), boundary)
+	require.NotPanics(t, func() {
+		part, err := mr.NextPart()
+		require.NoError(t, err)
+		require.NotNil(t, part)
+	})
 }
 
 func TestParseMediaType(t *testing.T) {
