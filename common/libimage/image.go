@@ -388,6 +388,15 @@ type RemoveImageReport struct {
 	// Size of the removed image.  Only set when explicitly requested in
 	// RemoveImagesOptions.
 	Size int64
+	// FreedSize is the size of the data that removing the image released,
+	// which is less than Size whenever the image shares layers with an image
+	// that is not removed.  A layer shared by several removed images is
+	// released once, and accounted to the image whose removal released it,
+	// so that summing this field over all reports of a removal yields the
+	// total released size.  It uses the same metric as the image sizes
+	// reported by DiskUsage.  Only set when explicitly requested in
+	// RemoveImagesOptions.
+	FreedSize int64
 	// The untagged tags.
 	Untagged []string
 }
@@ -528,11 +537,28 @@ func (i *Image) removeRecursive(ctx context.Context, rmMap map[string]*RemoveIma
 		parent = nil
 	}
 
-	if _, err := i.runtime.store.DeleteImage(i.ID(), true); handleError(err) != nil {
-		if errors.Is(err, storage.ErrImageUsedByContainer) {
-			err = fmt.Errorf("%w: consider listing external containers and force-removing image", err)
+	// The store reports the size of the layers it removes, which are exactly
+	// those no remaining image references anymore.
+	var freedSize int64
+	var deleteErr error
+	if options.WithSize {
+		_, freedSize, deleteErr = i.runtime.store.DeleteImageWithSize(i.ID(), true)
+	} else {
+		_, deleteErr = i.runtime.store.DeleteImage(i.ID(), true)
+	}
+	if handleError(deleteErr) != nil {
+		if errors.Is(deleteErr, storage.ErrImageUsedByContainer) {
+			deleteErr = fmt.Errorf("%w: consider listing external containers and force-removing image", deleteErr)
 		}
-		return processedIDs, err
+		return processedIDs, deleteErr
+	}
+
+	if options.WithSize {
+		// The image-specific big data is released along with the image.
+		for _, bigDataSize := range i.storageImage.BigDataSizes {
+			freedSize += bigDataSize
+		}
+		report.FreedSize = freedSize
 	}
 
 	report.Untagged = append(report.Untagged, i.Names()...)
