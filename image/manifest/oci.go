@@ -8,7 +8,6 @@ import (
 
 	ociencspec "github.com/containers/ocicrypt/spec"
 	"github.com/opencontainers/go-digest"
-	"github.com/opencontainers/image-spec/specs-go"
 	imgspecv1 "github.com/opencontainers/image-spec/specs-go/v1"
 	"go.podman.io/image/v5/internal/manifest"
 	compressiontypes "go.podman.io/image/v5/pkg/compression/types"
@@ -71,10 +70,10 @@ func OCI1FromManifest(manifestBlob []byte) (*OCI1, error) {
 func OCI1FromComponents(config imgspecv1.Descriptor, layers []imgspecv1.Descriptor) *OCI1 {
 	return &OCI1{
 		imgspecv1.Manifest{
-			Versioned: specs.Versioned{SchemaVersion: 2},
-			MediaType: imgspecv1.MediaTypeImageManifest,
-			Config:    config,
-			Layers:    layers,
+			SchemaVersion: 2,
+			MediaType:     imgspecv1.MediaTypeImageManifest,
+			Config:        config,
+			Layers:        layers,
 		},
 	}
 }

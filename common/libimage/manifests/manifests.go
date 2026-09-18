@@ -18,7 +18,6 @@ import (
 	"time"
 
 	digest "github.com/opencontainers/go-digest"
-	imgspec "github.com/opencontainers/image-spec/specs-go"
 	v1 "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/sirupsen/logrus"
 	"go.podman.io/common/internal"
@@ -344,10 +343,8 @@ func (l *list) Reference(store storage.Store, multiple cp.ImageListSelection, in
 			// write the index that refers to this one artifact image
 			indexFile := filepath.Join(tmp, v1.ImageIndexFile)
 			index := v1.Index{
-				Versioned: imgspec.Versioned{
-					SchemaVersion: 2,
-				},
-				MediaType: v1.MediaTypeImageIndex,
+				SchemaVersion: 2,
+				MediaType:     v1.MediaTypeImageIndex,
 				Manifests: []v1.Descriptor{{
 					MediaType: v1.MediaTypeImageManifest,
 					Digest:    artifactManifestDigest,
@@ -892,14 +889,12 @@ func (l *list) AddArtifact(ctx context.Context, sys *types.SystemContext, option
 
 	// Construct the manifest.
 	artifactManifest := v1.Manifest{
-		Versioned: imgspec.Versioned{
-			SchemaVersion: 2,
-		},
-		MediaType:    v1.MediaTypeImageManifest,
-		ArtifactType: artifactType,
-		Config:       *configDescriptor,
-		Layers:       layers,
-		Subject:      subject,
+		SchemaVersion: 2,
+		MediaType:     v1.MediaTypeImageManifest,
+		ArtifactType:  artifactType,
+		Config:        *configDescriptor,
+		Layers:        layers,
+		Subject:       subject,
 	}
 	// Add in annotations, more or less exactly as specified.
 	artifactManifest.Annotations = maps.Clone(options.Annotations)

@@ -2859,11 +2859,9 @@ func (r *layerStore) applyDiffFromStagingDirectory(id string, diffOutput *driver
 	}
 	if options == nil {
 		options = &drivers.ApplyDiffWithDifferOpts{
-			ApplyDiffOpts: drivers.ApplyDiffOpts{
-				Mappings:   r.layerMappings(layer),
-				MountLabel: layer.MountLabel,
-			},
-			Flags: nil,
+			Mappings:   r.layerMappings(layer),
+			MountLabel: layer.MountLabel,
+			Flags:      nil,
 		}
 	}
 

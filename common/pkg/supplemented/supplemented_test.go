@@ -13,7 +13,6 @@ import (
 	"time"
 
 	digest "github.com/opencontainers/go-digest"
-	specs "github.com/opencontainers/image-spec/specs-go"
 	v1 "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/stretchr/testify/assert"
 	cp "go.podman.io/image/v5/copy"
@@ -62,11 +61,9 @@ func makeLayer(t *testing.T) []byte {
 func makeConfig(arch, os string, layer []byte) v1.Image {
 	diffID := digest.Canonical.FromBytes(layer)
 	return v1.Image{
-		Created: &now,
-		Platform: v1.Platform{
-			Architecture: arch,
-			OS:           os,
-		},
+		Created:      &now,
+		Architecture: arch,
+		OS:           os,
 		Config: v1.ImageConfig{
 			User:       "root",
 			Entrypoint: []string{"/tmpfile"},
@@ -85,10 +82,8 @@ func makeConfig(arch, os string, layer []byte) v1.Image {
 
 func makeManifest(layer, config []byte) v1.Manifest {
 	return v1.Manifest{
-		Versioned: specs.Versioned{
-			SchemaVersion: 2,
-		},
-		MediaType: v1.MediaTypeImageManifest,
+		SchemaVersion: 2,
+		MediaType:     v1.MediaTypeImageManifest,
 		Config: v1.Descriptor{
 			MediaType: v1.MediaTypeImageConfig,
 			Digest:    digest.Canonical.FromBytes(config),
@@ -168,10 +163,8 @@ func TestSupplemented(t *testing.T) {
 	assert.Nilf(t, err, "error digesting manifest")
 
 	index := v1.Index{
-		Versioned: specs.Versioned{
-			SchemaVersion: 2,
-		},
-		MediaType: v1.MediaTypeImageIndex,
+		SchemaVersion: 2,
+		MediaType:     v1.MediaTypeImageIndex,
 		Manifests: []v1.Descriptor{
 			{
 				MediaType: v1.MediaTypeImageManifest,

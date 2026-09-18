@@ -355,11 +355,9 @@ func newSchema2ImageSource(t *testing.T, dockerRef string) *schema2ImageSource {
 	require.NoError(t, err)
 
 	return &schema2ImageSource{
-		configBlobImageSource: configBlobImageSource{
-			expectedDigest: commonFixtureConfigDigest,
-			f: func() (io.ReadCloser, int64, error) {
-				return io.NopCloser(bytes.NewReader(realConfigJSON)), int64(len(realConfigJSON)), nil
-			},
+		expectedDigest: commonFixtureConfigDigest,
+		f: func() (io.ReadCloser, int64, error) {
+			return io.NopCloser(bytes.NewReader(realConfigJSON)), int64(len(realConfigJSON)), nil
 		},
 		ref: ref,
 	}

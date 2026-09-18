@@ -10,7 +10,6 @@ import (
 	"slices"
 
 	"github.com/opencontainers/go-digest"
-	imgspec "github.com/opencontainers/image-spec/specs-go"
 	imgspecv1 "github.com/opencontainers/image-spec/specs-go/v1"
 	platform "go.podman.io/image/v5/internal/pkg/platform"
 	compression "go.podman.io/image/v5/pkg/compression/types"
@@ -300,10 +299,10 @@ func (index *OCI1IndexPublic) Serialize() ([]byte, error) {
 func OCI1IndexPublicFromComponents(components []imgspecv1.Descriptor, annotations map[string]string) *OCI1IndexPublic {
 	index := OCI1IndexPublic{
 		imgspecv1.Index{
-			Versioned:   imgspec.Versioned{SchemaVersion: 2},
-			MediaType:   imgspecv1.MediaTypeImageIndex,
-			Manifests:   make([]imgspecv1.Descriptor, len(components)),
-			Annotations: maps.Clone(annotations),
+			SchemaVersion: 2,
+			MediaType:     imgspecv1.MediaTypeImageIndex,
+			Manifests:     make([]imgspecv1.Descriptor, len(components)),
+			Annotations:   maps.Clone(annotations),
 		},
 	}
 	for i, component := range components {
@@ -343,14 +342,12 @@ func OCI1IndexPublicClone(index *OCI1IndexPublic) *OCI1IndexPublic {
 		manifests[i] = oci1DescriptorClone(m)
 	}
 	return &OCI1IndexPublic{
-		Index: imgspecv1.Index{
-			Versioned:    index.Versioned,
-			MediaType:    index.MediaType,
-			ArtifactType: index.ArtifactType,
-			Manifests:    manifests,
-			Subject:      subject,
-			Annotations:  maps.Clone(index.Annotations),
-		},
+		Versioned:    index.Versioned,
+		MediaType:    index.MediaType,
+		ArtifactType: index.ArtifactType,
+		Manifests:    manifests,
+		Subject:      subject,
+		Annotations:  maps.Clone(index.Annotations),
 	}
 }
 
@@ -389,12 +386,10 @@ func (index *OCI1IndexPublic) ToSchema2List() (*Schema2ListPublic, error) {
 // This is publicly visible as c/image/manifest.OCI1IndexFromManifest.
 func OCI1IndexPublicFromManifest(manifest []byte) (*OCI1IndexPublic, error) {
 	index := OCI1IndexPublic{
-		Index: imgspecv1.Index{
-			Versioned:   imgspec.Versioned{SchemaVersion: 2},
-			MediaType:   imgspecv1.MediaTypeImageIndex,
-			Manifests:   []imgspecv1.Descriptor{},
-			Annotations: make(map[string]string),
-		},
+		SchemaVersion: 2,
+		MediaType:     imgspecv1.MediaTypeImageIndex,
+		Manifests:     []imgspecv1.Descriptor{},
+		Annotations:   make(map[string]string),
 	}
 	if err := json.Unmarshal(manifest, &index); err != nil {
 		return nil, fmt.Errorf("unmarshaling OCI1Index %q: %w", string(manifest), err)

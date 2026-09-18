@@ -727,11 +727,11 @@ func TestPolicyRequirementsUnmarshalJSON(t *testing.T) {
 		// A member is not an object
 		{1},
 		// A member has an invalid type
-		{prSignedBy{prCommon: prCommon{Type: "this is invalid"}}},
+		{prSignedBy{Type: "this is invalid"}},
 		// A member has a valid type but invalid contents
 		{prSignedBy{
-			prCommon: prCommon{Type: prTypeSignedBy},
-			KeyType:  "this is invalid",
+			Type:    prTypeSignedBy,
+			KeyType: "this is invalid",
 		}},
 	} {
 		reqs := PolicyRequirements{}
@@ -758,8 +758,8 @@ func TestNewPolicyRequirementFromJSON(t *testing.T) {
 		prCommon{Type: "this is invalid"},
 		// Valid type but invalid contents
 		prSignedBy{
-			prCommon: prCommon{Type: prTypeSignedBy},
-			KeyType:  "this is invalid",
+			Type:    prTypeSignedBy,
+			KeyType: "this is invalid",
 		},
 	} {
 		testJSON, err := json.Marshal(invalid)
@@ -1142,7 +1142,7 @@ func TestNewPolicyReferenceMatchFromJSON(t *testing.T) {
 		prmCommon{Type: "this is invalid"},
 		// Valid type but invalid contents
 		prmExactReference{
-			prmCommon:       prmCommon{Type: prmTypeExactReference},
+			Type:            prmTypeExactReference,
 			DockerReference: "",
 		},
 	} {

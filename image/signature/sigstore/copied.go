@@ -4,6 +4,7 @@ import (
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/ed25519"
+	"crypto/mldsa"
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
@@ -67,6 +68,8 @@ func loadPrivateKey(key []byte, pass []byte) (signature.SignerVerifier, error) {
 		return signature.LoadECDSASignerVerifier(pk, crypto.SHA256)
 	case ed25519.PrivateKey:
 		return signature.LoadED25519SignerVerifier(pk)
+	case *mldsa.PrivateKey:
+		return signature.LoadMLDSASignerVerifier(pk)
 	default:
 		return nil, errors.New("unsupported key type")
 	}

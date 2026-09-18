@@ -224,11 +224,9 @@ func (d *openshiftImageDestination) PutSignaturesWithFormat(ctx context.Context,
 		}
 		// Note: This does absolutely no kind/version checking or conversions.
 		sig := imageSignature{
-			typeMeta: typeMeta{
-				Kind:       "ImageSignature",
-				APIVersion: "v1",
-			},
-			objectMeta: objectMeta{Name: signatureName},
+			Kind:       "ImageSignature",
+			APIVersion: "v1",
+			Name:       signatureName,
 			Type:       imageSignatureTypeAtomic,
 			Content:    newSig,
 		}

@@ -1,6 +1,6 @@
 module go.podman.io/image/v5
 
-go 1.26.0
+go 1.27.0
 
 // Warning: Ensure the "go" and "toolchain" versions match exactly to prevent unwanted auto-updates.
 // That generally means there should be no toolchain directive present.
@@ -31,7 +31,7 @@ require (
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	github.com/secure-systems-lab/go-securesystemslib v0.11.1
 	github.com/sigstore/fulcio v1.8.8
-	github.com/sigstore/sigstore v1.10.9
+	github.com/sigstore/sigstore v1.10.10
 	github.com/sirupsen/logrus v1.10.2
 	github.com/stretchr/testify v1.12.1
 	github.com/sylabs/sif/v2 v2.24.1
@@ -65,7 +65,7 @@ require (
 	github.com/go-jose/go-jose/v4 v4.1.5 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
-	github.com/google/go-containerregistry v0.21.7 // indirect
+	github.com/google/go-containerregistry v0.22.1 // indirect
 	github.com/google/go-intervals v0.0.2 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/mux v1.8.1 // indirect
@@ -84,7 +84,7 @@ require (
 	github.com/opencontainers/selinux v1.15.1 // indirect
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c // indirect
 	github.com/sergi/go-diff v1.4.0 // indirect
-	github.com/sigstore/protobuf-specs v0.5.1 // indirect
+	github.com/sigstore/protobuf-specs v0.5.2 // indirect
 	github.com/smallstep/pkcs7 v0.2.1 // indirect
 	github.com/stefanberger/go-pkcs11uri v0.0.0-20230803200340-78284954bff6 // indirect
 	github.com/tchap/go-patricia/v2 v2.3.3 // indirect

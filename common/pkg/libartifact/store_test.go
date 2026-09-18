@@ -606,9 +606,7 @@ func TestArtifactStore_Extract_SingleFile(t *testing.T) {
 	// Extract only one file by title
 	extractDir := t.TempDir()
 	err = as.Extract(ctx, ref, extractDir, &libartTypes.ExtractOptions{
-		FilterBlobOptions: libartTypes.FilterBlobOptions{
-			Title: "file1.txt",
-		},
+		Title: "file1.txt",
 	})
 	require.NoError(t, err)
 

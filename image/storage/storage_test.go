@@ -333,13 +333,11 @@ func configForLayers(t *testing.T, layers []testBlob) testBlob {
 	_, err := rand.Read(randomBytes)
 	require.NoError(t, err)
 	config := manifest.Schema2Image{
-		Schema2V1Image: manifest.Schema2V1Image{
-			Config: &manifest.Schema2Config{
-				Labels: map[string]string{"unique": fmt.Sprintf("%x", randomBytes)},
-			},
-			Created: time.Now(),
+		Config: &manifest.Schema2Config{
+			Labels: map[string]string{"unique": fmt.Sprintf("%x", randomBytes)},
 		},
-		RootFS: &rootFS,
+		Created: time.Now(),
+		RootFS:  &rootFS,
 	}
 	configBytes, err := json.Marshal(config)
 	require.NoError(t, err)

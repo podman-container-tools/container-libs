@@ -385,7 +385,7 @@ func TestNewPRSigstoreSignedKeyPath(t *testing.T) {
 	pr, ok := _pr.(*prSigstoreSigned)
 	require.True(t, ok)
 	assert.Equal(t, &prSigstoreSigned{
-		prCommon:       prCommon{Type: prTypeSigstoreSigned},
+		Type:           prTypeSigstoreSigned,
 		KeyPath:        testPath,
 		SignedIdentity: NewPRMMatchRepoDigestOrExact(),
 	}, pr)
@@ -399,7 +399,7 @@ func TestNewPRSigstoreSignedKeyData(t *testing.T) {
 	pr, ok := _pr.(*prSigstoreSigned)
 	require.True(t, ok)
 	assert.Equal(t, &prSigstoreSigned{
-		prCommon:       prCommon{Type: prTypeSigstoreSigned},
+		Type:           prTypeSigstoreSigned,
 		KeyData:        testData,
 		SignedIdentity: NewPRMMatchRepoDigestOrExact(),
 	}, pr)

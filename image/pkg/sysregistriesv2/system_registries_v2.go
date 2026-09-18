@@ -348,7 +348,7 @@ func (config *V1RegistriesConf) ConvertToV2() (*V2RegistriesConf, error) {
 		reg, exists := regMap[location]
 		if !exists {
 			reg = &Registry{
-				Endpoint: Endpoint{Location: location},
+				Location: location,
 				Mirrors:  []Endpoint{},
 				Prefix:   location,
 			}

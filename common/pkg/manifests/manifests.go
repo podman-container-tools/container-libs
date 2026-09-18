@@ -109,12 +109,10 @@ func (l *list) AddInstance(manifestDigest digest.Digest, manifestSize int64, man
 		Features:     features,
 	}
 	l.docker.Manifests = append(l.docker.Manifests, manifest.Schema2ManifestDescriptor{
-		Schema2Descriptor: manifest.Schema2Descriptor{
-			MediaType: manifestType,
-			Size:      manifestSize,
-			Digest:    manifestDigest,
-		},
-		Platform: schema2platform,
+		MediaType: manifestType,
+		Size:      manifestSize,
+		Digest:    manifestDigest,
+		Platform:  schema2platform,
 	})
 
 	ociv1platform := &v1.Platform{
@@ -579,12 +577,10 @@ func FromBlob(manifestBytes []byte) (List, error) {
 				urls = slices.Clone(m.URLs)
 			}
 			list.docker.Manifests = append(list.docker.Manifests, manifest.Schema2ManifestDescriptor{
-				Schema2Descriptor: manifest.Schema2Descriptor{
-					MediaType: m.MediaType,
-					Size:      m.Size,
-					Digest:    m.Digest,
-					URLs:      urls,
-				},
+				MediaType: m.MediaType,
+				Size:      m.Size,
+				Digest:    m.Digest,
+				URLs:      urls,
 				Platform: manifest.Schema2PlatformSpec{
 					Architecture: platform.Architecture,
 					OS:           platform.OS,

@@ -141,55 +141,55 @@ var _ = Describe("Connections conf", func() {
 			con, err := conf.GetConnection("", true)
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 			gomega.Expect(con).To(gomega.Equal(&Connection{
-				Name:        "test",
-				Default:     true,
-				ReadWrite:   true,
-				Destination: Destination{URI: "ssh://podman.io"},
+				Name:      "test",
+				Default:   true,
+				ReadWrite: true,
+				URI:       "ssh://podman.io",
 			}))
 
 			con, err = conf.GetConnection("test", false)
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 			gomega.Expect(con).To(gomega.Equal(&Connection{
-				Name:        "test",
-				Default:     true,
-				ReadWrite:   true,
-				Destination: Destination{URI: "ssh://podman.io"},
+				Name:      "test",
+				Default:   true,
+				ReadWrite: true,
+				URI:       "ssh://podman.io",
 			}))
 
 			con, err = conf.GetConnection("QA", false)
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 			gomega.Expect(con).To(gomega.Equal(&Connection{
-				Name:        "QA",
-				Default:     false,
-				ReadWrite:   true,
-				Destination: Destination{URI: "ssh://test", Identity: ".ssh/id", IsMachine: true},
+				Name:      "QA",
+				Default:   false,
+				ReadWrite: true,
+				URI:       "ssh://test", Identity: ".ssh/id", IsMachine: true,
 			}))
 
 			con, err = conf.GetConnection("TLS", false)
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 			gomega.Expect(con).To(gomega.Equal(&Connection{
-				Name:        "TLS",
-				Default:     false,
-				ReadWrite:   true,
-				Destination: Destination{URI: "tcp://podman.io:443", TLSCA: "/path/to/ca.pem"},
+				Name:      "TLS",
+				Default:   false,
+				ReadWrite: true,
+				URI:       "tcp://podman.io:443", TLSCA: "/path/to/ca.pem",
 			}))
 
 			con, err = conf.GetConnection("mTLS", false)
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 			gomega.Expect(con).To(gomega.Equal(&Connection{
-				Name:        "mTLS",
-				Default:     false,
-				ReadWrite:   true,
-				Destination: Destination{URI: "tcp://podman.io:443/subpath", TLSCA: "/path/to/ca.pem", TLSCert: "/path/to/tls.crt", TLSKey: "/path/to/tls.key"},
+				Name:      "mTLS",
+				Default:   false,
+				ReadWrite: true,
+				URI:       "tcp://podman.io:443/subpath", TLSCA: "/path/to/ca.pem", TLSCert: "/path/to/tls.crt", TLSKey: "/path/to/tls.key",
 			}))
 
 			con, err = conf.GetConnection("containers", false)
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 			gomega.Expect(con).To(gomega.Equal(&Connection{
-				Name:        "containers",
-				Default:     false,
-				ReadWrite:   false,
-				Destination: Destination{URI: "unix:///tmp/test.sock", IsMachine: true},
+				Name:      "containers",
+				Default:   false,
+				ReadWrite: false,
+				URI:       "unix:///tmp/test.sock", IsMachine: true,
 			}))
 		})
 
@@ -201,22 +201,22 @@ var _ = Describe("Connections conf", func() {
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 			gomega.Expect(cons).To(gomega.ContainElements(
 				Connection{
-					Name:        "test",
-					Default:     true,
-					ReadWrite:   true,
-					Destination: Destination{URI: "ssh://podman.io"},
+					Name:      "test",
+					Default:   true,
+					ReadWrite: true,
+					URI:       "ssh://podman.io",
 				},
 				Connection{
-					Name:        "QA",
-					Default:     false,
-					ReadWrite:   true,
-					Destination: Destination{URI: "ssh://test", Identity: ".ssh/id", IsMachine: true},
+					Name:      "QA",
+					Default:   false,
+					ReadWrite: true,
+					URI:       "ssh://test", Identity: ".ssh/id", IsMachine: true,
 				},
 				Connection{
-					Name:        "containers",
-					Default:     false,
-					ReadWrite:   false,
-					Destination: Destination{URI: "unix:///tmp/test.sock", IsMachine: true},
+					Name:      "containers",
+					Default:   false,
+					ReadWrite: false,
+					URI:       "unix:///tmp/test.sock", IsMachine: true,
 				},
 			))
 		})
@@ -230,10 +230,10 @@ var _ = Describe("Connections conf", func() {
 			gomega.Expect(name).To(gomega.Equal("farm1"))
 			gomega.Expect(cons).To(gomega.ContainElements(
 				Connection{
-					Name:        "test",
-					Default:     false,
-					ReadWrite:   false,
-					Destination: Destination{URI: "ssh://podman.io"},
+					Name:      "test",
+					Default:   false,
+					ReadWrite: false,
+					URI:       "ssh://podman.io",
 				},
 			))
 
@@ -241,10 +241,10 @@ var _ = Describe("Connections conf", func() {
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 			gomega.Expect(cons).To(gomega.ContainElements(
 				Connection{
-					Name:        "test",
-					Default:     false,
-					ReadWrite:   false,
-					Destination: Destination{URI: "ssh://podman.io"},
+					Name:      "test",
+					Default:   false,
+					ReadWrite: false,
+					URI:       "ssh://podman.io",
 				},
 			))
 
@@ -252,10 +252,10 @@ var _ = Describe("Connections conf", func() {
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
 			gomega.Expect(cons).To(gomega.ContainElements(
 				Connection{
-					Name:        "containers",
-					Default:     false,
-					ReadWrite:   false,
-					Destination: Destination{URI: "unix:///tmp/test.sock", IsMachine: true},
+					Name:      "containers",
+					Default:   false,
+					ReadWrite: false,
+					URI:       "unix:///tmp/test.sock", IsMachine: true,
 				},
 			))
 		})

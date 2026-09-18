@@ -345,7 +345,7 @@ func newPRSignedBy(keyType sbKeyType, keyPath string, keyPaths []string, keyData
 		return nil, InvalidPolicyFormatError("signedIdentity not specified")
 	}
 	return &prSignedBy{
-		prCommon:       prCommon{Type: prTypeSignedBy},
+		Type:           prTypeSignedBy,
 		KeyType:        keyType,
 		KeyPath:        keyPath,
 		KeyPaths:       keyPaths,
@@ -486,7 +486,7 @@ func newPRSignedBaseLayer(baseLayerIdentity PolicyReferenceMatch) (*prSignedBase
 		return nil, InvalidPolicyFormatError("baseLayerIdentity not specified")
 	}
 	return &prSignedBaseLayer{
-		prCommon:          prCommon{Type: prTypeSignedBaseLayer},
+		Type:              prTypeSignedBaseLayer,
 		BaseLayerIdentity: baseLayerIdentity,
 	}, nil
 }
@@ -656,7 +656,7 @@ func newPRMExactReference(dockerReference string) (*prmExactReference, error) {
 		return nil, InvalidPolicyFormatError(fmt.Sprintf("dockerReference %q contains neither a tag nor digest", dockerReference))
 	}
 	return &prmExactReference{
-		prmCommon:       prmCommon{Type: prmTypeExactReference},
+		Type:            prmTypeExactReference,
 		DockerReference: dockerReference,
 	}, nil
 }
@@ -698,7 +698,7 @@ func newPRMExactRepository(dockerRepository string) (*prmExactRepository, error)
 		return nil, InvalidPolicyFormatError(fmt.Sprintf("Invalid format of dockerRepository %q: %s", dockerRepository, err.Error()))
 	}
 	return &prmExactRepository{
-		prmCommon:        prmCommon{Type: prmTypeExactRepository},
+		Type:             prmTypeExactRepository,
 		DockerRepository: dockerRepository,
 	}, nil
 }
@@ -769,7 +769,7 @@ func newPRMRemapIdentity(prefix, signedPrefix string) (*prmRemapIdentity, error)
 		return nil, err
 	}
 	return &prmRemapIdentity{
-		prmCommon:    prmCommon{Type: prmTypeRemapIdentity},
+		Type:         prmTypeRemapIdentity,
 		Prefix:       prefix,
 		SignedPrefix: signedPrefix,
 	}, nil

@@ -121,17 +121,13 @@ var _ = Describe("run netavark", func() {
 			defNet := types.DefaultNetworkName
 			intName := "eth0"
 			opts := types.SetupOptions{
-				NetworkOptions: types.NetworkOptions{
-					ContainerID:   "someID",
-					ContainerName: "someName",
-					Networks: []types.NamedPerNetworkOptions{{
-						Name: defNet,
-						PerNetworkOptions: types.PerNetworkOptions{
-							InterfaceName: intName,
-							StaticMAC:     types.HardwareAddr{0x44, 0x33, 0x22, 0x44, 0x33, 0x22},
-						},
-					}},
-				},
+				ContainerID:   "someID",
+				ContainerName: "someName",
+				Networks: []types.NamedPerNetworkOptions{{
+					Name:          defNet,
+					InterfaceName: intName,
+					StaticMAC:     types.HardwareAddr{0x44, 0x33, 0x22, 0x44, 0x33, 0x22},
+				}},
 			}
 
 			res, err := libpodNet.Setup(netNSContainer.Path(), opts)
@@ -218,17 +214,13 @@ var _ = Describe("run netavark", func() {
 			intName := "eth0"
 			mac := types.HardwareAddr{0x44, 0x33, 0x22, 0x44, 0x33, 0x22}
 			opts := types.SetupOptions{
-				NetworkOptions: types.NetworkOptions{
-					ContainerID:   "someID",
-					ContainerName: "someName",
-					Networks: []types.NamedPerNetworkOptions{{
-						Name: defNet,
-						PerNetworkOptions: types.PerNetworkOptions{
-							InterfaceName: intName,
-							StaticMAC:     mac,
-						},
-					}},
-				},
+				ContainerID:   "someID",
+				ContainerName: "someName",
+				Networks: []types.NamedPerNetworkOptions{{
+					Name:          defNet,
+					InterfaceName: intName,
+					StaticMAC:     mac,
+				}},
 			}
 
 			res, err := libpodNet.Setup(netNSContainer.Path(), opts)
@@ -258,15 +250,11 @@ var _ = Describe("run netavark", func() {
 			defNet := types.DefaultNetworkName
 			intName := "eth0"
 			setupOpts1 := types.SetupOptions{
-				NetworkOptions: types.NetworkOptions{
-					ContainerID: stringid.GenerateNonCryptoID(),
-					Networks: []types.NamedPerNetworkOptions{{
-						Name: defNet,
-						PerNetworkOptions: types.PerNetworkOptions{
-							InterfaceName: intName,
-						},
-					}},
-				},
+				ContainerID: stringid.GenerateNonCryptoID(),
+				Networks: []types.NamedPerNetworkOptions{{
+					Name:          defNet,
+					InterfaceName: intName,
+				}},
 			}
 			res, err := libpodNet.Setup(netNSContainer.Path(), setupOpts1)
 			Expect(err).ToNot(HaveOccurred())
@@ -279,15 +267,11 @@ var _ = Describe("run netavark", func() {
 			Expect(res[defNet].Interfaces[intName].MacAddress).To(HaveLen(6))
 
 			setupOpts2 := types.SetupOptions{
-				NetworkOptions: types.NetworkOptions{
-					ContainerID: stringid.GenerateNonCryptoID(),
-					Networks: []types.NamedPerNetworkOptions{{
-						Name: defNet,
-						PerNetworkOptions: types.PerNetworkOptions{
-							InterfaceName: intName,
-						},
-					}},
-				},
+				ContainerID: stringid.GenerateNonCryptoID(),
+				Networks: []types.NamedPerNetworkOptions{{
+					Name:          defNet,
+					InterfaceName: intName,
+				}},
 			}
 
 			netNSContainer2, err := netns.NewNS()
@@ -331,15 +315,11 @@ var _ = Describe("run netavark", func() {
 			intName := "eth0"
 
 			setupOpts := types.SetupOptions{
-				NetworkOptions: types.NetworkOptions{
-					ContainerID: stringid.GenerateNonCryptoID(),
-					Networks: []types.NamedPerNetworkOptions{{
-						Name: netName,
-						PerNetworkOptions: types.PerNetworkOptions{
-							InterfaceName: intName,
-						},
-					}},
-				},
+				ContainerID: stringid.GenerateNonCryptoID(),
+				Networks: []types.NamedPerNetworkOptions{{
+					Name:          netName,
+					InterfaceName: intName,
+				}},
 			}
 			res, err := libpodNet.Setup(netNSContainer.Path(), setupOpts)
 			Expect(err).ToNot(HaveOccurred())
@@ -431,21 +411,15 @@ var _ = Describe("run netavark", func() {
 			intName2 := "eth1"
 
 			setupOpts := types.SetupOptions{
-				NetworkOptions: types.NetworkOptions{
-					ContainerID: stringid.GenerateNonCryptoID(),
-					Networks: []types.NamedPerNetworkOptions{
-						{
-							Name: netName1,
-							PerNetworkOptions: types.PerNetworkOptions{
-								InterfaceName: intName1,
-							},
-						},
-						{
-							Name: netName2,
-							PerNetworkOptions: types.PerNetworkOptions{
-								InterfaceName: intName2,
-							},
-						},
+				ContainerID: stringid.GenerateNonCryptoID(),
+				Networks: []types.NamedPerNetworkOptions{
+					{
+						Name:          netName1,
+						InterfaceName: intName1,
+					},
+					{
+						Name:          netName2,
+						InterfaceName: intName2,
 					},
 				},
 			}
@@ -539,21 +513,17 @@ var _ = Describe("run netavark", func() {
 				defNet := types.DefaultNetworkName
 				intName := "eth0"
 				setupOpts := types.SetupOptions{
-					NetworkOptions: types.NetworkOptions{
-						ContainerID: stringid.GenerateNonCryptoID(),
-						PortMappings: []types.PortMapping{{
-							Protocol:      protocol,
-							HostIP:        "127.0.0.1",
-							HostPort:      5000,
-							ContainerPort: 5000,
-						}},
-						Networks: []types.NamedPerNetworkOptions{{
-							Name: defNet,
-							PerNetworkOptions: types.PerNetworkOptions{
-								InterfaceName: intName,
-							},
-						}},
-					},
+					ContainerID: stringid.GenerateNonCryptoID(),
+					PortMappings: []types.PortMapping{{
+						Protocol:      protocol,
+						HostIP:        "127.0.0.1",
+						HostPort:      5000,
+						ContainerPort: 5000,
+					}},
+					Networks: []types.NamedPerNetworkOptions{{
+						Name:          defNet,
+						InterfaceName: intName,
+					}},
 				}
 				res, err := libpodNet.Setup(netNSContainer.Path(), setupOpts)
 				Expect(err).ToNot(HaveOccurred())
@@ -594,22 +564,18 @@ var _ = Describe("run netavark", func() {
 				defNet := types.DefaultNetworkName
 				intName := "eth0"
 				setupOpts := types.SetupOptions{
-					NetworkOptions: types.NetworkOptions{
-						ContainerID: stringid.GenerateNonCryptoID(),
-						PortMappings: []types.PortMapping{{
-							Protocol:      protocol,
-							HostIP:        "127.0.0.1",
-							HostPort:      5001,
-							ContainerPort: 5000,
-							Range:         3,
-						}},
-						Networks: []types.NamedPerNetworkOptions{{
-							Name: defNet,
-							PerNetworkOptions: types.PerNetworkOptions{
-								InterfaceName: intName,
-							},
-						}},
-					},
+					ContainerID: stringid.GenerateNonCryptoID(),
+					PortMappings: []types.PortMapping{{
+						Protocol:      protocol,
+						HostIP:        "127.0.0.1",
+						HostPort:      5001,
+						ContainerPort: 5000,
+						Range:         3,
+					}},
+					Networks: []types.NamedPerNetworkOptions{{
+						Name:          defNet,
+						InterfaceName: intName,
+					}},
 				}
 				res, err := libpodNet.Setup(netNSContainer.Path(), setupOpts)
 				Expect(err).ToNot(HaveOccurred())
@@ -658,16 +624,12 @@ var _ = Describe("run netavark", func() {
 			defNet := types.DefaultNetworkName
 			intName := "eth0"
 			opts := types.SetupOptions{
-				NetworkOptions: types.NetworkOptions{
-					ContainerID:   "someID",
-					ContainerName: "someName",
-					Networks: []types.NamedPerNetworkOptions{{
-						Name: defNet,
-						PerNetworkOptions: types.PerNetworkOptions{
-							InterfaceName: intName,
-						},
-					}},
-				},
+				ContainerID:   "someID",
+				ContainerName: "someName",
+				Networks: []types.NamedPerNetworkOptions{{
+					Name:          defNet,
+					InterfaceName: intName,
+				}},
 			}
 			res, err := libpodNet.Setup(netNSContainer.Path(), opts)
 			Expect(err).ToNot(HaveOccurred())
@@ -716,16 +678,12 @@ var _ = Describe("run netavark", func() {
 			Expect(err).ToNot(HaveOccurred())
 			defNet := types.DefaultNetworkName
 			opts := types.SetupOptions{
-				NetworkOptions: types.NetworkOptions{
-					ContainerID:   "someID",
-					ContainerName: "someName",
-					Networks: []types.NamedPerNetworkOptions{{
-						Name: defNet,
-						PerNetworkOptions: types.PerNetworkOptions{
-							InterfaceName: intName,
-						},
-					}},
-				},
+				ContainerID:   "someID",
+				ContainerName: "someName",
+				Networks: []types.NamedPerNetworkOptions{{
+					Name:          defNet,
+					InterfaceName: intName,
+				}},
 			}
 			_, err = libpodNet.Setup(netNSContainer.Path(), opts)
 			Expect(err).To(HaveOccurred())
@@ -748,15 +706,11 @@ var _ = Describe("run netavark", func() {
 			netName1 := network1.Name
 
 			setupOpts := types.SetupOptions{
-				NetworkOptions: types.NetworkOptions{
-					ContainerID: stringid.GenerateNonCryptoID(),
-					Networks: []types.NamedPerNetworkOptions{{
-						Name: netName1,
-						PerNetworkOptions: types.PerNetworkOptions{
-							InterfaceName: intName1,
-						},
-					}},
-				},
+				ContainerID: stringid.GenerateNonCryptoID(),
+				Networks: []types.NamedPerNetworkOptions{{
+					Name:          netName1,
+					InterfaceName: intName1,
+				}},
 			}
 
 			res, err := libpodNet.Setup(netNSContainer.Path(), setupOpts)
