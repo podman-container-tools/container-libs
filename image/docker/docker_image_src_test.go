@@ -3,6 +3,7 @@ package docker
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,13 +13,20 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/docker/distribution/registry/api/errcode"
 	v2 "github.com/docker/distribution/registry/api/v2"
+	digest "github.com/opencontainers/go-digest"
+	imgspecv1 "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.podman.io/image/v5/docker/reference"
 	"go.podman.io/image/v5/internal/private"
+	"go.podman.io/image/v5/internal/set"
+	"go.podman.io/image/v5/internal/signature"
+	"go.podman.io/image/v5/manifest"
 	"go.podman.io/image/v5/types"
 )
 
@@ -320,4 +328,345 @@ func TestParseMediaType(t *testing.T) {
 	// unquoted '@'
 	_, _, err = parseMediaType("multipart/byteranges; boundary=@")
 	require.Error(t, err)
+}
+
+func TestIsSigstoreReferrerArtifactType(t *testing.T) {
+	for _, c := range []struct {
+		artifactType string
+		expected     bool
+	}{
+		{"application/vnd.dev.cosign.artifact.sig.v1+json", true},
+		// Other cosign / sigstore artifacts are not signatures.
+		{"application/vnd.dev.cosign.artifact.att.v1+json", false},
+		{"application/vnd.dev.cosign.artifact.sbom.v1+json", false},
+		{"application/vnd.dev.sigstore.bundle.v0.3+json", false},
+		{"application/vnd.dev.cosign.simplesigning.v1+json", false},
+		{"application/spdx+json", false},
+		{"application/vnd.cyclonedx+json", false},
+		{"application/vnd.oci.image.manifest.v1+json", false},
+		{"", false},
+	} {
+		t.Run(c.artifactType, func(t *testing.T) {
+			assert.Equal(t, c.expected, isSigstoreReferrerArtifactType(c.artifactType))
+		})
+	}
+}
+
+func TestDeduplicateSigstoreSignatures(t *testing.T) {
+	sigA := signature.SigstoreFromComponents("application/vnd.dev.cosign.simplesigning.v1+json", []byte("payload-a"), map[string]string{"key": "val-a"})
+	sigB := signature.SigstoreFromComponents("application/vnd.dev.cosign.simplesigning.v1+json", []byte("payload-b"), map[string]string{"key": "val-b"})
+	sigADup := signature.SigstoreFromComponents("application/vnd.dev.cosign.simplesigning.v1+json", []byte("payload-a"), map[string]string{"key": "val-a"})
+	preExisting := signature.SimpleSigningFromBlob([]byte("pre-existing"))
+
+	t.Run("no duplicates", func(t *testing.T) {
+		sigs := []signature.Signature{preExisting, sigA, sigB}
+		result := deduplicateSigstoreSignatures(sigs, 1)
+		assert.Len(t, result, 3)
+	})
+
+	t.Run("duplicate across referrers and cosign tag", func(t *testing.T) {
+		sigs := []signature.Signature{preExisting, sigA, sigB, sigADup}
+		result := deduplicateSigstoreSignatures(sigs, 1)
+		assert.Len(t, result, 3)
+	})
+
+	t.Run("pre-existing signatures preserved", func(t *testing.T) {
+		sigs := []signature.Signature{preExisting, sigA}
+		result := deduplicateSigstoreSignatures(sigs, 1)
+		assert.Len(t, result, 2)
+	})
+
+	t.Run("all duplicates", func(t *testing.T) {
+		sigs := []signature.Signature{sigA, sigADup, sigADup}
+		result := deduplicateSigstoreSignatures(sigs, 0)
+		assert.Len(t, result, 1)
+	})
+}
+
+func TestAppendSignaturesFromReferrersArtifactTypeFilter(t *testing.T) {
+	const testDigest = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	spdxDigest := digest.Digest("sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd")
+	attestationDigest := digest.Digest("sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
+	mismatchDigest := digest.Digest("sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
+	const invalidDigest = digest.Digest("sha256:abc/../../../v2/victim/manifests/latest")
+
+	sigPayload := []byte(`{"critical":{"type":"cosign container image signature"}}`)
+	layerDigest := digest.FromBytes(sigPayload)
+	dssePayload := []byte(`{"payloadType":"application/vnd.in-toto+json"}`)
+	dsseDigest := digest.FromBytes(dssePayload)
+
+	cosignManifest, err := json.Marshal(manifest.OCI1{
+		Manifest: imgspecv1.Manifest{
+			MediaType:    imgspecv1.MediaTypeImageManifest,
+			ArtifactType: sigstoreReferrerArtifactType,
+			Config: imgspecv1.Descriptor{
+				MediaType: imgspecv1.MediaTypeEmptyJSON,
+				Digest:    imgspecv1.DescriptorEmptyJSON.Digest,
+				Size:      imgspecv1.DescriptorEmptyJSON.Size,
+			},
+			Layers: []imgspecv1.Descriptor{
+				{
+					MediaType:   signature.SigstoreSignatureMIMEType,
+					Digest:      layerDigest,
+					Size:        int64(len(sigPayload)),
+					Annotations: map[string]string{"dev.cosignproject.cosign/signature": "dGVzdA=="},
+				},
+				// A layer with a non-signature MIME type inside a signature artifact must be ignored.
+				{
+					MediaType: "application/vnd.dsse.envelope.v1+json",
+					Digest:    dsseDigest,
+					Size:      int64(len(dssePayload)),
+				},
+			},
+		},
+	})
+	require.NoError(t, err)
+	cosignDigest := digest.FromBytes(cosignManifest)
+
+	referrersIndex, err := json.Marshal(imgspecv1.Index{
+		MediaType: imgspecv1.MediaTypeImageIndex,
+		Manifests: []imgspecv1.Descriptor{
+			{
+				MediaType:    imgspecv1.MediaTypeImageManifest,
+				Digest:       cosignDigest,
+				Size:         int64(len(cosignManifest)),
+				ArtifactType: sigstoreReferrerArtifactType,
+			},
+			// A manifest that does not match its digest must be ignored.
+			{
+				MediaType:    imgspecv1.MediaTypeImageManifest,
+				Digest:       mismatchDigest,
+				Size:         int64(len(cosignManifest)),
+				ArtifactType: sigstoreReferrerArtifactType,
+			},
+			// An invalid digest must not be interpolated into a request path.
+			{
+				MediaType:    imgspecv1.MediaTypeImageManifest,
+				Digest:       invalidDigest,
+				Size:         100,
+				ArtifactType: sigstoreReferrerArtifactType,
+			},
+			{
+				MediaType:    imgspecv1.MediaTypeImageManifest,
+				Digest:       spdxDigest,
+				Size:         500,
+				ArtifactType: "application/spdx+json",
+			},
+			// A cosign attestation shares the artifactType prefix with signatures but is not one.
+			{
+				MediaType:    imgspecv1.MediaTypeImageManifest,
+				Digest:       attestationDigest,
+				Size:         500,
+				ArtifactType: "application/vnd.dev.cosign.artifact.att.v1+json",
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	var mu sync.Mutex
+	requestedPaths := map[string]int{}
+
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		requestedPaths[r.URL.Path]++
+		mu.Unlock()
+
+		switch {
+		case r.URL.Path == "/v2/":
+			w.WriteHeader(http.StatusOK)
+		case strings.Contains(r.URL.Path, "/referrers/"):
+			w.Header().Set("Content-Type", imgspecv1.MediaTypeImageIndex)
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(referrersIndex)
+		case strings.Contains(r.URL.Path, "/manifests/"+cosignDigest.String()),
+			strings.Contains(r.URL.Path, "/manifests/"+mismatchDigest.String()):
+			w.Header().Set("Content-Type", imgspecv1.MediaTypeImageManifest)
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(cosignManifest)
+		case strings.Contains(r.URL.Path, "victim"):
+			t.Errorf("invalid digest was used in a request: %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		case strings.Contains(r.URL.Path, "/manifests/"+spdxDigest.String()):
+			t.Error("SPDX manifest should not have been fetched")
+			w.WriteHeader(http.StatusOK)
+		case strings.Contains(r.URL.Path, "/manifests/"+attestationDigest.String()):
+			t.Error("attestation manifest should not have been fetched")
+			w.WriteHeader(http.StatusOK)
+		case strings.Contains(r.URL.Path, "/blobs/"+dsseDigest.String()):
+			t.Error("DSSE layer should not have been fetched")
+			w.WriteHeader(http.StatusOK)
+		case strings.Contains(r.URL.Path, "/blobs/"+layerDigest.String()):
+			w.Header().Set("Content-Type", "application/octet-stream")
+			w.Header().Set("Docker-Content-Digest", layerDigest.String())
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(sigPayload)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer s.Close()
+
+	registry := strings.TrimPrefix(s.URL, "http://")
+	named, err := reference.ParseNormalizedNamed(registry + "/test/repo@" + testDigest)
+	require.NoError(t, err)
+	ref, err := newReference(named, false)
+	require.NoError(t, err)
+
+	client := &dockerClient{
+		sys:                    &types.SystemContext{DockerInsecureSkipTLSVerify: types.OptionalBoolTrue},
+		registry:               registry,
+		scheme:                 "http",
+		client:                 s.Client(),
+		tokenCache:             map[string]*bearerToken{},
+		reportedWarnings:       set.New[string](),
+		useSigstoreAttachments: true,
+	}
+	client.detectPropertiesOnce.Do(func() {})
+
+	src := &dockerImageSource{
+		physicalRef: ref,
+		c:           client,
+	}
+
+	instanceDigest := digest.Digest(testDigest)
+	var sigs []signature.Signature
+	fetched, err := src.appendSignaturesFromReferrers(context.Background(), &sigs, &instanceDigest)
+	require.NoError(t, err)
+	require.Len(t, fetched, 1)
+	assert.Equal(t, layerDigest, fetched[0].Digest)
+
+	require.Len(t, sigs, 1, "should find exactly one cosign signature")
+	sigstoreSig, ok := sigs[0].(signature.Sigstore)
+	require.True(t, ok)
+	assert.Equal(t, signature.SigstoreSignatureMIMEType, sigstoreSig.UntrustedMIMEType())
+	assert.Equal(t, sigPayload, sigstoreSig.UntrustedPayload())
+
+	mu.Lock()
+	defer mu.Unlock()
+	for path := range requestedPaths {
+		assert.NotContains(t, path, spdxDigest.String(), "SPDX referrer manifest should not be fetched")
+		assert.NotContains(t, path, attestationDigest.String(), "attestation referrer manifest should not be fetched")
+		assert.NotContains(t, path, dsseDigest.String(), "DSSE layer should not be fetched")
+	}
+}
+
+// TestGetSignaturesWithFormatReferrers tests the interaction of the referrers and cosign tag read paths.
+func TestGetSignaturesWithFormatReferrers(t *testing.T) {
+	sigPayload := []byte(`{"critical":{"type":"cosign container image signature"}}`)
+	layerDesc := imgspecv1.Descriptor{
+		MediaType:   signature.SigstoreSignatureMIMEType,
+		Digest:      digest.FromBytes(sigPayload),
+		Size:        int64(len(sigPayload)),
+		Annotations: map[string]string{"dev.cosignproject.cosign/signature": "dGVzdA=="},
+	}
+	// The cosign tag manifest, and a referrer artifact, both pointing at the same payload.
+	cosignTagManifest, err := json.Marshal(manifest.OCI1{
+		Manifest: imgspecv1.Manifest{
+			MediaType: imgspecv1.MediaTypeImageManifest,
+			Config:    imgspecv1.Descriptor{MediaType: imgspecv1.MediaTypeImageConfig, Digest: digest.FromBytes([]byte("{}")), Size: 2},
+			Layers:    []imgspecv1.Descriptor{layerDesc},
+		},
+	})
+	require.NoError(t, err)
+	artifactManifest, err := json.Marshal(manifest.OCI1{
+		Manifest: imgspecv1.Manifest{
+			MediaType:    imgspecv1.MediaTypeImageManifest,
+			ArtifactType: sigstoreReferrerArtifactType,
+			Config:       imgspecv1.Descriptor{MediaType: imgspecv1.MediaTypeEmptyJSON, Digest: imgspecv1.DescriptorEmptyJSON.Digest, Size: imgspecv1.DescriptorEmptyJSON.Size},
+			Layers:       []imgspecv1.Descriptor{layerDesc},
+		},
+	})
+	require.NoError(t, err)
+	artifactDigest := digest.FromBytes(artifactManifest)
+	referrersIndex, err := json.Marshal(imgspecv1.Index{
+		MediaType: imgspecv1.MediaTypeImageIndex,
+		Manifests: []imgspecv1.Descriptor{{
+			MediaType:    imgspecv1.MediaTypeImageManifest,
+			Digest:       artifactDigest,
+			Size:         int64(len(artifactManifest)),
+			ArtifactType: sigstoreReferrerArtifactType,
+		}},
+	})
+	require.NoError(t, err)
+
+	const testDigest = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	cosignTag := strings.Replace(testDigest, ":", "-", 1) + ".sig"
+
+	for _, tc := range []struct {
+		name             string
+		referrersStatus  int
+		expectedBlobGets int
+	}{
+		{name: "referrers API error does not hide cosign tag signatures", referrersStatus: http.StatusForbidden, expectedBlobGets: 1},
+		{name: "payload found via referrers is not fetched again from the cosign tag", referrersStatus: http.StatusOK, expectedBlobGets: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var mu sync.Mutex
+			blobGets := 0
+			s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.URL.Path == "/v2/":
+					w.WriteHeader(http.StatusOK)
+				case strings.Contains(r.URL.Path, "/referrers/"):
+					w.Header().Set("Content-Type", imgspecv1.MediaTypeImageIndex)
+					w.WriteHeader(tc.referrersStatus)
+					if tc.referrersStatus == http.StatusOK {
+						_, _ = w.Write(referrersIndex)
+					}
+				case strings.HasSuffix(r.URL.Path, "/manifests/"+artifactDigest.String()):
+					w.Header().Set("Content-Type", imgspecv1.MediaTypeImageManifest)
+					w.WriteHeader(http.StatusOK)
+					_, _ = w.Write(artifactManifest)
+				case strings.HasSuffix(r.URL.Path, "/manifests/"+cosignTag):
+					w.Header().Set("Content-Type", imgspecv1.MediaTypeImageManifest)
+					w.WriteHeader(http.StatusOK)
+					_, _ = w.Write(cosignTagManifest)
+				case strings.HasSuffix(r.URL.Path, "/blobs/"+layerDesc.Digest.String()):
+					mu.Lock()
+					blobGets++
+					mu.Unlock()
+					w.Header().Set("Content-Type", "application/octet-stream")
+					w.WriteHeader(http.StatusOK)
+					_, _ = w.Write(sigPayload)
+				default:
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}))
+			defer s.Close()
+
+			registry := strings.TrimPrefix(s.URL, "http://")
+			named, err := reference.ParseNormalizedNamed(registry + "/test/repo@" + testDigest)
+			require.NoError(t, err)
+			ref, err := newReference(named, false)
+			require.NoError(t, err)
+
+			// An empty lookaside directory, so that the lookaside path finds nothing.
+			signatureBase, err := url.Parse("file://" + t.TempDir())
+			require.NoError(t, err)
+			client := &dockerClient{
+				sys:                    &types.SystemContext{DockerInsecureSkipTLSVerify: types.OptionalBoolTrue},
+				registry:               registry,
+				scheme:                 "http",
+				client:                 s.Client(),
+				tokenCache:             map[string]*bearerToken{},
+				reportedWarnings:       set.New[string](),
+				useSigstoreAttachments: true,
+				signatureBase:          signatureBase,
+			}
+			client.detectPropertiesOnce.Do(func() {})
+			src := &dockerImageSource{physicalRef: ref, c: client}
+
+			sigs, err := src.GetSignaturesWithFormat(context.Background(), nil)
+			require.NoError(t, err)
+			require.Len(t, sigs, 1)
+			sigstoreSig, ok := sigs[0].(signature.Sigstore)
+			require.True(t, ok)
+			assert.Equal(t, sigPayload, sigstoreSig.UntrustedPayload())
+			assert.Equal(t, layerDesc.Annotations, sigstoreSig.UntrustedAnnotations())
+
+			mu.Lock()
+			defer mu.Unlock()
+			assert.Equal(t, tc.expectedBlobGets, blobGets)
+		})
+	}
 }
