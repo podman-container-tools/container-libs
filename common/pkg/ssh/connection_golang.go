@@ -306,33 +306,38 @@ func ValidateAndConfigure(uri *url.URL, iden string, insecureIsMachineConnection
 		return nil, err
 	}
 
-	keyFilePath := filepath.Join(homedir.Get(), ".ssh", "known_hosts")
-	known, err := knownhosts.NewDB(keyFilePath)
-	if err != nil {
-		if !errors.Is(err, os.ErrNotExist) {
-			return nil, err
-		}
-		keyDir := filepath.Dir(keyFilePath)
-		if err := fileutils.Exists(keyDir); errors.Is(err, os.ErrNotExist) {
-			if err := os.Mkdir(keyDir, 0o700); err != nil {
+	var callback ssh.HostKeyCallback
+	var hostKeyAlgos []string
+	if insecureIsMachineConnection {
+		// Machine connections do not verify the host key, so consulting
+		// known_hosts is pointless here. It can only break the connection,
+		// e.g. a @cert-authority marker would restrict HostKeyAlgorithms to
+		// cert types the machine never offers.
+		callback = ssh.InsecureIgnoreHostKey()
+	} else {
+		keyFilePath := filepath.Join(homedir.Get(), ".ssh", "known_hosts")
+		known, err := knownhosts.NewDB(keyFilePath)
+		if err != nil {
+			if !errors.Is(err, os.ErrNotExist) {
+				return nil, err
+			}
+			keyDir := filepath.Dir(keyFilePath)
+			if err := fileutils.Exists(keyDir); errors.Is(err, os.ErrNotExist) {
+				if err := os.Mkdir(keyDir, 0o700); err != nil {
+					return nil, err
+				}
+			}
+			k, err := os.OpenFile(keyFilePath, os.O_RDWR|os.O_CREATE, 0o600)
+			if err != nil {
+				return nil, err
+			}
+			k.Close()
+			known, err = knownhosts.NewDB(keyFilePath)
+			if err != nil {
 				return nil, err
 			}
 		}
-		k, err := os.OpenFile(keyFilePath, os.O_RDWR|os.O_CREATE, 0o600)
-		if err != nil {
-			return nil, err
-		}
-		k.Close()
-		known, err = knownhosts.NewDB(keyFilePath)
-		if err != nil {
-			return nil, err
-		}
-	}
 
-	var callback ssh.HostKeyCallback
-	if insecureIsMachineConnection {
-		callback = ssh.InsecureIgnoreHostKey()
-	} else {
 		callback = ssh.HostKeyCallback(func(host string, remote net.Addr, pubKey ssh.PublicKey) error {
 			// we need to check if there is an error from reading known hosts for this public key and if there is an error, what is it, and why is it happening?
 			// if it is a key mismatch we want to error since we know the host using another key
@@ -358,6 +363,7 @@ func ValidateAndConfigure(uri *url.URL, iden string, insecureIsMachineConnection
 			}
 			return nil
 		})
+		hostKeyAlgos = known.HostKeyAlgorithms(uri.Host)
 	}
 
 	cfg := &ssh.ClientConfig{
@@ -365,7 +371,7 @@ func ValidateAndConfigure(uri *url.URL, iden string, insecureIsMachineConnection
 		Auth:              authMethods,
 		HostKeyCallback:   callback,
 		Timeout:           tick,
-		HostKeyAlgorithms: known.HostKeyAlgorithms(uri.Host),
+		HostKeyAlgorithms: hostKeyAlgos,
 	}
 	return cfg, nil
 }
