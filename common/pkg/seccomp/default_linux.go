@@ -583,6 +583,7 @@ func DefaultProfile() *Seccomp {
 		{
 			Names: []string{
 				"riscv_flush_icache",
+				"riscv_hwprobe",
 			},
 			Action: ActAllow,
 			Args:   []*Arg{},

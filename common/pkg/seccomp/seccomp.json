@@ -647,7 +647,8 @@
 		},
 		{
 			"names": [
-				"riscv_flush_icache"
+				"riscv_flush_icache",
+				"riscv_hwprobe"
 			],
 			"action": "SCMP_ACT_ALLOW",
 			"args": [],
