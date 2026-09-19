@@ -24,7 +24,7 @@ require (
 	github.com/sirupsen/logrus v1.10.2
 	github.com/stretchr/testify v1.12.1
 	github.com/tchap/go-patricia/v2 v2.3.3
-	github.com/ulikunitz/xz v0.5.16
+	github.com/ulikunitz/xz v0.5.17
 	github.com/vbatts/tar-split v0.12.3
 	golang.org/x/sync v0.23.0
 	golang.org/x/sys v0.48.0
