@@ -48,6 +48,15 @@ type dockerImageDestination struct {
 	c   *dockerClient
 	// State
 	manifestDigest digest.Digest // or "" if not yet known.
+	// uploadedManifests records manifests written by PutManifest, so that they can be
+	// referenced as the subject of referrer artifacts. nil until the first upload.
+	uploadedManifests map[digest.Digest]uploadedManifestInfo
+}
+
+// uploadedManifestInfo describes a manifest uploaded by PutManifest.
+type uploadedManifestInfo struct {
+	size     int64
+	mimeType string
 }
 
 // newImageDestination creates a new ImageDestination for the specified image reference.
@@ -462,6 +471,7 @@ func (d *dockerImageDestination) TryReusingBlobWithOptions(ctx context.Context, 
 // but may accept a different manifest type, the returned error must be an ManifestTypeRejectedError.
 func (d *dockerImageDestination) PutManifest(ctx context.Context, m []byte, instanceDigest *digest.Digest) error {
 	var refTail string
+	var manifestDigest digest.Digest
 	// If d.ref.isUnknownDigest=true, then we push without a tag, so get the
 	// digest that will be used
 	if d.ref.isUnknownDigest {
@@ -469,11 +479,13 @@ func (d *dockerImageDestination) PutManifest(ctx context.Context, m []byte, inst
 		if err != nil {
 			return err
 		}
+		manifestDigest = digest
 		refTail = digest.String()
 	} else if instanceDigest != nil {
 		// If the instanceDigest is provided, then use it as the refTail, because the reference,
 		// whether it includes a tag or a digest, refers to the list as a whole, and not this
 		// particular instance.
+		manifestDigest = *instanceDigest
 		refTail = instanceDigest.String()
 		// Double-check that the manifest we've been given matches the digest we've been given.
 		// This also validates the format of instanceDigest.
@@ -496,6 +508,7 @@ func (d *dockerImageDestination) PutManifest(ctx context.Context, m []byte, inst
 			return err
 		}
 		d.manifestDigest = digest
+		manifestDigest = digest
 		// The refTail should be either a digest (which we expect to match the value we just
 		// computed) or a tag name.
 		refTail, err = d.ref.tagOrDigest()
@@ -504,7 +517,17 @@ func (d *dockerImageDestination) PutManifest(ctx context.Context, m []byte, inst
 		}
 	}
 
-	return d.uploadManifest(ctx, m, refTail)
+	if err := d.uploadManifest(ctx, m, refTail); err != nil {
+		return err
+	}
+	if d.uploadedManifests == nil {
+		d.uploadedManifests = map[digest.Digest]uploadedManifestInfo{}
+	}
+	d.uploadedManifests[manifestDigest] = uploadedManifestInfo{
+		size:     int64(len(m)),
+		mimeType: manifest.GuessMIMEType(m),
+	}
+	return nil
 }
 
 // uploadManifest writes manifest to tagOrDigest.
@@ -604,8 +627,19 @@ func (d *dockerImageDestination) PutSignaturesWithFormat(ctx context.Context, si
 	// FIXME: So should we enable sigstores in all cases? Or write in all cases, but opt-in to read?
 
 	if len(sigstoreSignatures) != 0 {
-		if err := d.putSignaturesToSigstoreAttachments(ctx, sigstoreSignatures, *instanceDigest); err != nil {
-			return err
+		// The destinations are chosen by sigstore-attachments-write, so a failure of either is
+		// reported rather than silently worked around: that layout was asked for.
+		// The cosign tag is written first, so that a failure of the newer mechanism does not
+		// also cost us the one every reader understands.
+		if d.c.sigstoreAttachmentsWrite.writesCosignTag() {
+			if err := d.putSignaturesToSigstoreAttachments(ctx, sigstoreSignatures, *instanceDigest); err != nil {
+				return err
+			}
+		}
+		if d.c.sigstoreAttachmentsWrite.writesReferrers() {
+			if err := d.putSignaturesToReferrers(ctx, sigstoreSignatures, *instanceDigest); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -698,6 +732,233 @@ func (d *dockerImageDestination) putOneSignature(sigURL *url.URL, sig signature.
 	default:
 		return fmt.Errorf("Unsupported scheme when writing signature to %s", sigURL.Redacted())
 	}
+}
+
+// putSignaturesToReferrers writes each sigstore signature as an individual OCI artifact
+// manifest with a subject field pointing to the target manifest, following the OCI 1.1
+// Referrers API model. For registries that do not support the Referrers API natively,
+// it also maintains the referrers tag schema index.
+func (d *dockerImageDestination) putSignaturesToReferrers(ctx context.Context, signatures []signature.Sigstore, manifestDigest digest.Digest) error {
+	if !d.c.useSigstoreAttachments {
+		return errors.New("writing sigstore attachments is disabled by configuration")
+	}
+	if len(signatures) == 0 {
+		return nil
+	}
+
+	if err := manifestDigest.Validate(); err != nil {
+		return err
+	}
+
+	// getReferrers is bounded by maxReferrersPages and maxReferrersToScan, and the deduplication
+	// below by maxReferrersToProcess, so on a huge referrers list an existing signature can be
+	// missed and written again. Rewriting one we created ourselves is a no-op, because the artifact
+	// manifest is content-addressed; rewriting one another tool created does add a duplicate.
+	existingReferrers, apiSupported, err := d.c.getReferrers(ctx, d.ref, manifestDigest, sigstoreReferrerArtifactType)
+	if err != nil {
+		return fmt.Errorf("checking existing referrers: %w", err)
+	}
+	// Deduplicate by signature content, not by the digest of the artifact manifest we would create:
+	// other tools (notably cosign in its oci-1-1 mode) wrap the very same signature in a differently
+	// shaped manifest, and comparing artifact digests would add a second copy of it on every copy.
+	var existingSignatureLayers []imgspecv1.Descriptor
+	if existingReferrers != nil {
+		for ociManifest := range d.c.sigstoreReferrerManifests(ctx, d.ref, existingReferrers) {
+			existingSignatureLayers = append(existingSignatureLayers, ociManifest.Layers...)
+		}
+	}
+
+	subjectDescriptor, err := d.subjectDescriptor(ctx, manifestDigest)
+	if err != nil {
+		return err
+	}
+
+	emptyConfig := imgspecv1.Descriptor{
+		MediaType: imgspecv1.MediaTypeEmptyJSON,
+		Digest:    imgspecv1.DescriptorEmptyJSON.Digest,
+		Size:      imgspecv1.DescriptorEmptyJSON.Size,
+	}
+	emptyConfigUploaded := false // The blob is shared by all artifacts, upload it at most once.
+
+	var newReferrerDescs []imgspecv1.Descriptor
+	for _, sig := range signatures {
+		mimeType := sig.UntrustedMIMEType()
+		payloadBlob := sig.UntrustedPayload()
+		annotations := sig.UntrustedAnnotations()
+
+		sigDesc := imgspecv1.Descriptor{
+			MediaType:   mimeType,
+			Digest:      digest.FromBytes(payloadBlob),
+			Size:        int64(len(payloadBlob)),
+			Annotations: annotations,
+		}
+
+		if slices.ContainsFunc(existingSignatureLayers, func(layer imgspecv1.Descriptor) bool {
+			return layerMatchesSigstoreSignature(layer, mimeType, payloadBlob, annotations)
+		}) {
+			logrus.Debugf("Signature with digest %s already exists as a referrer, skipping", sigDesc.Digest.String())
+			continue
+		}
+
+		artifactManifest := manifest.OCI1FromComponents(emptyConfig, []imgspecv1.Descriptor{sigDesc})
+		artifactManifest.Subject = &subjectDescriptor
+		// Use cosign’s artifactType so that cosign (and other tools) can discover the signature
+		// by filtering referrers; the layer’s MIME type still identifies the payload format.
+		artifactManifest.ArtifactType = sigstoreReferrerArtifactType
+
+		manifestBlob, err := artifactManifest.Serialize()
+		if err != nil {
+			return err
+		}
+		artifactDigest, err := manifest.Digest(manifestBlob)
+		if err != nil {
+			return err
+		}
+
+		// A referrer we wrote ourselves has the same layer and is already caught above; this also
+		// covers an existing artifact whose manifest could not be fetched for the comparison.
+		if existingReferrers != nil && referrerAlreadyExists(existingReferrers, artifactDigest) {
+			logrus.Debugf("Referrer artifact %s already exists, skipping", artifactDigest)
+			continue
+		}
+
+		if !emptyConfigUploaded {
+			// We don’t benefit from a real BlobInfoCache here because we never try to reuse/mount configs.
+			if _, err := d.putBlobBytesAsOCI(ctx, imgspecv1.DescriptorEmptyJSON.Data, imgspecv1.MediaTypeEmptyJSON, private.PutBlobOptions{
+				Cache:      none.NoCache,
+				IsConfig:   true,
+				EmptyLayer: false,
+				LayerIndex: nil,
+			}); err != nil {
+				return err
+			}
+			emptyConfigUploaded = true
+		}
+
+		// We don’t benefit from a real BlobInfoCache here because we never try to reuse/mount attachment payloads.
+		if _, err := d.putBlobBytesAsOCI(ctx, payloadBlob, mimeType, private.PutBlobOptions{
+			Cache:      none.NoCache,
+			IsConfig:   false,
+			EmptyLayer: false,
+			LayerIndex: nil,
+		}); err != nil {
+			return err
+		}
+
+		logrus.Debugf("Uploading referrer artifact manifest %s for signature %s", artifactDigest, sigDesc.Digest)
+		if err := d.uploadManifest(ctx, manifestBlob, artifactDigest.String()); err != nil {
+			return fmt.Errorf("uploading referrer artifact manifest: %w", err)
+		}
+
+		newReferrerDescs = append(newReferrerDescs, imgspecv1.Descriptor{
+			MediaType:    imgspecv1.MediaTypeImageManifest,
+			Digest:       artifactDigest,
+			Size:         int64(len(manifestBlob)),
+			ArtifactType: sigstoreReferrerArtifactType,
+		})
+	}
+
+	if len(newReferrerDescs) == 0 {
+		return nil
+	}
+
+	// Per the OCI distribution spec, the referrers tag schema is only maintained by clients
+	// when the registry does not implement the Referrers API.
+	if apiSupported {
+		logrus.Debugf("Registry supports the Referrers API, not updating the referrers tag schema index")
+		return nil
+	}
+	if err := d.updateReferrersTagIndex(ctx, manifestDigest, newReferrerDescs); err != nil {
+		return fmt.Errorf("updating referrers tag schema index: %w", err)
+	}
+	return nil
+}
+
+// subjectDescriptor returns a descriptor of the manifest with manifestDigest,
+// suitable for use as the subject of a referrer artifact manifest.
+func (d *dockerImageDestination) subjectDescriptor(ctx context.Context, manifestDigest digest.Digest) (imgspecv1.Descriptor, error) {
+	if info, ok := d.uploadedManifests[manifestDigest]; ok && info.mimeType != "" {
+		return imgspecv1.Descriptor{
+			MediaType: info.mimeType,
+			Digest:    manifestDigest,
+			Size:      info.size,
+		}, nil
+	}
+	// PutSignaturesWithFormat is documented to be called after PutManifest, so we should
+	// normally know the manifest; fetch it from the registry otherwise.
+	manifestBlob, mimeType, err := d.c.fetchManifest(ctx, d.ref, manifestDigest.String())
+	if err != nil {
+		return imgspecv1.Descriptor{}, fmt.Errorf("determining subject descriptor for %s: %w", manifestDigest, err)
+	}
+	if matches, err := manifest.MatchesDigest(manifestBlob, manifestDigest); err != nil || !matches {
+		return imgspecv1.Descriptor{}, fmt.Errorf("manifest fetched for %s does not match its digest", manifestDigest)
+	}
+	if guessed := manifest.GuessMIMEType(manifestBlob); guessed != "" {
+		mimeType = guessed
+	}
+	return imgspecv1.Descriptor{
+		MediaType: mimeType,
+		Digest:    manifestDigest,
+		Size:      int64(len(manifestBlob)),
+	}, nil
+}
+
+// referrerAlreadyExists checks whether a referrer artifact manifest with the
+// given digest already exists in the referrers index.
+func referrerAlreadyExists(index *imgspecv1.Index, artifactDigest digest.Digest) bool {
+	return slices.ContainsFunc(index.Manifests, func(desc imgspecv1.Descriptor) bool {
+		return desc.Digest == artifactDigest
+	})
+}
+
+// updateReferrersTagIndex maintains the OCI referrers tag schema index for registries
+// that do not natively support the Referrers API. It fetches the existing index at the
+// tag schema tag (sha256-<hex>), appends the new referrer descriptors, and pushes the
+// updated index.
+//
+// This is a read-modify-write with no concurrency control, so two clients pushing referrers for the
+// same subject at the same time can drop each other’s entries. The OCI distribution specification
+// explicitly accepts that for the tag schema fallback, so we do not try to do better.
+func (d *dockerImageDestination) updateReferrersTagIndex(ctx context.Context, manifestDigest digest.Digest, newDescs []imgspecv1.Descriptor) error {
+	tag, err := referrersTagSchemaTag(manifestDigest)
+	if err != nil {
+		return err
+	}
+
+	var index imgspecv1.Index
+	index.SchemaVersion = 2
+	index.MediaType = imgspecv1.MediaTypeImageIndex
+
+	existingBlob, mimeType, err := d.c.fetchManifest(ctx, d.ref, tag)
+	if err != nil {
+		if !isManifestUnknownError(err) {
+			return fmt.Errorf("fetching existing referrers tag index: %w", err)
+		}
+	} else {
+		if mimeType != imgspecv1.MediaTypeImageIndex {
+			// Do not overwrite something we do not understand.
+			return fmt.Errorf("referrers tag %s exists but is not an image index (%q)", tag, mimeType)
+		}
+		if err := json.Unmarshal(existingBlob, &index); err != nil {
+			return fmt.Errorf("parsing existing referrers tag index: %w", err)
+		}
+		index.SchemaVersion = 2
+		index.MediaType = imgspecv1.MediaTypeImageIndex
+	}
+
+	for _, desc := range newDescs {
+		if !referrerAlreadyExists(&index, desc.Digest) {
+			index.Manifests = append(index.Manifests, desc)
+		}
+	}
+
+	indexBlob, err := json.Marshal(index)
+	if err != nil {
+		return err
+	}
+
+	logrus.Debugf("Uploading referrers tag schema index to %s with %d entries", tag, len(index.Manifests))
+	return d.uploadManifest(ctx, indexBlob, tag)
 }
 
 func (d *dockerImageDestination) putSignaturesToSigstoreAttachments(ctx context.Context, signatures []signature.Sigstore, manifestDigest digest.Digest) error {
