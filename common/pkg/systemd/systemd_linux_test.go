@@ -65,7 +65,7 @@ func TestRunUnderSystemdScopeJobCompletionCancellation(t *testing.T) {
 
 func TestRunUnderSystemdScopeSuccess(t *testing.T) {
 	newScopeTestManager(t, false, true)
-	// Keep coverage of the public wrapper, which supplies the startup deadline.
+	// Keep coverage of the public wrapper, which uses a background context.
 	done := make(chan error, 1)
 	go func() { done <- RunUnderSystemdScope(os.Getpid(), "user.slice", "test.scope") }()
 	select {

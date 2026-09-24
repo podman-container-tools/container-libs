@@ -3,12 +3,10 @@ package systemd
 import (
 	"context"
 	"crypto/rand"
-	"errors"
 	"fmt"
 	"os"
 	"strconv"
 	"sync"
-	"time"
 
 	systemdDbus "github.com/coreos/go-systemd/v22/dbus"
 	"github.com/godbus/dbus/v5"
@@ -16,9 +14,6 @@ import (
 	"go.podman.io/common/pkg/cgroups"
 	"go.podman.io/storage/pkg/unshare"
 )
-
-// Limit scope startup even for callers that do not have a context.
-const scopeStartupTimeout = 10 * time.Second
 
 var (
 	runsOnSystemdOnce sync.Once
@@ -90,9 +85,6 @@ func MovePauseProcessToScope(pausePidPath string) {
 		if err == nil {
 			return
 		}
-		if errors.Is(err, context.DeadlineExceeded) {
-			break
-		}
 	}
 
 	if err != nil {
@@ -107,11 +99,9 @@ func MovePauseProcessToScope(pausePidPath string) {
 }
 
 // RunUnderSystemdScope adds the specified pid to a systemd scope.
-// Authentication, the method reply, and job completion share a 10-second timeout.
+// Use RunUnderSystemdScopeContext to set a deadline or cancel the operation.
 func RunUnderSystemdScope(pid int, slice string, unitName string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), scopeStartupTimeout)
-	defer cancel()
-	return RunUnderSystemdScopeContext(ctx, pid, slice, unitName)
+	return RunUnderSystemdScopeContext(context.Background(), pid, slice, unitName)
 }
 
 // RunUnderSystemdScopeContext adds the specified pid to a systemd scope.
