@@ -1,11 +1,16 @@
 package ssh
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/pem"
 	"net/url"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"golang.org/x/crypto/ssh"
 )
 
 // these tests cannot check for "true" functionality
@@ -114,4 +119,41 @@ func TestScp(t *testing.T) {
 
 	_, err = Scp(&options, GolangMode)
 	require.Error(t, err, "failed to connect: ssh: handshake failed: ssh: disconnect, reason 2: Too many authentication failures")
+}
+
+func TestValidateAndConfigureMachineIgnoresKnownHosts(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	require.NoError(t, os.MkdirAll(filepath.Join(home, ".ssh"), 0o700))
+
+	// A @cert-authority marker matching every host restricts the host key
+	// algorithms to cert types only; this must not break machine
+	// connections which ignore the host key anyway.
+	_, caKey, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+	caPub, err := ssh.NewPublicKey(caKey.Public())
+	require.NoError(t, err)
+	knownHosts := append([]byte("@cert-authority * "), ssh.MarshalAuthorizedKey(caPub)...)
+	require.NoError(t, os.WriteFile(filepath.Join(home, ".ssh", "known_hosts"), knownHosts, 0o600))
+
+	_, userKey, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+	userPEM, err := ssh.MarshalPrivateKey(userKey, "")
+	require.NoError(t, err)
+	iden := filepath.Join(t.TempDir(), "id_ed25519")
+	require.NoError(t, os.WriteFile(iden, pem.EncodeToMemory(userPEM), 0o600))
+
+	uri, err := url.Parse("ssh://core@localhost:22")
+	require.NoError(t, err)
+
+	cfg, err := ValidateAndConfigure(uri, iden, true)
+	require.NoError(t, err)
+	require.NotNil(t, cfg.HostKeyCallback)
+	require.Empty(t, cfg.HostKeyAlgorithms)
+
+	// Regular connections still honor the known_hosts restriction.
+	cfg, err = ValidateAndConfigure(uri, iden, false)
+	require.NoError(t, err)
+	require.Contains(t, cfg.HostKeyAlgorithms, ssh.CertAlgoED25519v01)
+	require.NotContains(t, cfg.HostKeyAlgorithms, ssh.KeyAlgoED25519)
 }
