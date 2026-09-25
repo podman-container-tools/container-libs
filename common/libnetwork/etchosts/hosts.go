@@ -38,9 +38,9 @@ type Params struct {
 	// with the container name and host name as names set.
 	// Optional.
 	ContainerIPs HostEntries
-	// HostContainersInternalIP is the IP for the host.containers.internal entry.
+	// HostContainersInternalIP are the IPs for the host.containers.internal entry.
 	// Optional.
-	HostContainersInternalIP string
+	HostContainersInternalIPs []string
 	// TargetFile where the hosts are written to.
 	TargetFile string
 }
@@ -100,7 +100,7 @@ func Remove(file string, entries HostEntries) error {
 
 // new see comment on New().
 func newHost(params *Params) error {
-	entries, err := parseExtraHosts(params.ExtraHosts, params.HostContainersInternalIP)
+	entries, err := parseExtraHosts(params.ExtraHosts, params.HostContainersInternalIPs)
 	if err != nil {
 		return err
 	}
@@ -111,7 +111,7 @@ func newHost(params *Params) error {
 	entries = append(entries, entries2...)
 
 	// preallocate the slice with enough space for the 3 special entries below
-	containerIPs := make(HostEntries, 0, len(params.ContainerIPs)+3)
+	containerIPs := make(HostEntries, 0, len(params.ContainerIPs)+2+len(params.HostContainersInternalIPs))
 
 	// if localhost was not added we add it
 	// https://github.com/containers/podman/issues/11411
@@ -119,9 +119,11 @@ func newHost(params *Params) error {
 	l1 := HostEntry{IP: "127.0.0.1", Names: lh}
 	l2 := HostEntry{IP: "::1", Names: lh}
 	containerIPs = append(containerIPs, l1, l2)
-	if params.HostContainersInternalIP != "" {
-		e := HostEntry{IP: params.HostContainersInternalIP, Names: []string{HostContainersInternal, hostDockerInternal}}
-		containerIPs = append(containerIPs, e)
+	if len(params.HostContainersInternalIPs) > 0 {
+		for _, ip := range params.HostContainersInternalIPs {
+			e := HostEntry{IP: ip, Names: []string{HostContainersInternal, hostDockerInternal}}
+			containerIPs = append(containerIPs, e)
+		}
 	}
 	containerIPs = append(containerIPs, params.ContainerIPs...)
 
@@ -233,7 +235,7 @@ func checkIfEntryExists(current HostEntry, entries HostEntries) bool {
 // Each entry can contain one or more hostnames separated by semicolons and an IP address separated by a colon.
 // Because podman and buildah both store the extra hosts in this format,
 // we convert it here instead of having to do this on the caller side.
-func parseExtraHosts(extraHosts []string, hostContainersInternalIP string) (HostEntries, error) {
+func parseExtraHosts(extraHosts []string, hostContainersInternalIPs []string) (HostEntries, error) {
 	entries := make(HostEntries, 0, len(extraHosts))
 	for _, entry := range extraHosts {
 		namesString, ip, ok := strings.Cut(entry, ":")
@@ -247,11 +249,17 @@ func parseExtraHosts(extraHosts []string, hostContainersInternalIP string) (Host
 			return nil, fmt.Errorf("IP address in host entry %q is empty", entry)
 		}
 		if ip == HostGateway {
-			if hostContainersInternalIP == "" {
+			if len(hostContainersInternalIPs) == 0 {
 				return nil, fmt.Errorf("unable to replace %q of host entry %q: host containers internal IP address is empty", HostGateway, entry)
 			}
-			ip = hostContainersInternalIP
+			names := strings.Split(namesString, ";")
+			for _, hcip := range hostContainersInternalIPs {
+				e := HostEntry{IP: hcip, Names: names}
+				entries = append(entries, e)
+			}
+			continue
 		}
+
 		names := strings.Split(namesString, ";")
 		e := HostEntry{IP: ip, Names: names}
 		entries = append(entries, e)
