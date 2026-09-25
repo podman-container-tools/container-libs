@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"go.podman.io/common/pkg/config"
 )
 
 func Test_refCount(t *testing.T) {
@@ -73,5 +74,34 @@ func Test_refCount(t *testing.T) {
 			assert.NoError(t, err, "read file error")
 			assert.Equal(t, strconv.Itoa(tt.want), string(content), "file content after refCount()")
 		})
+	}
+}
+
+func Test_getOrCreateNetnsNoCreateDoesNotRestartHelper(t *testing.T) {
+	dir := t.TempDir()
+
+	conf, err := config.Default()
+	assert.NoError(t, err)
+
+	n, err := New(dir, conf)
+	assert.NoError(t, err)
+
+	nsPath := n.getPath(rootlessNetnsDir)
+	err = os.Symlink("/proc/self/ns/net", nsPath)
+	assert.NoError(t, err)
+
+	err = os.WriteFile(
+		n.getPath(rootlessNetNsConnPidFile),
+		[]byte("99999999"),
+		0o600,
+	)
+	assert.NoError(t, err)
+
+	ns, created, err := n.getOrCreateNetns(false)
+	assert.NoError(t, err)
+	assert.False(t, created)
+
+	if ns != nil {
+		assert.NoError(t, ns.Close())
 	}
 }
