@@ -1081,6 +1081,18 @@ func TestTarWithOptions(t *testing.T) {
 	}
 }
 
+// Some tar archives such as http://haproxy.1wt.eu/download/1.5/src/devel/haproxy-1.5-dev21.tar.gz
+// use PAX Global Extended Headers.
+// Failing prevents the archives from being uncompressed during ADD
+func TestTypeXGlobalHeaderDoesNotFail(t *testing.T) {
+	hdr := tar.Header{Typeflag: tar.TypeXGlobalHeader}
+	tmpDir := t.TempDir()
+	err := extractTarFileEntry(filepath.Join(tmpDir, "pax_global_header"), tmpDir, &hdr, nil, true, nil, false, false, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestTarWithOptionsWildcardNegation(t *testing.T) {
 	if runtime.GOOS == windows {
 		t.Skip("Failing on Windows")
@@ -1135,7 +1147,11 @@ func TestExtractTarFileEntry(t *testing.T) {
 	// Wrap the tested extractTarFileEntry so that we don't need to repeat all those parameters all the time
 	buffer := make([]byte, 1<<20)
 	etfe := func(path string, extractDir string, hdr *tar.Header, reader io.Reader) error {
-		return extractTarFileEntry(path, extractDir, hdr, reader, true, nil, false, false, nil, buffer)
+		var writeContent func(*os.File) error
+		if reader != nil {
+			writeContent = func(dst *os.File) error { _, err := io.CopyBuffer(dst, reader, buffer); return err }
+		}
+		return extractTarFileEntry(path, extractDir, hdr, writeContent, true, nil, false, false, nil)
 	}
 
 	symlinkVictim := filepath.Join(t.TempDir(), "symlink_victim")
