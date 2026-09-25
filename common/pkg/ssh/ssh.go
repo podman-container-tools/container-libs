@@ -48,6 +48,13 @@ func ExecWithInput(options *ConnectionExecOptions, kind EngineMode, input io.Rea
 	return rep.Response, nil
 }
 
+func ExecWithOutput(options *ConnectionExecOptions, kind EngineMode, input io.Reader) (io.ReadCloser, error) {
+	if kind == NativeMode {
+		return nativeConnectionExecWithOutput(*options, input)
+	}
+	return golangConnectionExecWithOutput(*options, input)
+}
+
 func Scp(options *ConnectionScpOptions, kind EngineMode) (string, error) {
 	var rep *ConnectionScpReport
 	var err error
