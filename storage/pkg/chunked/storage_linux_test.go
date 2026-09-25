@@ -6,7 +6,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sync"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -34,6 +37,121 @@ func (m *mockReadCloser) Close() error {
 
 func mockReadCloserFromContent(content string) *mockReadCloser {
 	return &mockReadCloser{Reader: bytes.NewBufferString(content), closed: false}
+}
+
+type testDestinationFile struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func (f *testDestinationFile) Close() error {
+	if f.started != nil {
+		close(f.started)
+		<-f.release
+	}
+	syscall.ForkLock.RUnlock()
+	return nil
+}
+
+// TestDestinationFileCloserDoesNotBlockFork reproduces the interleaving that
+// used to deadlock: the producer is blocked handing over a destination file
+// because the queue is full, so it consumes no close result, while a
+// concurrent composefs generation waits for syscall.ForkLock.Lock().  Every
+// queued destination file must still be closed, and so release its
+// syscall.ForkLock.RLock().
+//
+// Failures use t.Error, never t.Fatal: syscall.ForkLock is process wide, so
+// bailing out while a testDestinationFile still holds it would hang every
+// later test that forks.
+func TestDestinationFileCloserDoesNotBlockFork(t *testing.T) {
+	firstStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	var releaseFirstOnce sync.Once
+	unblockFirst := func() {
+		releaseFirstOnce.Do(func() { close(releaseFirst) })
+	}
+	newDestination := func(blocking bool) *testDestinationFile {
+		file := &testDestinationFile{}
+		if blocking {
+			file.started = firstStarted
+			file.release = releaseFirst
+		}
+		syscall.ForkLock.RLock()
+		return file
+	}
+
+	filesToClose := newDestinationFileCloser()
+	blockedAdd := make(chan struct{})
+	var blockedAddErr error
+	forkLocked := make(chan struct{})
+	releaseFork := make(chan struct{})
+	forkStarted, forkDone := false, make(chan struct{})
+	// Unwind in a fixed order regardless of which assertion failed: release
+	// the closer, wait for the producer, then for the pending fork.
+	defer func() {
+		unblockFirst()
+		<-blockedAdd
+		assert.NoError(t, blockedAddErr)
+		assert.NoError(t, filesToClose.Wait())
+		if forkStarted {
+			close(releaseFork)
+			<-forkDone
+		}
+	}()
+
+	// Hand over a file whose Close() blocks, so the closer cannot drain the
+	// queue while the remaining files are added.
+	require.NoError(t, filesToClose.Add(newDestination(true)))
+	select {
+	case <-firstStarted:
+	case <-time.After(30 * time.Second):
+		t.Error("the destination file closer did not start closing the first file")
+	}
+
+	// Fill the queue, then block the producer on one more file.
+	for range maxPendingDestinationFiles {
+		require.NoError(t, filesToClose.Add(newDestination(false)))
+	}
+	go func() {
+		defer close(blockedAdd)
+		blockedAddErr = filesToClose.Add(newDestination(false))
+	}()
+
+	// The closer is stuck in Close(), so nothing can leave the queue.
+	select {
+	case <-blockedAdd:
+		t.Error("the producer was expected to block on a full queue")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	// Only now, with every destination file holding syscall.ForkLock.RLock(),
+	// start the concurrent composefs generation: a pending write lock also
+	// blocks new readers, which would keep the producer from ever reaching the
+	// blocked hand over above.
+	forkStarted = true
+	go func() {
+		defer close(forkDone)
+		syscall.ForkLock.Lock()
+		close(forkLocked)
+		<-releaseFork
+		syscall.ForkLock.Unlock()
+	}()
+	// The queued files still hold the read lock, so the fork cannot proceed.
+	// This makes sure the test exercises what it claims to.
+	select {
+	case <-forkLocked:
+		t.Error("the queued destination files did not hold syscall.ForkLock")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	// Let the closer make progress.  It must close every queued file without
+	// waiting for the blocked producer to collect the results.
+	unblockFirst()
+	select {
+	case <-forkLocked:
+	case <-time.After(30 * time.Second):
+		t.Error("closing the destination files blocked a concurrent fork")
+	}
 }
 
 func TestGetBlobAtNormalOperation(t *testing.T) {
