@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"go.podman.io/storage/internal/rootlookupcache"
 	"go.podman.io/storage/internal/stat"
 	"go.podman.io/storage/pkg/idtools"
 	"go.podman.io/storage/pkg/system"
@@ -50,6 +51,8 @@ func collectFileInfo(sourceDir string, idMappings *idtools.IDMappings) (*FileInf
 		return nil, err
 	}
 	defer root.Close()
+	rootCache := rootlookupcache.NewCache(root)
+	defer rootCache.Close()
 
 	rootFileInfo := newRootFileInfo(idMappings)
 
@@ -95,10 +98,14 @@ func collectFileInfo(sourceDir string, idMappings *idtools.IDMappings) (*FileInf
 			return filepath.SkipDir
 		}
 
+		parentRoot, fsBasename, err := rootCache.PreparePath(fsPath)
+		if err != nil {
+			return err
+		}
 		info.stat = s
-		info.capability, _ = system.RootLgetxattr(root, fsPath, "security.capability")
+		info.capability, _ = system.RootLgetxattr(parentRoot, fsBasename, "security.capability")
 		if s.IsSymlink() {
-			info.target, err = root.Readlink(fsPath)
+			info.target, err = parentRoot.Readlink(fsBasename)
 			if err != nil {
 				return err
 			}

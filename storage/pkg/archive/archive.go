@@ -24,6 +24,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/ulikunitz/xz"
 	"go.podman.io/storage/internal/createpath"
+	"go.podman.io/storage/internal/rootlookupcache"
 	"go.podman.io/storage/pkg/fileutils"
 	"go.podman.io/storage/pkg/idtools"
 	"go.podman.io/storage/pkg/pools"
@@ -473,7 +474,7 @@ func normalizeCapabilityRootID(idMappings *idtools.IDMappings, capData []byte) (
 
 // readSecurityXattrToTarHeader reads security.capability, security,image
 // xattrs from filesystem to a tar header
-func (ta *tarWriter) readSecurityXattrToTarHeader(root *os.Root, fsPath string, hdr *tar.Header) error {
+func (ta *tarWriter) readSecurityXattrToTarHeader(parentRoot *os.Root, fsBasename string, hdr *tar.Header) error {
 	if hdr.PAXRecords == nil {
 		hdr.PAXRecords = make(map[string]string)
 	}
@@ -481,12 +482,12 @@ func (ta *tarWriter) readSecurityXattrToTarHeader(root *os.Root, fsPath string, 
 		var capability []byte
 		var err error
 		if !ta.runningInMinimalChroot {
-			capability, err = system.RootLgetxattr(root, fsPath, xattr)
+			capability, err = system.RootLgetxattr(parentRoot, fsBasename, xattr)
 		} else {
-			capability, err = system.Lgetxattr(filepath.Join(root.Name(), filepath.FromSlash(fsPath)), xattr)
+			capability, err = system.Lgetxattr(filepath.Join(parentRoot.Name(), filepath.FromSlash(fsBasename)), xattr)
 		}
 		if err != nil && !errors.Is(err, system.ENOTSUP) && err != system.ErrNotSupportedPlatform {
-			return fmt.Errorf("failed to read %q attribute from %q in %q: %w", xattr, fsPath, root.Name(), err)
+			return fmt.Errorf("failed to read %q attribute from %q in %q: %w", xattr, fsBasename, parentRoot.Name(), err)
 		}
 		if capability == nil {
 			continue
@@ -494,7 +495,7 @@ func (ta *tarWriter) readSecurityXattrToTarHeader(root *os.Root, fsPath string, 
 		if xattr == "security.capability" {
 			capability, err = normalizeCapabilityRootID(ta.IDMappings, capability)
 			if err != nil {
-				return fmt.Errorf("failed to normalize %q attribute from %q in %q: %w", xattr, fsPath, root.Name(), err)
+				return fmt.Errorf("failed to normalize %q attribute from %q in %q: %w", xattr, fsBasename, parentRoot.Name(), err)
 			}
 		}
 		hdr.PAXRecords[PaxSchilyXattr+xattr] = string(capability)
@@ -503,13 +504,13 @@ func (ta *tarWriter) readSecurityXattrToTarHeader(root *os.Root, fsPath string, 
 }
 
 // readUserXattrToTarHeader reads user.* xattr from filesystem to a tar header
-func (ta *tarWriter) readUserXattrToTarHeader(root *os.Root, fsPath string, hdr *tar.Header) error {
+func (ta *tarWriter) readUserXattrToTarHeader(parentRoot *os.Root, fsBasename string, hdr *tar.Header) error {
 	var xattrs []string
 	var err error
 	if !ta.runningInMinimalChroot {
-		xattrs, err = system.RootLlistxattr(root, fsPath)
+		xattrs, err = system.RootLlistxattr(parentRoot, fsBasename)
 	} else {
-		xattrs, err = system.Llistxattr(filepath.Join(root.Name(), filepath.FromSlash(fsPath)))
+		xattrs, err = system.Llistxattr(filepath.Join(parentRoot.Name(), filepath.FromSlash(fsBasename)))
 	}
 	if err != nil && !errors.Is(err, system.ENOTSUP) && err != system.ErrNotSupportedPlatform {
 		return err
@@ -519,13 +520,13 @@ func (ta *tarWriter) readUserXattrToTarHeader(root *os.Root, fsPath string, hdr 
 			var value []byte
 			var err error
 			if !ta.runningInMinimalChroot {
-				value, err = system.RootLgetxattr(root, fsPath, key)
+				value, err = system.RootLgetxattr(parentRoot, fsBasename, key)
 			} else {
-				value, err = system.Lgetxattr(filepath.Join(root.Name(), filepath.FromSlash(fsPath)), key)
+				value, err = system.Lgetxattr(filepath.Join(parentRoot.Name(), filepath.FromSlash(fsBasename)), key)
 			}
 			if err != nil {
 				if errors.Is(err, system.E2BIG) {
-					logrus.Errorf("archive: Skipping xattr for file %q in %q since value is too big: %s", fsPath, root.Name(), key)
+					logrus.Errorf("archive: Skipping xattr for file %q in %q since value is too big: %s", fsBasename, parentRoot.Name(), key)
 					continue
 				}
 				return err
@@ -556,7 +557,7 @@ type TarWhiteoutConverter interface {
 
 type tarWhiteoutConverter interface {
 	TarWhiteoutConverter
-	convertWrite(hdr *tar.Header, root *os.Root, fsPath string, fi os.FileInfo) (*tar.Header, error)
+	convertWrite(hdr *tar.Header, parentRoot *os.Root, fsBasename string, fi os.FileInfo) (*tar.Header, error)
 }
 
 // GetWhiteoutConverter has no documented way to be called externally. Do not add any users outside of c/storage.
@@ -625,7 +626,7 @@ func canonicalTarName(name string, isDir bool) (string, error) {
 
 type addFileData struct {
 	// The path within a separately-provided root from which to read contents.
-	fsPath string
+	fsBasename string
 
 	// os.Stat for the above.
 	fi os.FileInfo
@@ -638,24 +639,24 @@ type addFileData struct {
 }
 
 // prepareAddFile generates the tar file header(s) for adding a file
-// from fsPath within root as tarName to the tar archive, without writing to the
+// from fsBasename in parentRoot as tarName to the tar archive, without writing to the
 // tar stream. Thus, any error may be ignored without corrupting the
 // tar file. A (nil, nil) return means that the file should be
 // ignored for non-error reasons.
-func (ta *tarWriter) prepareAddFile(root *os.Root, fsPath string, fi os.FileInfo, tarName string) (*addFileData, error) {
+func (ta *tarWriter) prepareAddFile(parentRoot *os.Root, fsBasename string, fi os.FileInfo, tarName string) (*addFileData, error) {
 	// WARNING: This function is called in contexts where the contents of root may be maliciously
 	// concurrently modified.
 
 	var link string
 	if fi.Mode()&os.ModeSymlink != 0 {
 		var err error
-		link, err = root.Readlink(fsPath)
+		link, err = parentRoot.Readlink(fsBasename)
 		if err != nil {
 			return nil, err
 		}
 	}
 	if fi.Mode()&os.ModeSocket != 0 {
-		logrus.Infof("archive: skipping %q in %q since it is a socket", fsPath, root.Name())
+		logrus.Infof("archive: skipping %q in %q since it is a socket", fsBasename, parentRoot.Name())
 		return nil, nil
 	}
 
@@ -663,10 +664,10 @@ func (ta *tarWriter) prepareAddFile(root *os.Root, fsPath string, fi os.FileInfo
 	if err != nil {
 		return nil, err
 	}
-	if err := ta.readSecurityXattrToTarHeader(root, fsPath, hdr); err != nil {
+	if err := ta.readSecurityXattrToTarHeader(parentRoot, fsBasename, hdr); err != nil {
 		return nil, err
 	}
-	if err := ta.readUserXattrToTarHeader(root, fsPath, hdr); err != nil {
+	if err := ta.readUserXattrToTarHeader(parentRoot, fsBasename, hdr); err != nil {
 		return nil, err
 	}
 	if err := readFileFlagsToTarHeader(fi, hdr); err != nil {
@@ -723,9 +724,9 @@ func (ta *tarWriter) prepareAddFile(root *os.Root, fsPath string, fi os.FileInfo
 	maybeTruncateHeaderModTime(hdr)
 
 	result := &addFileData{
-		fsPath: fsPath,
-		hdr:    hdr,
-		fi:     fi,
+		fsBasename: fsBasename,
+		hdr:        hdr,
+		fi:         fi,
 	}
 	if ta.whiteoutConverter != nil {
 		// The whiteoutConverter suggests a generic mechanism,
@@ -739,7 +740,7 @@ func (ta *tarWriter) prepareAddFile(root *os.Root, fsPath string, fi os.FileInfo
 		// should be represented as a directory containing a
 		// magic whiteout empty regular file, hence the
 		// extraWhiteout header returned here.
-		result.extraWhiteout, err = ta.whiteoutConverter.convertWrite(hdr, root, fsPath, fi)
+		result.extraWhiteout, err = ta.whiteoutConverter.convertWrite(hdr, parentRoot, fsBasename, fi)
 		if err != nil {
 			return nil, err
 		}
@@ -749,7 +750,7 @@ func (ta *tarWriter) prepareAddFile(root *os.Root, fsPath string, fi os.FileInfo
 }
 
 // addFile performs the write. An error here corrupts the tar file.
-func (ta *tarWriter) addFile(root *os.Root, headers *addFileData) error {
+func (ta *tarWriter) addFile(parentRoot *os.Root, headers *addFileData) error {
 	// WARNING: This function is called in contexts where the contents of root may be maliciously
 	// concurrently modified.
 
@@ -774,7 +775,7 @@ func (ta *tarWriter) addFile(root *os.Root, headers *addFileData) error {
 	}
 
 	if hdr.Typeflag == tar.TypeReg && hdr.Size > 0 {
-		file, err := root.Open(headers.fsPath)
+		file, err := parentRoot.Open(headers.fsBasename)
 		if err != nil {
 			return err
 		}
@@ -1087,6 +1088,8 @@ func tarWithOptionsTo(dest io.Writer, srcPath string, options *TarOptions) (resu
 		return err
 	}
 	defer root.Close()
+	rootCache := rootlookupcache.NewCache(root)
+	defer rootCache.Close()
 
 	if len(includeFiles) == 0 {
 		includeFiles = []string{"."}
@@ -1187,11 +1190,17 @@ func tarWithOptionsTo(dest io.Writer, srcPath string, options *TarOptions) (resu
 				logrus.Errorf("Can't add file %q in %q to tar: %s; skipping", fsFilePath, root.Name(), err)
 				return nil
 			}
-			headers, err := ta.prepareAddFile(root, fsFilePath, fi, relFilePath)
+
+			parentRoot, fsBasename, err := rootCache.PreparePath(fsFilePath)
+			if err != nil {
+				logrus.Errorf("Can't add file %q in %q to tar: %s; skipping", fsFilePath, root.Name(), err)
+				return nil
+			}
+			headers, err := ta.prepareAddFile(parentRoot, fsBasename, fi, relFilePath)
 			if err != nil {
 				logrus.Errorf("Can't add file %q in %q to tar: %s; skipping", fsFilePath, root.Name(), err)
 			} else if headers != nil {
-				if err := ta.addFile(root, headers); err != nil {
+				if err := ta.addFile(parentRoot, headers); err != nil {
 					return err
 				}
 			}

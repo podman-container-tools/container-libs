@@ -50,14 +50,14 @@ func (o overlayWhiteoutConverter) ConvertWrite(hdr *tar.Header, path string, fi 
 	})
 }
 
-func (o overlayWhiteoutConverter) convertWrite(hdr *tar.Header, root *os.Root, fsPath string, fi os.FileInfo) (*tar.Header, error) {
+func (o overlayWhiteoutConverter) convertWrite(hdr *tar.Header, parentRoot *os.Root, fsBasename string, fi os.FileInfo) (*tar.Header, error) {
 	if !o.runningInMinimalChroot {
 		return o.convertWriteWithGetxattr(hdr, fi, func(attrName string) ([]byte, error) {
-			return system.RootLgetxattr(root, fsPath, attrName)
+			return system.RootLgetxattr(parentRoot, fsBasename, attrName)
 		})
 	} else {
 		return o.convertWriteWithGetxattr(hdr, fi, func(attrName string) ([]byte, error) {
-			return system.Lgetxattr(filepath.Join(root.Name(), filepath.FromSlash(fsPath)), attrName)
+			return system.Lgetxattr(filepath.Join(parentRoot.Name(), filepath.FromSlash(fsBasename)), attrName)
 		})
 	}
 }

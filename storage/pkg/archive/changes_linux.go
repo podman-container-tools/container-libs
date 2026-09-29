@@ -15,6 +15,7 @@ import (
 
 	securejoin "github.com/cyphar/filepath-securejoin"
 	"github.com/sirupsen/logrus"
+	"go.podman.io/storage/internal/rootlookupcache"
 	"go.podman.io/storage/internal/stat"
 	"go.podman.io/storage/pkg/idtools"
 	"go.podman.io/storage/pkg/system"
@@ -341,8 +342,8 @@ func OverlayChanges(layers []string, rw string) ([]Change, error) {
 	// WARNING: This is called in contexts where the contents of rw (but not layers) may be maliciously
 	// concurrently modified.
 
-	dc := func(root *os.Root, fsPath string, fi os.FileInfo) (string, error) {
-		r, err := overlayDeletedFile(layers, root, fsPath, fi)
+	dc := func(rootCache *rootlookupcache.Cache, fsPath string, fi os.FileInfo) (string, error) {
+		r, err := overlayDeletedFile(layers, rootCache, fsPath, fi)
 		if err != nil {
 			return "", fmt.Errorf("overlay deleted file query: %w", err)
 		}
@@ -371,7 +372,7 @@ func overlayLowerContainsWhiteout(root, fsPath string) (bool, error) {
 	return false, nil
 }
 
-func overlayDeletedFile(layers []string, root *os.Root, fsPath string, fi os.FileInfo) (string, error) {
+func overlayDeletedFile(layers []string, rootCache *rootlookupcache.Cache, fsPath string, fi os.FileInfo) (string, error) {
 	// If it's a whiteout item, then a file or directory with that name is removed by this layer.
 	if fi.Mode()&os.ModeCharDevice != 0 {
 		if isWhiteOut(fi) {
@@ -383,7 +384,11 @@ func overlayDeletedFile(layers []string, root *os.Root, fsPath string, fi os.Fil
 		return "", nil
 	}
 	// If the directory isn't marked as opaque, then it's just a normal directory.
-	opaque, err := system.RootLgetxattr(root, fsPath, getOverlayOpaqueXattrName())
+	parentRoot, fsBasename, err := rootCache.PreparePath(fsPath)
+	if err != nil {
+		return "", err
+	}
+	opaque, err := system.RootLgetxattr(parentRoot, fsBasename, getOverlayOpaqueXattrName())
 	if err != nil {
 		return "", fmt.Errorf("failed querying overlay opaque xattr: %w", err)
 	}
