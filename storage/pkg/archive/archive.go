@@ -642,14 +642,9 @@ type addFileData struct {
 // tar stream. Thus, any error may be ignored without corrupting the
 // tar file. A (nil, nil) return means that the file should be
 // ignored for non-error reasons.
-func (ta *tarWriter) prepareAddFile(root *os.Root, fsPath, tarName string) (*addFileData, error) {
+func (ta *tarWriter) prepareAddFile(root *os.Root, fsPath string, fi os.FileInfo, tarName string) (*addFileData, error) {
 	// WARNING: This function is called in contexts where the contents of root may be maliciously
 	// concurrently modified.
-
-	fi, err := root.Lstat(fsPath) // FIXME: can we eliminate this and Lstat only once, e.g. from fs.WalkDir()?
-	if err != nil {
-		return nil, err
-	}
 
 	var link string
 	if fi.Mode()&os.ModeSymlink != 0 {
@@ -1187,7 +1182,12 @@ func tarWithOptionsTo(dest io.Writer, srcPath string, options *TarOptions) (resu
 				relFilePath = strings.Replace(relFilePath, include, replacement, 1)
 			}
 
-			headers, err := ta.prepareAddFile(root, fsFilePath, relFilePath)
+			fi, err := d.Info() // This is free and never fails, root.FS().ReadDir() always calls lstatat to get this data.
+			if err != nil {
+				logrus.Errorf("Can't add file %q in %q to tar: %s; skipping", fsFilePath, root.Name(), err)
+				return nil
+			}
+			headers, err := ta.prepareAddFile(root, fsFilePath, fi, relFilePath)
 			if err != nil {
 				logrus.Errorf("Can't add file %q in %q to tar: %s; skipping", fsFilePath, root.Name(), err)
 			} else if headers != nil {

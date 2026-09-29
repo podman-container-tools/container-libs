@@ -553,10 +553,18 @@ func ExportChanges(dir string, changes []Change, uidMaps, gidMaps []idtools.IDMa
 				}
 			} else {
 				relPath := change.Path[1:]
-				headers, err := ta.prepareAddFile(root, filepath.ToSlash(relPath), relPath)
+				fsPath := filepath.ToSlash(relPath)
+				fi, err := root.Lstat(fsPath)
 				if err != nil {
 					logrus.Debugf("Can't add file %q in %q to tar: %s", change.Path, root.Name(), err)
-				} else if headers != nil {
+					continue
+				}
+				headers, err := ta.prepareAddFile(root, fsPath, fi, relPath)
+				if err != nil {
+					logrus.Debugf("Can't add file %q in %q to tar: %s", change.Path, root.Name(), err)
+					continue
+				}
+				if headers != nil {
 					if err := ta.addFile(root, headers); err != nil {
 						return err
 					}
