@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"go.podman.io/storage/internal/stat"
 	"go.podman.io/storage/pkg/idtools"
 	"go.podman.io/storage/pkg/system"
 )
@@ -81,10 +82,11 @@ func collectFileInfo(sourceDir string, idMappings *idtools.IDMappings) (*FileInf
 			idMappings: idMappings,
 		}
 
-		s, err := system.RootLstat(root, fsPath)
+		fi, err := d.Info() // This is free and never fails, root.FS().ReadDir() always calls lstatat() to get this data.
 		if err != nil {
 			return err
 		}
+		s := stat.FromFileInfo(fi)
 
 		// Don't cross mount points. This ignores file mounts to avoid
 		// generating a diff which deletes all files following the
