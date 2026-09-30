@@ -15,6 +15,7 @@ import (
 
 	securejoin "github.com/cyphar/filepath-securejoin"
 	"github.com/sirupsen/logrus"
+	"go.podman.io/storage/internal/stat"
 	"go.podman.io/storage/pkg/idtools"
 	"go.podman.io/storage/pkg/system"
 	"golang.org/x/sys/unix"
@@ -100,11 +101,8 @@ func walkchunk(root *os.Root, fsPath string, fi os.FileInfo, rootFI *FileInfo) e
 		idMappings: rootFI.idMappings,
 		target:     "",
 	}
-	stat, err := system.FromStatT(fi.Sys().(*syscall.Stat_t))
-	if err != nil {
-		return err
-	}
-	info.stat = stat
+	info.stat = stat.FromFileInfo(fi)
+	var err error
 	info.capability, err = system.RootLgetxattr(root, fsPath, "security.capability") // lgetxattr(2): fs access
 	if err != nil && !errors.Is(err, system.ENOTSUP) {
 		return err

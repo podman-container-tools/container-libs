@@ -19,5 +19,5 @@ func Stat(path string) (*StatT, error) {
 	if err != nil {
 		return nil, err
 	}
-	return stat.FromStatT(&fi), nil
+	return stat.FromFileInfo(fi), nil
 }

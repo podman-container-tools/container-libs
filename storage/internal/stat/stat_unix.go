@@ -3,6 +3,7 @@
 package stat
 
 import (
+	"os"
 	"syscall"
 
 	"golang.org/x/sys/unix"
@@ -64,4 +65,9 @@ func (s StatT) IsDir() bool {
 
 func (s StatT) IsSymlink() bool {
 	return (s.mode & unix.S_IFMT) == unix.S_IFLNK
+}
+
+// FromFileInfo converts a os.FileInfo type to a StatT type
+func FromFileInfo(fi os.FileInfo) *StatT {
+	return FromStatT(fi.Sys().(*syscall.Stat_t))
 }
