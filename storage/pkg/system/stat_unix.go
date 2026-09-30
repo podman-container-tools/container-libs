@@ -23,7 +23,7 @@ func Stat(path string) (*StatT, error) {
 	if err := syscall.Stat(path, s); err != nil {
 		return nil, &os.PathError{Op: "Stat", Path: path, Err: err}
 	}
-	return stat.FromStatT(s)
+	return stat.FromStatT(s), nil
 }
 
 // Fstat takes an open file descriptor and returns
@@ -35,5 +35,5 @@ func Fstat(fd int) (*StatT, error) {
 	if err := syscall.Fstat(fd, s); err != nil {
 		return nil, &os.PathError{Op: "Fstat", Path: strconv.Itoa(fd), Err: err}
 	}
-	return stat.FromStatT(s)
+	return stat.FromStatT(s), nil
 }

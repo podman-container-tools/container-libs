@@ -21,10 +21,7 @@ func TestFromStatT(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	s, err := FromStatT(stat)
-	if err != nil {
-		t.Fatal(err)
-	}
+	s := FromStatT(stat)
 
 	if stat.Uid != s.UID() {
 		t.Fatal("got invalid uid")

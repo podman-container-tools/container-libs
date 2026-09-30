@@ -3,7 +3,7 @@ package stat
 import "syscall"
 
 // FromStatT converts a syscall.Stat_t type to a StatT type
-func FromStatT(s *syscall.Stat_t) (*StatT, error) {
+func FromStatT(s *syscall.Stat_t) *StatT {
 	return &StatT{
 		size: s.Size,
 		mode: uint32(s.Mode),
@@ -11,5 +11,5 @@ func FromStatT(s *syscall.Stat_t) (*StatT, error) {
 		gid:  s.Gid,
 		rdev: uint64(s.Rdev),
 		mtim: s.Mtim,
-	}, nil
+	}
 }

@@ -14,7 +14,7 @@ func Lstat(path string) (*StatT, error) {
 		return nil, err
 	}
 
-	return stat.FromStatT(&fi)
+	return stat.FromStatT(&fi), nil
 }
 
 // RootLstat takes fsPath within root and returns
@@ -24,5 +24,5 @@ func RootLstat(root *os.Root, fsPath string) (*StatT, error) {
 	if err != nil {
 		return nil, err
 	}
-	return stat.FromStatT(&fi)
+	return stat.FromStatT(&fi), nil
 }

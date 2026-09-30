@@ -59,10 +59,10 @@ func (s StatT) IsSymlink() bool {
 }
 
 // FromStatT converts a os.FileInfo type to a StatT type
-func FromStatT(fi *os.FileInfo) (*StatT, error) {
+func FromStatT(fi *os.FileInfo) *StatT {
 	return &StatT{
 		size: (*fi).Size(),
 		mode: (*fi).Mode(),
 		mtim: (*fi).ModTime(),
-	}, nil
+	}
 }
