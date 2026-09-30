@@ -1,18 +1,17 @@
-//go:build linux
+//go:build freebsd
 
-package system
+package stat
 
 import (
 	"syscall"
 	"testing"
 )
 
-// TestFromStatT tests fromStatT for a tempfile
 func platformTestFromStatT(t *testing.T, stat *syscall.Stat_t, s *StatT) {
-	if stat.Mode != s.Mode() {
+	if stat.Mode != uint16(s.Mode()) {
 		t.Fatal("got invalid mode")
 	}
-	if stat.Mtim != s.Mtim() {
+	if stat.Mtimespec != s.Mtim() {
 		t.Fatal("got invalid mtim")
 	}
 }
