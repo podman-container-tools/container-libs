@@ -528,15 +528,15 @@ func canDedupFileWithHardLink(file *fileMetadata, fd int, s os.FileInfo) bool {
 // ostreeRepos is a list of OSTree repos.
 // dirfd is an open fd to the destination checkout.
 // useHardLinks defines whether the deduplication can be performed using hard links.
-func findFileInOSTreeRepos(file *fileMetadata, ostreeRepos []string, dirfd int, useHardLinks bool, needsForkLock bool) (bool, *os.File, int64, error) {
+func findFileInOSTreeRepos(file *fileMetadata, ostreeRepos []string, dirfd int, useHardLinks bool, needsForkLock bool) (bool, *os.File, int64, string, error) {
 	digest, err := digest.Parse(file.Digest)
 	if err != nil {
 		logrus.Debugf("could not parse digest: %v", err)
-		return false, nil, 0, nil
+		return false, nil, 0, "", nil
 	}
 	payloadLink := digest.Encoded() + ".payload-link"
 	if len(payloadLink) < 2 {
-		return false, nil, 0, nil
+		return false, nil, 0, "", nil
 	}
 
 	for _, repo := range ostreeRepos {
@@ -551,7 +551,7 @@ func findFileInOSTreeRepos(file *fileMetadata, ostreeRepos []string, dirfd int, 
 		fd, err := unix.Open(sourceFile, unix.O_RDONLY|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
 		if err != nil {
 			logrus.Debugf("could not open sourceFile %s: %v", sourceFile, err)
-			return false, nil, 0, nil
+			return false, nil, 0, "", nil
 		}
 		f := os.NewFile(uintptr(fd), "fd")
 		defer f.Close()
@@ -564,16 +564,16 @@ func findFileInOSTreeRepos(file *fileMetadata, ostreeRepos []string, dirfd int, 
 		dstFile, written, err := copyFileContent(fd, file, dirfd, 0, useHardLinks, needsForkLock)
 		if err != nil {
 			logrus.Debugf("could not copyFileContent: %v", err)
-			return false, nil, 0, nil
+			return false, nil, 0, "", nil
 		}
-		return true, dstFile, written, nil
+		return true, dstFile, written, sourceFile, nil
 	}
 	// If hard links deduplication was used and it has failed, try again without hard links.
 	if useHardLinks {
 		return findFileInOSTreeRepos(file, ostreeRepos, dirfd, false, needsForkLock)
 	}
 
-	return false, nil, 0, nil
+	return false, nil, 0, "", nil
 }
 
 // findFileInOtherLayers finds the specified file in other layers.
@@ -581,12 +581,13 @@ func findFileInOSTreeRepos(file *fileMetadata, ostreeRepos []string, dirfd int, 
 // file is the file to look for.
 // dirfd is an open file descriptor to the checkout root directory.
 // useHardLinks defines whether the deduplication can be performed using hard links.
-func findFileInOtherLayers(cache *layersCache, file *fileMetadata, dirfd int, useHardLinks bool, needsForkLock bool) (bool, *os.File, int64, error) {
+func findFileInOtherLayers(cache *layersCache, file *fileMetadata, dirfd int, useHardLinks bool, needsForkLock bool) (bool, *os.File, int64, string, error) {
 	target, name, err := cache.findFileInOtherLayers(file, useHardLinks)
 	if err != nil || name == "" {
-		return false, nil, 0, err
+		return false, nil, 0, "", err
 	}
-	return copyFileFromOtherLayer(file, target, name, dirfd, useHardLinks, needsForkLock)
+	found, dstFile, fd, err := copyFileFromOtherLayer(file, target, name, dirfd, useHardLinks, needsForkLock)
+	return found, dstFile, fd, filepath.Join(target, name), err
 }
 
 func maybeDoIDRemap(manifest []fileMetadata, options *archive.TarOptions) error {
@@ -1222,8 +1223,23 @@ func reopenFileReadOnly(f *os.File) (*os.File, error) {
 }
 
 func (c *chunkedDiffer) findAndCopyFile(dirfd int, r *fileMetadata, copyOptions *findAndCopyFileOptions, mode os.FileMode) (bool, error) {
-	finalizeFile := func(roFile *os.File) error {
+	finalizeFile := func(roFile *os.File, path string) error {
 		if roFile == nil {
+			if c.useFsVerity != graphdriver.DifferFsVerityDisabled && copyOptions.useHardLinks {
+				// Store verity from hard-linked source in verity map, if available
+				fd, err := unix.Open(path, unix.O_RDONLY|unix.O_CLOEXEC, 0)
+				if err != nil {
+					return nil
+				}
+				verity, err := fsverity.MeasureVerity(r.Name, fd)
+				defer unix.Close(fd)
+				if err != nil {
+					return nil
+				}
+				c.fsVerityMutex.Lock()
+				c.fsVerityDigests[r.Name] = verity
+				c.fsVerityMutex.Unlock()
+			}
 			return nil
 		}
 		defer roFile.Close()
@@ -1238,23 +1254,23 @@ func (c *chunkedDiffer) findAndCopyFile(dirfd int, r *fileMetadata, copyOptions 
 	}
 
 	needsForkLock := c.useFsVerity != graphdriver.DifferFsVerityDisabled
-	found, dstFile, _, err := findFileInOtherLayers(c.layersCache, r, dirfd, copyOptions.useHardLinks, needsForkLock)
+	found, dstFile, _, path, err := findFileInOtherLayers(c.layersCache, r, dirfd, copyOptions.useHardLinks, needsForkLock)
 	if err != nil {
 		return false, err
 	}
 	if found {
-		if err := finalizeFile(dstFile); err != nil {
+		if err := finalizeFile(dstFile, path); err != nil {
 			return false, err
 		}
 		return true, nil
 	}
 
-	found, dstFile, _, err = findFileInOSTreeRepos(r, copyOptions.ostreeRepos, dirfd, copyOptions.useHardLinks, needsForkLock)
+	found, dstFile, _, path, err = findFileInOSTreeRepos(r, copyOptions.ostreeRepos, dirfd, copyOptions.useHardLinks, needsForkLock)
 	if err != nil {
 		return false, err
 	}
 	if found {
-		if err := finalizeFile(dstFile); err != nil {
+		if err := finalizeFile(dstFile, path); err != nil {
 			return false, err
 		}
 		return true, nil
