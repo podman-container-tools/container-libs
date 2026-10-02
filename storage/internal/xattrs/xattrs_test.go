@@ -43,77 +43,15 @@ func testXattrListNames(names []string) []string {
 	return res
 }
 
-func TestXattrs(t *testing.T) {
+func testXattrs(t *testing.T, dir string,
+	lgetxattr func(path, attr string) ([]byte, error),
+	llistxattr func(path string) ([]string, error),
+) {
 	ns, canTestSymlinks := testXattrNamespace()
 	xattrName := ns + testXattr
 	xattrNameOnSymlink := ns + testXattrOnSymlink
 	xattrNameMissing := ns + testXattrMissing
 
-	dir := t.TempDir()
-	file := filepath.Join(dir, "file")
-	err := os.WriteFile(file, nil, 0o644)
-	require.NoError(t, err)
-	err = Lsetxattr(file, xattrName, []byte("v"), 0)
-	require.NoError(t, err)
-
-	link := filepath.Join(dir, "symlink")
-	link2 := filepath.Join(dir, "symlink2")
-	if canTestSymlinks {
-		err = os.Symlink("./file", link)
-		require.NoError(t, err)
-		err = os.Symlink("../../../../this/escapes/but/that/does/not/matter", link2)
-		require.NoError(t, err)
-		err = Lsetxattr(link, xattrNameOnSymlink, []byte("on-link"), 0)
-		require.NoError(t, err)
-		err = Lsetxattr(link2, xattrNameOnSymlink, []byte("on-link2"), 0)
-		require.NoError(t, err)
-	}
-
-	for _, tc := range []struct {
-		symlinkTest bool
-		path        string
-		attr        string
-		want        []byte
-	}{
-		{false, file, xattrName, []byte("v")},                 // file, attr set
-		{false, file, xattrNameMissing, nil},                  // file, attr unset
-		{true, link, xattrNameOnSymlink, []byte("on-link")},   // symlink, attr set on link
-		{true, link, xattrName, nil},                          // symlink, attr unset on link (but set on target)
-		{true, link2, xattrNameOnSymlink, []byte("on-link2")}, // symlink to a nonexistent parent path, attr set on link
-	} {
-		if tc.symlinkTest && !canTestSymlinks {
-			continue
-		}
-		got, err := Lgetxattr(tc.path, tc.attr)
-		require.NoError(t, err)
-		assert.Equal(t, tc.want, got)
-	}
-
-	for _, tc := range []struct {
-		symlinkTest bool
-		path        string
-		want        []string
-	}{
-		{false, file, []string{xattrName}},
-		{true, link, []string{xattrNameOnSymlink}},
-		{true, link2, []string{xattrNameOnSymlink}},
-	} {
-		if tc.symlinkTest && !canTestSymlinks {
-			continue
-		}
-		got, err := Llistxattr(tc.path)
-		require.NoError(t, err)
-		assert.ElementsMatch(t, tc.want, testXattrListNames(got))
-	}
-}
-
-func TestRootXattrs(t *testing.T) {
-	ns, canTestSymlinks := testXattrNamespace()
-	xattrName := ns + testXattr
-	xattrNameOnSymlink := ns + testXattrOnSymlink
-	xattrNameMissing := ns + testXattrMissing
-
-	dir := t.TempDir()
 	err := os.Mkdir(filepath.Join(dir, "subdir"), 0o755)
 	require.NoError(t, err)
 	file := filepath.Join(dir, "subdir", "file")
@@ -134,9 +72,6 @@ func TestRootXattrs(t *testing.T) {
 		err = Lsetxattr(link2, xattrNameOnSymlink, []byte("on-link2"), 0)
 		require.NoError(t, err)
 	}
-	root, err := os.OpenRoot(dir)
-	require.NoError(t, err)
-	defer root.Close()
 
 	for _, tc := range []struct {
 		symlinkTest bool
@@ -153,7 +88,7 @@ func TestRootXattrs(t *testing.T) {
 		if tc.symlinkTest && !canTestSymlinks {
 			continue
 		}
-		got, err := RootLgetxattr(root, tc.fsPath, tc.attr)
+		got, err := lgetxattr(tc.fsPath, tc.attr)
 		assert.NoError(t, err)
 		assert.Equal(t, tc.want, got)
 	}
@@ -170,12 +105,37 @@ func TestRootXattrs(t *testing.T) {
 		if tc.symlinkTest && !canTestSymlinks {
 			continue
 		}
-		got, err := RootLlistxattr(root, tc.fsPath)
+		got, err := llistxattr(tc.fsPath)
 		require.NoError(t, err)
 		assert.ElementsMatch(t, tc.want, testXattrListNames(got))
 	}
+}
 
-	_, err = RootLgetxattr(root, "..", xattrName)
+func TestXattrs(t *testing.T) {
+	dir := t.TempDir()
+	testXattrs(t, dir,
+		func(path, attr string) ([]byte, error) {
+			return Lgetxattr(filepath.Join(dir, path), attr)
+		}, func(path string) ([]string, error) {
+			return Llistxattr(filepath.Join(dir, path))
+		})
+}
+
+func TestRootXattrs(t *testing.T) {
+	dir := t.TempDir()
+	root, err := os.OpenRoot(dir)
+	require.NoError(t, err)
+	defer root.Close()
+
+	testXattrs(t, dir,
+		func(path, attr string) ([]byte, error) {
+			return RootLgetxattr(root, path, attr)
+		}, func(path string) ([]string, error) {
+			return RootLlistxattr(root, path)
+		})
+
+	ns, _ := testXattrNamespace()
+	_, err = RootLgetxattr(root, "..", ns+testXattr)
 	assert.Error(t, err)
 	_, err = RootLlistxattr(root, "..")
 	assert.Error(t, err)
