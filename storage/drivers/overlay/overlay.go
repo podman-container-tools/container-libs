@@ -151,6 +151,7 @@ type Driver struct {
 	stagingDirsLocks map[string]*staging_lockfile.StagingLockFile
 
 	supportsIDMappedMounts *bool
+	supportsReflinks       *bool
 }
 
 type additionalLayerStore struct {
@@ -300,6 +301,18 @@ func (d *Driver) getSupportsDataOnly() (bool, error) {
 	}
 	d.supportsDataOnly = &supportsDataOnly
 	return supportsDataOnly, nil
+}
+
+func (d *Driver) getSupportsReflinks() (bool, error) {
+	if d.supportsReflinks != nil {
+		return *d.supportsReflinks, nil
+	}
+	supportsReflinks, err := checkSupportsReflinks(d.home, d.runhome)
+	if err != nil {
+		return false, err
+	}
+	d.supportsReflinks = &supportsReflinks
+	return supportsReflinks, nil
 }
 
 // isNetworkFileSystem checks if the specified file system is supported by native overlay
@@ -866,6 +879,10 @@ func (d *Driver) Status() [][2]string {
 	if err != nil {
 		supportsVolatile = false
 	}
+	supportsReflinks, err := d.getSupportsReflinks()
+	if err != nil {
+		supportsReflinks = false
+	}
 	return [][2]string{
 		{"Backing Filesystem", backingFs},
 		{"Supports d_type", strconv.FormatBool(d.supportsDType)},
@@ -873,6 +890,7 @@ func (d *Driver) Status() [][2]string {
 		{"Using metacopy", strconv.FormatBool(d.usingMetacopy)},
 		{"Supports shifting", strconv.FormatBool(d.SupportsShifting(nil, nil))},
 		{"Supports volatile", strconv.FormatBool(supportsVolatile)},
+		{"Supports reflinks", strconv.FormatBool(supportsReflinks)},
 	}
 }
 
