@@ -1,3 +1,4 @@
+
 //go:build !remote
 
 package libimage
@@ -221,6 +222,31 @@ func (i *Image) isDangling(ctx context.Context, tree *layerTree) (bool, error) {
 	return (len(children) == 0 && !usedInManfiestList), nil
 }
 
+// isDanglingDryRunCheck is an alternative to isDangling in a 
+// dry run scenario, bacause we are not removing images so we can't check
+// the current tree
+func (i *Image) isDanglingDryRunCheck(ctx context.Context, rmMap map[string]*RemoveImageReport) (bool, error) {
+	if len(i.Names()) > 0 { // Need to check also options.Filters[dangling=true]
+		return false, nil
+	}
+
+	children, err := i.Children(ctx)
+
+	if err != nil {
+		return false, err
+	}
+
+	for _, child := range children {
+		// Dry run does mark images as removed, so we only need to check
+		// if current image has any children that were not mentioned in rmMap
+		report, exists := rmMap[child.ID()]
+		if !exists || !report.Removed {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
 // IsIntermediate returns true if the image is an intermediate image, that is
 // an untagged image with children.
 func (i *Image) IsIntermediate(ctx context.Context) (bool, error) {
@@ -331,7 +357,7 @@ func (i *Image) Containers() ([]string, error) {
 
 // removeContainers removes all containers using the image.
 func (i *Image) removeContainers(options *RemoveImagesOptions) error {
-	if !options.Force && !options.ExternalContainers {
+	if (!options.Force && !options.ExternalContainers) || options.DryRun {
 		// Nothing to do.
 		return nil
 	}
@@ -487,13 +513,15 @@ func (i *Image) removeRecursive(ctx context.Context, rmMap map[string]*RemoveIma
 
 		// Only try to untag if we know it's not an ID or digest.
 		if !byID && !byDigest {
-			if err := i.Untag(referencedBy); handleError(err) != nil {
-				return processedIDs, err
-			}
-			report.Untagged = append(report.Untagged, referencedBy)
+			if !options.DryRun {
+				if err := i.Untag(referencedBy); handleError(err) != nil {
+					return processedIDs, err
+				}
+				report.Untagged = append(report.Untagged, referencedBy)
 
-			// If there's still tags left, we cannot delete it.
-			skipRemove = len(i.Names()) > 0
+				// If there's still tags left, we cannot delete it.
+				skipRemove = len(i.Names()) > 0
+			}
 		}
 	}
 
@@ -528,11 +556,13 @@ func (i *Image) removeRecursive(ctx context.Context, rmMap map[string]*RemoveIma
 		parent = nil
 	}
 
-	if _, err := i.runtime.store.DeleteImage(i.ID(), true); handleError(err) != nil {
-		if errors.Is(err, storage.ErrImageUsedByContainer) {
-			err = fmt.Errorf("%w: consider listing external containers and force-removing image", err)
+	if !options.DryRun {
+		if _, err := i.runtime.store.DeleteImage(i.ID(), true); handleError(err) != nil {
+			if errors.Is(err, storage.ErrImageUsedByContainer) {
+				err = fmt.Errorf("%w: consider listing external containers and force-removing image", err)
+			}
+			return processedIDs, err
 		}
-		return processedIDs, err
 	}
 
 	report.Untagged = append(report.Untagged, i.Names()...)
@@ -556,18 +586,29 @@ func (i *Image) removeRecursive(ctx context.Context, rmMap map[string]*RemoveIma
 		return processedIDs, nil
 	}
 
-	// Only remove the parent if it's dangling, that is being untagged and
-	// without children.
-	danglingParent, err := parent.IsDangling(ctx)
-	if err != nil {
-		// See Podman commit fd9dd7065d44: we need to
-		// be tolerant toward corrupted images.
-		logrus.Warnf("Failed to determine if an image is a parent: %v, ignoring the error", err)
-		danglingParent = false
+	var danglingParent bool
+
+	if options.DryRun {
+		danglingParent, err = parent.isDanglingDryRunCheck(ctx, rmMap)
+		if err != nil {
+			logrus.Warnf("Failed to get children images of the parent %s: %v, ignoring the error", parent.ID(), err)
+		}
+	} else {
+		// Only remove the parent if it's dangling, that is being untagged and
+		// without children.
+		danglingParent, err = parent.IsDangling(ctx)
+		if err != nil {
+			// See Podman commit fd9dd7065d44: we need to
+			// be tolerant toward corrupted images.
+			logrus.Warnf("Failed to determine if an image is a parent: %v, ignoring the error", err)
+			danglingParent = false
+		}
 	}
+
 	if !danglingParent {
 		return processedIDs, nil
 	}
+
 	// Recurse into removing the parent.
 	return parent.removeRecursive(ctx, rmMap, processedIDs, "", options)
 }
