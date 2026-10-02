@@ -20,7 +20,8 @@ import (
 // (sadly fs.WalkDir does not give us a parent handle, it needs one internally); or for similar
 // code that needs to repeatedly make operations within a single directory.
 type Cache struct {
-	root *os.Root
+	root     *os.Root
+	rootFile *os.File // For root; or nil
 
 	// This is a minimal implementation, ideal for fairly shallow directory hierarchies with several files.
 	// For a deeper hierarchy, operations on (root/dir/file1, root/dir/subdir1, root/dir/file2, root/dir/subdir2, ...)
@@ -33,6 +34,7 @@ type Cache struct {
 	// parent, and could perhaps maintain some kind of a direct reference to a cache entry).
 	cachedDirRoot *os.Root // Or nil
 	cachedPath    string   // Valid if cachedDirRoot != nil
+	cachedDirFile *os.File // For cachedDirRoot, which must be non-nil; or nil
 }
 
 // NewCache creates a cache for operations within root.
@@ -45,8 +47,14 @@ func NewCache(root *os.Root) *Cache {
 
 // Close releases any possibly cached handles.
 func (c *Cache) Close() error {
+	if c.rootFile != nil {
+		_ = c.rootFile.Close()
+	}
 	if c.cachedDirRoot != nil {
 		_ = c.cachedDirRoot.Close()
+	}
+	if c.cachedDirFile != nil {
+		_ = c.cachedDirFile.Close()
 	}
 	return nil
 }
@@ -69,6 +77,10 @@ func (c *Cache) RootForDir(dir string) (*os.Root, error) {
 	}
 	if c.cachedDirRoot != nil {
 		_ = c.cachedDirRoot.Close()
+	}
+	if c.cachedDirFile != nil {
+		_ = c.cachedDirFile.Close()
+		c.cachedDirFile = nil
 	}
 	c.cachedDirRoot = dirRoot
 	c.cachedPath = dir
@@ -93,4 +105,44 @@ func (c *Cache) PreparePath(fsPath string) (*os.Root, string, error) {
 		return nil, "", fmt.Errorf("internal error: trailing .. in a path that should conform to fs.ValidPath: %q", fsPath)
 	}
 	return parentRoot, basename, nil
+}
+
+// FileForRoot returns, or newly opens, an *os.File descriptor for reading root (which must have been the last value obtained by RootForDir or PreparePath).
+// The returned value can be used only until the next call to RootForDir(), FileForRoot() or Close();
+// the caller must not close it manually.
+func (c *Cache) FileForRoot(root *os.Root) (*os.File, error) {
+	// Ideally, we should be able to use the file descriptor already existing in *os.Root, without the extra Open(".")/Close().
+
+	// We should not really _need_ the special case for c.root, we probably only need one cached *os.File
+	// for accessing all files in a directory, and c.root is not really special WRT expected use patterns.
+	//
+	// But we have the RootForDir(".") special case because it is cheap to implement there, and without a
+	// corresponding File cache for "." we’d need a more complex invalidation logic in RootForDir.
+	if root == c.root {
+		if c.rootFile == nil {
+			fd, err := c.root.Open(".")
+			if err != nil {
+				return nil, err
+			}
+			c.rootFile = fd
+		}
+		return c.rootFile, nil
+	}
+
+	if c.cachedDirRoot != nil && root == c.cachedDirRoot {
+		if c.cachedDirFile == nil {
+			fd, err := c.cachedDirRoot.Open(".")
+			if err != nil {
+				return nil, err
+			}
+			c.cachedDirFile = fd
+		}
+		return c.cachedDirFile, nil
+	}
+
+	// Otherwise we would need to open a new file descriptor, and then we would need to close it at some point,
+	// i.e. we would need to be tracking it in the cache.
+	// That could work under the assumption that the caller is following the cache rules, but under that assumption,
+	// we should never get here.
+	return nil, fmt.Errorf("internal error: FileForRoot called with an unexpected root")
 }
