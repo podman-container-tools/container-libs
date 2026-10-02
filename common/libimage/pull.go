@@ -659,3 +659,51 @@ func (r *Runtime) copySingleImageFromRegistry(ctx context.Context, imageName str
 
 	return nil, resolved.FormatPullErrors(pullErrors)
 }
+
+func (r *Runtime) copyFromOCIArchiveReaderReferenceAndManifestDescriptor(ctx context.Context, readerRef types.ImageReference, manifestDescriptor ociSpec.Descriptor, options *CopyOptions) (string, error) {
+	c, err := r.newCopier(options)
+	if err != nil {
+		return "", err
+	}
+	defer c.Close()
+
+	// Get a storage reference we can copy.
+	destRef, destName, err := r.storageReferenceFromOCIArchiveReaderDescriptor(ctx, readerRef, manifestDescriptor)
+	if err != nil {
+		return "", err
+	}
+
+	// Now copy the images.  Use readerRef for performance.
+	if _, err := c.Copy(ctx, readerRef, destRef); err != nil {
+		return "", err
+	}
+
+	return destName, nil
+}
+
+func (r *Runtime) storageReferenceFromOCIArchiveReaderDescriptor(ctx context.Context, readerRef types.ImageReference, manifestDescriptor ociSpec.Descriptor) (types.ImageReference, string, error) {
+	storageName := manifestDescriptor.Annotations["org.opencontainers.image.ref.name"]
+	var imageName string
+	switch len(storageName) {
+	case 0:
+		// If there's no reference name in the annotations, compute an ID.
+		var err error
+		storageName, err = getImageID(ctx, readerRef, &r.systemContext)
+		if err != nil {
+			return nil, "", err
+		}
+		imageName = "sha256:" + storageName[1:]
+	default:
+		named, err := NormalizeName(storageName)
+		if err != nil {
+			return nil, "", err
+		}
+		imageName = named.String()
+	}
+
+	destRef, err := storageTransport.Transport.ParseStoreReference(r.store, imageName)
+	if err != nil {
+		return nil, "", fmt.Errorf("parsing dest reference name %#v: %w", imageName, err)
+	}
+	return destRef, imageName, nil
+}

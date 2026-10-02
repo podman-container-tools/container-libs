@@ -49,8 +49,8 @@ func (r *Runtime) Save(ctx context.Context, names []string, format, path string,
 	case 1:
 		// All formats support saving 1.
 	default:
-		if format != "docker-archive" {
-			return fmt.Errorf("unsupported format %q for saving multiple images (only docker-archive)", format)
+		if format != "docker-archive" && format != "oci-archive" {
+			return fmt.Errorf("unsupported format %q for saving multiple images (only docker-archive and oci-archive)", format)
 		}
 		if len(options.AdditionalTags) > 0 {
 			return errors.New("cannot save multiple images with multiple tags")
@@ -59,15 +59,17 @@ func (r *Runtime) Save(ctx context.Context, names []string, format, path string,
 
 	// Dispatch the save operations.
 	switch format {
-	case "oci-archive", "oci-dir", "docker-dir":
+	case "oci-dir", "docker-dir":
 		if len(names) > 1 {
 			return fmt.Errorf("%q does not support saving multiple images (%v)", format, names)
 		}
 		return r.saveSingleImage(ctx, names[0], format, path, options)
-
 	case "docker-archive":
 		options.ManifestMIMEType = manifest.DockerV2Schema2MediaType
 		return r.saveDockerArchive(ctx, names, path, options)
+	case "oci-archive":
+		options.ManifestMIMEType = ociv1.MediaTypeImageManifest
+		return r.saveOCIArchive(ctx, names, path, options)
 	}
 
 	return fmt.Errorf("unsupported format %q for saving images", format)
@@ -225,5 +227,91 @@ func (r *Runtime) saveDockerArchive(ctx context.Context, names []string, path st
 		}
 	}
 
+	return nil
+}
+
+func (r *Runtime) saveOCIArchive(ctx context.Context, names []string, path string, options *SaveOptions) error {
+	additionalTags := []reference.NamedTagged{}
+	for _, tag := range options.AdditionalTags {
+		named, err := NormalizeName(tag)
+		if err == nil {
+			if tagged, withTag := named.(reference.NamedTagged); withTag {
+				additionalTags = append(additionalTags, tagged)
+			}
+		}
+	}
+
+	orderedIDs := []string{}
+	type localImg struct {
+		image     *Image
+		destNames []string
+	}
+	localImages := make(map[string]*localImg)
+	visitedNames := make(map[string]bool)
+
+	for _, name := range names {
+		image, imageName, err := r.LookupImage(name, nil)
+		if err != nil {
+			return err
+		}
+		if _, exists := visitedNames[imageName]; exists {
+			continue
+		}
+		visitedNames[imageName] = true
+
+		local, exists := localImages[image.ID()]
+		if !exists {
+			local = &localImg{image: image}
+			orderedIDs = append(orderedIDs, image.ID())
+		}
+
+		named, err := reference.ParseNamed(imageName)
+		if err == nil {
+			if tagged, withTag := named.(reference.NamedTagged); withTag {
+				local.destNames = append(local.destNames, tagged.String())
+			} else {
+				local.destNames = append(local.destNames, named.String())
+			}
+		} else {
+			local.destNames = append(local.destNames, imageName)
+		}
+
+		for _, tag := range additionalTags {
+			local.destNames = append(local.destNames, tag.String())
+		}
+		localImages[image.ID()] = local
+	}
+
+	writer, err := ociArchiveTransport.NewWriter(r.systemContextCopy(), path)
+	if err != nil {
+		return err
+	}
+	defer writer.Close()
+
+	for _, id := range orderedIDs {
+		local := localImages[id]
+		c, err := r.newCopier(&options.CopyOptions)
+		if err != nil {
+			return err
+		}
+
+		for _, destName := range local.destNames {
+			destRef, err := writer.NewReference(destName)
+			if err != nil {
+				c.Close()
+				return err
+			}
+			srcRef, err := local.image.StorageReference()
+			if err != nil {
+				c.Close()
+				return err
+			}
+			if _, err := c.Copy(ctx, srcRef, destRef); err != nil {
+				c.Close()
+				return err
+			}
+		}
+		c.Close()
+	}
 	return nil
 }
