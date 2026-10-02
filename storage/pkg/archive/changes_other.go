@@ -102,6 +102,13 @@ func collectFileInfo(sourceDir string, idMappings *idtools.IDMappings) (*FileInf
 			}
 		}
 
+		if d.Type()&os.ModeSymlink != 0 {
+			info.target, err = os.Readlink(path)
+			if err != nil {
+				return err
+			}
+		}
+
 		parent.children[info.name] = info
 
 		return nil
