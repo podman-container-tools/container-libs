@@ -1,9 +1,13 @@
 package pasta
 
 import (
+	"os"
+	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.podman.io/common/libnetwork/types"
 	"go.podman.io/common/pkg/config"
 	"go.podman.io/storage/pkg/configfile"
@@ -18,6 +22,11 @@ func makeSetupOptions(configArgs, extraArgs []string, ports []types.PortMapping)
 	}
 }
 
+func withPidFile(opts *SetupOptions, pidFile string) *SetupOptions {
+	opts.PidFile = pidFile
+	return opts
+}
+
 func Test_createPastaArgs(t *testing.T) {
 	tests := []struct {
 		name             string
@@ -25,7 +34,11 @@ func Test_createPastaArgs(t *testing.T) {
 		wantArgs         []string
 		wantDNSForward   []string
 		wantMapGuestAddr []string
-		wantErr          string
+		// wantPidFile is the pid file we expect to end up using.  Leave it
+		// empty to expect the generated temporary one, which has a random
+		// path and is therefore checked separately.
+		wantPidFile string
+		wantErr     string
 	}{
 		{
 			name: "default options",
@@ -373,19 +386,123 @@ func Test_createPastaArgs(t *testing.T) {
 			},
 			wantDNSForward:   []string{dnsForwardIpv4},
 			wantMapGuestAddr: []string{mapGuestAddrIpv4, mapGuestAddrIpv6},
+			wantPidFile:      "/run/pasta.pid",
+		},
+		{
+			name: "user pid file --pid=FILE",
+			input: makeSetupOptions(
+				nil,
+				[]string{"--pid=/run/pasta.pid"},
+				nil,
+			),
+			wantArgs: []string{
+				"--config-net", "--pid=/run/pasta.pid",
+				dnsForwardOpt, dnsForwardIpv4,
+				"-t", "none", "-u", "none", "-T", "none", "-U", "none", "--no-map-gw", "--quiet",
+				mapGuestAddrOpt, mapGuestAddrIpv4,
+				"--netns", "netns123",
+			},
+			wantDNSForward:   []string{dnsForwardIpv4},
+			wantMapGuestAddr: []string{mapGuestAddrIpv4},
+			wantPidFile:      "/run/pasta.pid",
+		},
+		{
+			name: "user pid file -P FILE",
+			input: makeSetupOptions(
+				nil,
+				[]string{"-P", "/run/pasta.pid"},
+				nil,
+			),
+			wantArgs: []string{
+				"--config-net", "-P", "/run/pasta.pid",
+				dnsForwardOpt, dnsForwardIpv4,
+				"-t", "none", "-u", "none", "-T", "none", "-U", "none", "--no-map-gw", "--quiet",
+				mapGuestAddrOpt, mapGuestAddrIpv4,
+				"--netns", "netns123",
+			},
+			wantDNSForward:   []string{dnsForwardIpv4},
+			wantMapGuestAddr: []string{mapGuestAddrIpv4},
+			wantPidFile:      "/run/pasta.pid",
+		},
+		{
+			name: "user pid file -PFILE",
+			input: makeSetupOptions(
+				nil,
+				[]string{"-P/run/pasta.pid"},
+				nil,
+			),
+			wantArgs: []string{
+				"--config-net", "-P/run/pasta.pid",
+				dnsForwardOpt, dnsForwardIpv4,
+				"-t", "none", "-u", "none", "-T", "none", "-U", "none", "--no-map-gw", "--quiet",
+				mapGuestAddrOpt, mapGuestAddrIpv4,
+				"--netns", "netns123",
+			},
+			wantDNSForward:   []string{dnsForwardIpv4},
+			wantMapGuestAddr: []string{mapGuestAddrIpv4},
+			wantPidFile:      "/run/pasta.pid",
+		},
+		{
+			name: "pid file requested via SetupOptions",
+			input: withPidFile(makeSetupOptions(
+				nil,
+				nil,
+				nil,
+			), "/run/pasta.pid"),
+			wantArgs: []string{
+				"--config-net", dnsForwardOpt, dnsForwardIpv4,
+				"-t", "none", "-u", "none", "-T", "none", "-U", "none", "--no-map-gw", "--quiet",
+				mapGuestAddrOpt, mapGuestAddrIpv4,
+				pidOpt, "/run/pasta.pid",
+				"--netns", "netns123",
+			},
+			wantDNSForward:   []string{dnsForwardIpv4},
+			wantMapGuestAddr: []string{mapGuestAddrIpv4},
+			wantPidFile:      "/run/pasta.pid",
+		},
+		{
+			name: "SetupOptions pid file conflicts with the one set by the user",
+			input: withPidFile(makeSetupOptions(
+				nil,
+				[]string{"--pid", "/run/user-pasta.pid"},
+				nil,
+			), "/run/pasta.pid"),
+			wantErr: "cannot use --pid or -P in the pasta options, the pid file is already set to /run/pasta.pid",
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			args, dnsForward, mapGuestAddr, err := createPastaArgs(tt.input)
+			args, err := createPastaArgs(tt.input)
 			if tt.wantErr != "" {
 				assert.EqualError(t, err, tt.wantErr, "createPastaArgs error")
 				return
 			}
-			assert.NoError(t, err, "expect no createPastaArgs error")
-			assert.Equal(t, tt.wantArgs, args, "check arguments")
-			assert.Equal(t, tt.wantDNSForward, dnsForward, "check dns forward")
-			assert.Equal(t, tt.wantMapGuestAddr, mapGuestAddr, "check map guest addr")
+			require.NoError(t, err, "expect no createPastaArgs error")
+
+			cmdArgs := args.cmdArgs
+			if tt.wantPidFile == "" {
+				// No pid file was asked for, so we generate one ourselves.  Its
+				// path is random, check it here and drop it from the arguments
+				// so the table can keep asserting them exactly.
+				require.NotEmpty(t, args.pidFileTmpDir, "expect a temporary pid file dir")
+				t.Cleanup(func() {
+					assert.NoError(t, os.RemoveAll(args.pidFileTmpDir))
+				})
+				assert.Equal(t, filepath.Join(args.pidFileTmpDir, "pasta.pid"), args.pidFile, "check temporary pid file")
+
+				i := slices.Index(cmdArgs, pidOpt)
+				require.NotEqual(t, -1, i, "expect %s in arguments", pidOpt)
+				require.Less(t, i+1, len(cmdArgs), "expect an argument after %s", pidOpt)
+				assert.Equal(t, args.pidFile, cmdArgs[i+1], "check %s argument", pidOpt)
+				cmdArgs = slices.Delete(slices.Clone(cmdArgs), i, i+2)
+			} else {
+				assert.Empty(t, args.pidFileTmpDir, "expect no temporary pid file dir")
+				assert.Equal(t, tt.wantPidFile, args.pidFile, "check pid file")
+			}
+
+			assert.Equal(t, tt.wantArgs, cmdArgs, "check arguments")
+			assert.Equal(t, tt.wantDNSForward, args.dnsForwardIPs, "check dns forward")
+			assert.Equal(t, tt.wantMapGuestAddr, args.mapGuestAddrIPs, "check map guest addr")
 		})
 	}
 }
