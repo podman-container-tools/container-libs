@@ -1,25 +1,27 @@
 //go:build linux || freebsd
 
-package system
+package stat
 
 import (
+	"os"
+	"path/filepath"
 	"syscall"
 	"testing"
 )
 
-// TestFromStatT tests fromStatT for a tempfile
+// TestFromStatT tests FromStatT for a tempfile
 func TestFromStatT(t *testing.T) {
-	_, file, _, _ := prepareFiles(t)
+	file := filepath.Join(t.TempDir(), "exist")
+	if err := os.WriteFile(file, []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	stat := &syscall.Stat_t{}
 	if err := syscall.Lstat(file, stat); err != nil {
 		t.Fatal(err)
 	}
 
-	s, err := fromStatT(stat)
-	if err != nil {
-		t.Fatal(err)
-	}
+	s := FromStatT(stat)
 
 	if stat.Uid != s.UID() {
 		t.Fatal("got invalid uid")
