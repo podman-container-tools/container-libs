@@ -10,6 +10,7 @@ import (
 
 	"go.podman.io/storage/internal/rootlookupcache"
 	"go.podman.io/storage/internal/stat"
+	"go.podman.io/storage/internal/xattrs"
 	"go.podman.io/storage/pkg/idtools"
 	"go.podman.io/storage/pkg/system"
 )
@@ -103,7 +104,14 @@ func collectFileInfo(sourceDir string, idMappings *idtools.IDMappings) (*FileInf
 			return err
 		}
 		info.stat = s
-		info.capability, _ = system.RootLgetxattr(parentRoot, fsBasename, "security.capability")
+		info.capability, _ = func() ([]byte, error) { // A scope for defer
+			h, err := xattrs.NewLHandle(parentRoot, fsBasename, rootCache)
+			if err != nil {
+				return nil, err
+			}
+			defer h.Close()
+			return h.Getxattr("security.capability")
+		}()
 		if s.IsSymlink() {
 			info.target, err = parentRoot.Readlink(fsBasename)
 			if err != nil {

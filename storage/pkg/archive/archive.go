@@ -25,6 +25,7 @@ import (
 	"github.com/ulikunitz/xz"
 	"go.podman.io/storage/internal/createpath"
 	"go.podman.io/storage/internal/rootlookupcache"
+	"go.podman.io/storage/internal/xattrs"
 	"go.podman.io/storage/pkg/fileutils"
 	"go.podman.io/storage/pkg/idtools"
 	"go.podman.io/storage/pkg/pools"
@@ -473,18 +474,18 @@ func normalizeCapabilityRootID(idMappings *idtools.IDMappings, capData []byte) (
 }
 
 // readSecurityXattrToTarHeader reads security.capability, security,image
-// xattrs from filesystem to a tar header
-func (ta *tarWriter) readSecurityXattrToTarHeader(parentRoot *os.Root, fsBasename string, hdr *tar.Header) error {
+// xattrs from filesystem to a tar header, using xattrHandle (if not nil) or a non-os.Root access to parentRoot/fsBasename.
+func (ta *tarWriter) readSecurityXattrToTarHeader(xattrHandle *xattrs.Handle, parentRoot *os.Root, fsBasename string, hdr *tar.Header) error {
 	if hdr.PAXRecords == nil {
 		hdr.PAXRecords = make(map[string]string)
 	}
 	for _, xattr := range []string{"security.capability", "security.ima"} {
 		var capability []byte
 		var err error
-		if !ta.runningInMinimalChroot {
-			capability, err = system.RootLgetxattr(parentRoot, fsBasename, xattr)
+		if xattrHandle != nil {
+			capability, err = xattrHandle.Getxattr(xattr)
 		} else {
-			capability, err = system.Lgetxattr(filepath.Join(parentRoot.Name(), filepath.FromSlash(fsBasename)), xattr)
+			capability, err = xattrs.Lgetxattr(filepath.Join(parentRoot.Name(), filepath.FromSlash(fsBasename)), xattr)
 		}
 		if err != nil && !errors.Is(err, system.ENOTSUP) && err != system.ErrNotSupportedPlatform {
 			return fmt.Errorf("failed to read %q attribute from %q in %q: %w", xattr, fsBasename, parentRoot.Name(), err)
@@ -503,26 +504,27 @@ func (ta *tarWriter) readSecurityXattrToTarHeader(parentRoot *os.Root, fsBasenam
 	return nil
 }
 
-// readUserXattrToTarHeader reads user.* xattr from filesystem to a tar header
-func (ta *tarWriter) readUserXattrToTarHeader(parentRoot *os.Root, fsBasename string, hdr *tar.Header) error {
-	var xattrs []string
+// readUserXattrToTarHeader reads user.* xattr from filesystem to a tar header,
+// using xattrHandle (if not nil) or a non-os.Root access to parentRoot/fsBasename.
+func (ta *tarWriter) readUserXattrToTarHeader(xattrHandle *xattrs.Handle, parentRoot *os.Root, fsBasename string, hdr *tar.Header) error {
+	var xattrNames []string
 	var err error
-	if !ta.runningInMinimalChroot {
-		xattrs, err = system.RootLlistxattr(parentRoot, fsBasename)
+	if xattrHandle != nil {
+		xattrNames, err = xattrHandle.Listxattr()
 	} else {
-		xattrs, err = system.Llistxattr(filepath.Join(parentRoot.Name(), filepath.FromSlash(fsBasename)))
+		xattrNames, err = xattrs.Llistxattr(filepath.Join(parentRoot.Name(), filepath.FromSlash(fsBasename)))
 	}
 	if err != nil && !errors.Is(err, system.ENOTSUP) && err != system.ErrNotSupportedPlatform {
 		return err
 	}
-	for _, key := range xattrs {
+	for _, key := range xattrNames {
 		if strings.HasPrefix(key, "user.") && !strings.HasPrefix(key, "user.overlay.") {
 			var value []byte
 			var err error
-			if !ta.runningInMinimalChroot {
-				value, err = system.RootLgetxattr(parentRoot, fsBasename, key)
+			if xattrHandle != nil {
+				value, err = xattrHandle.Getxattr(key)
 			} else {
-				value, err = system.Lgetxattr(filepath.Join(parentRoot.Name(), filepath.FromSlash(fsBasename)), key)
+				value, err = xattrs.Lgetxattr(filepath.Join(parentRoot.Name(), filepath.FromSlash(fsBasename)), key)
 			}
 			if err != nil {
 				if errors.Is(err, system.E2BIG) {
@@ -557,12 +559,15 @@ type TarWhiteoutConverter interface {
 
 type tarWhiteoutConverter interface {
 	TarWhiteoutConverter
-	convertWrite(hdr *tar.Header, parentRoot *os.Root, fsBasename string, fi os.FileInfo) (*tar.Header, error)
+	// convertWrite updates hdr from on-disk format to the desired tar format, based on fi,
+	// and reading xattrs from xattrHandle (if not nil) or a non-os.Root access to parentRoot/fsBasename.
+	// If representing the whiteout requires an extra tar entry, it returns one.
+	convertWrite(hdr *tar.Header, xattrHandle *xattrs.Handle, parentRoot *os.Root, fsBasename string, fi os.FileInfo) (*tar.Header, error)
 }
 
 // GetWhiteoutConverter has no documented way to be called externally. Do not add any users outside of c/storage.
 func GetWhiteoutConverter(format WhiteoutFormat, data any) TarWhiteoutConverter {
-	return getWhiteoutConverter(format, data, nil)
+	return getWhiteoutConverter(format, data)
 }
 
 type tarWriter struct {
@@ -643,7 +648,7 @@ type addFileData struct {
 // tar stream. Thus, any error may be ignored without corrupting the
 // tar file. A (nil, nil) return means that the file should be
 // ignored for non-error reasons.
-func (ta *tarWriter) prepareAddFile(parentRoot *os.Root, fsBasename string, fi os.FileInfo, tarName string) (*addFileData, error) {
+func (ta *tarWriter) prepareAddFile(parentRoot *os.Root, fsBasename string, fi os.FileInfo, tarName string, rootCache *rootlookupcache.Cache) (*addFileData, error) {
 	// WARNING: This function is called in contexts where the contents of root may be maliciously
 	// concurrently modified.
 
@@ -664,10 +669,19 @@ func (ta *tarWriter) prepareAddFile(parentRoot *os.Root, fsBasename string, fi o
 	if err != nil {
 		return nil, err
 	}
-	if err := ta.readSecurityXattrToTarHeader(parentRoot, fsBasename, hdr); err != nil {
+	var xattrHandle *xattrs.Handle
+	if !ta.runningInMinimalChroot {
+		h, err := xattrs.NewLHandle(parentRoot, fsBasename, rootCache)
+		if err != nil {
+			return nil, err
+		}
+		defer h.Close()
+		xattrHandle = h
+	}
+	if err := ta.readSecurityXattrToTarHeader(xattrHandle, parentRoot, fsBasename, hdr); err != nil {
 		return nil, err
 	}
-	if err := ta.readUserXattrToTarHeader(parentRoot, fsBasename, hdr); err != nil {
+	if err := ta.readUserXattrToTarHeader(xattrHandle, parentRoot, fsBasename, hdr); err != nil {
 		return nil, err
 	}
 	if err := readFileFlagsToTarHeader(fi, hdr); err != nil {
@@ -740,7 +754,7 @@ func (ta *tarWriter) prepareAddFile(parentRoot *os.Root, fsBasename string, fi o
 		// should be represented as a directory containing a
 		// magic whiteout empty regular file, hence the
 		// extraWhiteout header returned here.
-		result.extraWhiteout, err = ta.whiteoutConverter.convertWrite(hdr, parentRoot, fsBasename, fi)
+		result.extraWhiteout, err = ta.whiteoutConverter.convertWrite(hdr, xattrHandle, parentRoot, fsBasename, fi)
 		if err != nil {
 			return nil, err
 		}
@@ -1044,7 +1058,7 @@ func tarWithOptionsTo(dest io.Writer, srcPath string, options *TarOptions) (resu
 		options.Timestamp,
 		options.InternalRunningInMinimalChroot,
 	)
-	ta.whiteoutConverter = getWhiteoutConverter(options.WhiteoutFormat, options.WhiteoutData, options)
+	ta.whiteoutConverter = getWhiteoutConverter(options.WhiteoutFormat, options.WhiteoutData)
 	ta.CopyPass = options.CopyPass
 
 	includeFiles := options.IncludeFiles
@@ -1196,7 +1210,7 @@ func tarWithOptionsTo(dest io.Writer, srcPath string, options *TarOptions) (resu
 				logrus.Errorf("Can't add file %q in %q to tar: %s; skipping", fsFilePath, root.Name(), err)
 				return nil
 			}
-			headers, err := ta.prepareAddFile(parentRoot, fsBasename, fi, relFilePath)
+			headers, err := ta.prepareAddFile(parentRoot, fsBasename, fi, relFilePath, rootCache)
 			if err != nil {
 				logrus.Errorf("Can't add file %q in %q to tar: %s; skipping", fsFilePath, root.Name(), err)
 			} else if headers != nil {

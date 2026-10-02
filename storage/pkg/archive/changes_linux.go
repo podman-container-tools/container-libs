@@ -17,6 +17,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"go.podman.io/storage/internal/rootlookupcache"
 	"go.podman.io/storage/internal/stat"
+	"go.podman.io/storage/internal/xattrs"
 	"go.podman.io/storage/pkg/idtools"
 	"go.podman.io/storage/pkg/system"
 	"golang.org/x/sys/unix"
@@ -85,11 +86,11 @@ func collectFileInfoForChanges(dir1, dir2 string, idmap1, idmap2 *idtools.IDMapp
 	return w.rootFileInfo1, w.rootFileInfo2, nil
 }
 
-// Register file fsPath with rootFI, which is accessible as parentRoot/fsBasename
+// Register file fsPath with rootFI, which is accessible as parentRoot/fsBasename (coming from rootCache)
 // and for which fi is already available.
 //
 // parentRoot+fi can be simultaneously nil, in that case do nothing.
-func walkchunk(rootFI *FileInfo, fsPath string, parentRoot *os.Root, fsBasename string, fi os.FileInfo) error {
+func walkchunk(rootFI *FileInfo, fsPath string, parentRoot *os.Root, fsBasename string, fi os.FileInfo, rootCache *rootlookupcache.Cache) error {
 	// WARNING: This is called in contexts where the contents of root may be maliciously
 	// concurrently modified.
 
@@ -110,7 +111,12 @@ func walkchunk(rootFI *FileInfo, fsPath string, parentRoot *os.Root, fsBasename 
 	}
 	info.stat = stat.FromFileInfo(fi)
 	var err error
-	info.capability, err = system.RootLgetxattr(parentRoot, fsBasename, "security.capability") // lgetxattr(2): fs access
+	xattrHandle, err := xattrs.NewLHandle(parentRoot, fsBasename, rootCache)
+	if err != nil {
+		return err
+	}
+	defer xattrHandle.Close()
+	info.capability, err = xattrHandle.Getxattr("security.capability") // lgetxattr(2): fs access
 	if err != nil && !errors.Is(err, system.ENOTSUP) {
 		return err
 	}
@@ -118,13 +124,13 @@ func walkchunk(rootFI *FileInfo, fsPath string, parentRoot *os.Root, fsBasename 
 	if err != nil {
 		return err
 	}
-	xattrs, err := system.RootLlistxattr(parentRoot, fsBasename)
+	xattrs, err := xattrHandle.Listxattr()
 	if err != nil && !errors.Is(err, system.ENOTSUP) {
 		return err
 	}
 	for _, key := range xattrs {
 		if strings.HasPrefix(key, "user.") {
-			value, err := system.RootLgetxattr(parentRoot, fsBasename, key)
+			value, err := xattrHandle.Getxattr(key)
 			if err != nil {
 				if errors.Is(err, system.E2BIG) {
 					logrus.Errorf("archive: Skipping xattr for file %q in %q since value is too big: %s", fsBasename, parentRoot.Name(), key)
@@ -162,10 +168,10 @@ func (w *walker) walk(fsPath string, fsBasename string, parentRoot1, parentRoot2
 	// Register these nodes with the return trees, unless we're still at the
 	// (already-created) roots:
 	if fsPath != "." {
-		if err := walkchunk(w.rootFileInfo1, fsPath, parentRoot1, fsBasename, i1); err != nil {
+		if err := walkchunk(w.rootFileInfo1, fsPath, parentRoot1, fsBasename, i1, w.rootCache1); err != nil {
 			return err
 		}
-		if err := walkchunk(w.rootFileInfo2, fsPath, parentRoot2, fsBasename, i2); err != nil {
+		if err := walkchunk(w.rootFileInfo2, fsPath, parentRoot2, fsBasename, i2, w.rootCache2); err != nil {
 			return err
 		}
 	}
@@ -417,7 +423,14 @@ func overlayDeletedFile(layers []string, rootCache *rootlookupcache.Cache, fsPat
 	if err != nil {
 		return "", err
 	}
-	opaque, err := system.RootLgetxattr(parentRoot, fsBasename, getOverlayOpaqueXattrName())
+	opaque, err := func() ([]byte, error) { // A scope for defer
+		xattrHandle, err := xattrs.NewLHandle(parentRoot, fsBasename, rootCache)
+		if err != nil {
+			return nil, err
+		}
+		defer xattrHandle.Close()
+		return xattrHandle.Getxattr(getOverlayOpaqueXattrName())
+	}()
 	if err != nil {
 		return "", fmt.Errorf("failed querying overlay opaque xattr: %w", err)
 	}
