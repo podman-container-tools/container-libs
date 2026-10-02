@@ -11,6 +11,45 @@ a TOML format that can be easily modified and versioned.
 
 By default, the configuration is read from `$XDG_CONFIG_HOME/containers/containers.conf` (or from `$HOME/.config/containers/containers.conf` if `$XDG_CONFIG_HOME` is unset), if it exists; otherwise from `/etc/containers/containers.conf`;  otherwise from `/usr/share/containers/containers.conf`.
 
+### Windows
+
+Podman on Windows does not run containers natively. Instead, `podman machine`
+creates a Linux virtual machine, and most settings in this file — anything
+under `[containers]`, for example — are applied by the container engine
+running **inside that VM**, not by the Windows host. A configuration file on the Windows host is ignored unless it is visible inside the VM.
+
+Starting with Podman 6, `podman machine` automatically mounts the host
+directory `%APPDATA%\containers` into the VM at `/etc/containers`.
+`%APPDATA%` already expands to `...\AppData\Roaming`, so the correct location
+for a drop-in file is:
+
+    %APPDATA%\containers\containers.conf.d\<name>.conf
+
+and **not** `%APPDATA%\Roaming\containers\...` (that path is doubled and is
+never read).
+
+After adding or editing a file, restart the machine so the VM picks up the
+change:
+
+    podman machine stop
+    podman machine start
+
+To confirm the file landed inside the VM:
+
+    podman machine ssh
+    cat /etc/containers/containers.conf.d/<name>.conf
+
+On Podman versions before this automatic mount existed, edit the
+configuration directly inside the VM instead:
+
+    podman machine ssh
+    # then create/edit, e.g.:
+    # /etc/containers/containers.conf.d/<name>.conf
+
+See **containers-config(5)** for the general file search/merge order; on
+Windows those paths apply inside the VM, not on the host.
+
+
 In addition to containers.conf, drop-in files using the same format from the following directories are also read:
  - `$XDG_CONFIG_HOME/containers/containers.conf.d` (or from `$HOME/.config/containers/containers.conf.d` if `$XDG_CONFIG_HOME` is unset)
  - `/etc/containers/containers.rootful.conf.d` (only when running as uid 0)
