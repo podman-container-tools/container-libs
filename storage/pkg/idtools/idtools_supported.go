@@ -5,6 +5,7 @@ package idtools
 import (
 	"errors"
 	"os/user"
+	"runtime"
 	"sync"
 	"unsafe"
 )
@@ -35,7 +36,10 @@ static FILE *subid_stderr(void) {
 */
 import "C"
 
-var onceInit sync.Once
+var (
+	libsubidLock     sync.Mutex
+	subidInitialized bool
+)
 
 func readSubid(username string, isUser bool) ([]subIDRange, error) {
 	var ret []subIDRange
@@ -49,9 +53,19 @@ func readSubid(username string, isUser bool) ([]subIDRange, error) {
 		uidstr = u.Uid
 	}
 
-	onceInit.Do(func() {
+	// Avoid the goroutine being switched to different threads during our calls.
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
+	// libsubid is not thread safe currently, concurrent calls often fail.
+	// https://github.com/shadow-maint/shadow/issues/1362
+	libsubidLock.Lock()
+	defer libsubidLock.Unlock()
+
+	if !subidInitialized {
 		C.subid_init(C.CString("storage"), C.subid_stderr())
-	})
+		subidInitialized = true
+	}
 
 	cUsername := C.CString(username)
 	defer C.free(unsafe.Pointer(cUsername))
