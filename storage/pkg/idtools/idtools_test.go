@@ -3,6 +3,8 @@ package idtools
 import (
 	"io/fs"
 	"os"
+	"os/user"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -453,5 +455,30 @@ func TestParseDevice(t *testing.T) {
 				assert.Equal(t, tt.wantMinor, minor)
 			}
 		})
+	}
+}
+
+func TestNewIDMappingsConcurrent(t *testing.T) {
+	user, err := user.Current()
+	require.NoError(t, err)
+	got, err := NewIDMappings(user.Username, user.Username)
+	if err != nil {
+		t.Skipf("No subid mappings found for user %s", user.Username)
+	}
+
+	wg := &sync.WaitGroup{}
+	res := make(chan *IDMappings, 10)
+	for range 10 {
+		wg.Go(func() {
+			got1, err := NewIDMappings(user.Username, user.Username)
+			require.NoError(t, err)
+			res <- got1
+		})
+	}
+	wg.Wait()
+	close(res)
+
+	for idmap := range res {
+		assert.Equal(t, got, idmap)
 	}
 }
