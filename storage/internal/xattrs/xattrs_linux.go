@@ -7,12 +7,46 @@ import (
 	"path"
 	"path/filepath"
 
+	"go.podman.io/storage/internal/rootlookupcache"
 	"golang.org/x/sys/unix"
 )
 
+// newLHandle creates a Handle for parentFile/fsBasename (using errorRoot/errorPath for error reporting).
+// If fsBasename is a symbolic link, it refers to the symbolic link, not to the target.
+func newLHandle(parentFile *os.File, fsBasename string, errorRoot *os.Root, errorPath string) (*Handle, error) {
+	// A path per fs.ValidPath should not contain a ".."; reject it so that we can ensure no escape from parentFile.
+	if fsBasename == ".." {
+		return nil, fmt.Errorf("trailing .. in newLhandle in %q", errorPath)
+	}
+	fd, err := syscallConnControl(parentFile, func(parentDir uintptr) (int, error) {
+		return unix.Openat(int(parentDir), filepath.FromSlash(fsBasename), unix.O_PATH|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return &Handle{
+		fd:        fd,
+		errorRoot: errorRoot,
+		errorPath: errorPath,
+	}, nil
+}
+
+// NewLHandle creates a Handle for fsBasename in parentRoot, which was the one last obtained from rootCache.
+// If fsBasename is a symbolic link, it refers to the symbolic link, not to the target.
+//
+// The handle must be closed using .Close().
+func NewLHandle(parentRoot *os.Root, fsBasename string, rootCache *rootlookupcache.Cache) (*Handle, error) {
+	parentFile, err := rootCache.FileForRoot(parentRoot)
+	if err != nil {
+		return nil, err
+	}
+	return newLHandle(parentFile, fsBasename, parentRoot, fsBasename)
+}
+
 // getxattr is the logic underlying Lgetxattr and RootLgetxattr.
 // Returns a []byte slice if the xattr is set and nil otherwise.
-func getxattr(syscallName string, pathInError string, getSyscall func(dest []byte) (int, error)) ([]byte, error) {
+func getxattr(syscallName string, pathInError func() string, getSyscall func(dest []byte) (int, error)) ([]byte, error) {
 	// Start with a 128 length byte array
 	dest := make([]byte, 128)
 	sz, errno := getSyscall(dest)
@@ -21,7 +55,7 @@ func getxattr(syscallName string, pathInError string, getSyscall func(dest []byt
 		// Buffer too small, use zero-sized buffer to get the actual size
 		sz, errno = getSyscall([]byte{})
 		if errno != nil {
-			return nil, &os.PathError{Op: syscallName, Path: pathInError, Err: errno}
+			return nil, &os.PathError{Op: syscallName, Path: pathInError(), Err: errno}
 		}
 		dest = make([]byte, sz)
 		sz, errno = getSyscall(dest)
@@ -31,7 +65,7 @@ func getxattr(syscallName string, pathInError string, getSyscall func(dest []byt
 	case errno == unix.ENODATA:
 		return nil, nil
 	case errno != nil:
-		return nil, &os.PathError{Op: syscallName, Path: pathInError, Err: errno}
+		return nil, &os.PathError{Op: syscallName, Path: pathInError(), Err: errno}
 	}
 
 	return dest[:sz], nil
@@ -41,8 +75,17 @@ func getxattr(syscallName string, pathInError string, getSyscall func(dest []byt
 // and associated with the given path in the file system.
 // Returns a []byte slice if the xattr is set and nil otherwise.
 func Lgetxattr(path string, attr string) ([]byte, error) {
-	return getxattr("lgetxattr", path, func(dest []byte) (int, error) {
+	return getxattr("lgetxattr", func() string { return path }, func(dest []byte) (int, error) {
 		return unix.Lgetxattr(path, attr, dest)
+	})
+}
+
+// Getxattr retrieves the value of the extended attribute identified by attr.
+// Returns a []byte slice if the xattr is set and nil otherwise.
+func (h *Handle) Getxattr(attr string) ([]byte, error) {
+	// Ideally we would use getxattrat() here, but as of 2026-05 that might be too recent.
+	return getxattr("Handle.Getxattr", h.pathInError, func(dest []byte) (int, error) {
+		return unix.Getxattr(fmt.Sprintf("/proc/self/fd/%d", h.fd), attr, dest)
 	})
 }
 
@@ -56,23 +99,14 @@ func RootLgetxattr(root *os.Root, fsPath string, attr string) ([]byte, error) {
 		return nil, err
 	}
 	defer parentDir.Close()
-	// A path per fs.ValidPath should not contain a ".."; reject it so that we can ensure no escape from parentDir.
-	fsBase := path.Base(fsPath)
-	if fsBase == ".." {
-		return nil, fmt.Errorf("trailing .. in RootLgetxattr(%q)", fsPath)
-	}
-	// Ideally we would use getxattrat() here, but as of 2026-05 that might be too recent.
-	fd, err := syscallConnControl(parentDir, func(parentDir uintptr) (int, error) {
-		return unix.Openat(int(parentDir), filepath.FromSlash(fsBase), unix.O_PATH|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
-	})
+
+	handle, err := newLHandle(parentDir, path.Base(fsPath), root, fsPath)
 	if err != nil {
 		return nil, err
 	}
-	defer unix.Close(fd)
+	defer handle.Close()
 
-	return getxattr("RootLgetxattr", fsPath, func(dest []byte) (int, error) {
-		return unix.Getxattr(fmt.Sprintf("/proc/self/fd/%d", fd), attr, dest)
-	})
+	return handle.Getxattr(attr)
 }
 
 // Lsetxattr sets the value of the extended attribute identified by attr
@@ -86,7 +120,7 @@ func Lsetxattr(path string, attr string, data []byte, flags int) error {
 }
 
 // listxattr is the logic underlying Llistxattr and RootLlistxattr.
-func listxattr(syscallName string, pathInError string, listSyscall func(dest []byte) (int, error)) ([]string, error) {
+func listxattr(syscallName string, pathInError func() string, listSyscall func(dest []byte) (int, error)) ([]string, error) {
 	dest := make([]byte, 128)
 	sz, errno := listSyscall(dest)
 
@@ -94,14 +128,14 @@ func listxattr(syscallName string, pathInError string, listSyscall func(dest []b
 		// Buffer too small, use zero-sized buffer to get the actual size
 		sz, errno = listSyscall([]byte{})
 		if errno != nil {
-			return nil, &os.PathError{Op: syscallName, Path: pathInError, Err: errno}
+			return nil, &os.PathError{Op: syscallName, Path: pathInError(), Err: errno}
 		}
 
 		dest = make([]byte, sz)
 		sz, errno = listSyscall(dest)
 	}
 	if errno != nil {
-		return nil, &os.PathError{Op: syscallName, Path: pathInError, Err: errno}
+		return nil, &os.PathError{Op: syscallName, Path: pathInError(), Err: errno}
 	}
 
 	var attrs []string
@@ -117,8 +151,16 @@ func listxattr(syscallName string, pathInError string, listSyscall func(dest []b
 // Llistxattr lists extended attributes associated with the given path
 // in the file system.
 func Llistxattr(path string) ([]string, error) {
-	return listxattr("llistxattr", path, func(dest []byte) (int, error) {
+	return listxattr("llistxattr", func() string { return path }, func(dest []byte) (int, error) {
 		return unix.Llistxattr(path, dest)
+	})
+}
+
+// Listxattr lists extended attributes associated with the given handle.
+func (h *Handle) Listxattr() ([]string, error) {
+	// Ideally we would use listxattrat() here, but as of 2026-05 that might be too recent.
+	return listxattr("Handle.Listxattr", h.pathInError, func(dest []byte) (int, error) {
+		return unix.Listxattr(fmt.Sprintf("/proc/self/fd/%d", h.fd), dest)
 	})
 }
 
@@ -131,21 +173,12 @@ func RootLlistxattr(root *os.Root, fsPath string) ([]string, error) {
 		return nil, err
 	}
 	defer parentDir.Close()
-	// A path per fs.ValidPath should not contain a ".."; reject it so that we can ensure no escape from parentDir.
-	fsBase := path.Base(fsPath)
-	if fsBase == ".." {
-		return nil, fmt.Errorf("trailing .. in RootLlistxattr(%q)", fsPath)
-	}
-	// Ideally we would use listxattrat() here, but as of 2026-05 that might be too recent.
-	fd, err := syscallConnControl(parentDir, func(parentDir uintptr) (int, error) {
-		return unix.Openat(int(parentDir), filepath.FromSlash(fsBase), unix.O_PATH|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
-	})
+
+	handle, err := newLHandle(parentDir, path.Base(fsPath), root, fsPath)
 	if err != nil {
 		return nil, err
 	}
-	defer unix.Close(fd)
+	defer handle.Close()
 
-	return listxattr("RootLlistxattr", fsPath, func(dest []byte) (int, error) {
-		return unix.Listxattr(fmt.Sprintf("/proc/self/fd/%d", fd), dest)
-	})
+	return handle.Listxattr()
 }

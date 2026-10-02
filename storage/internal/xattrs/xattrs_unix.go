@@ -2,7 +2,29 @@
 
 package xattrs
 
-import "os"
+import (
+	"os"
+	"path/filepath"
+
+	"golang.org/x/sys/unix"
+)
+
+// XattrHandle allows efficient llistxattr / llistxattr operations on a single file.
+type Handle struct {
+	fd int
+
+	// Only for error reporting
+	errorRoot *os.Root
+	errorPath string // Within errorRoot
+}
+
+func (h *Handle) Close() error {
+	return unix.Close(h.fd)
+}
+
+func (h *Handle) pathInError() string {
+	return filepath.Join(h.errorRoot.Name(), h.errorPath)
+}
 
 // syscallConnControl calls fn with the file descriptor of fd,
 // simplifying the boilerplate of f.SyscallConn().Control().

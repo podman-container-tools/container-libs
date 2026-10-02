@@ -4,7 +4,6 @@ package xattrs
 
 import (
 	"os"
-	"strconv"
 	"unsafe"
 
 	"golang.org/x/sys/unix"
@@ -12,13 +11,13 @@ import (
 
 // extattrGet is the logic underlying ExtattrGetLink and extattrGetFd.
 // Returns a []byte slice if the extattr is set and nil otherwise.
-func extattrGet(syscallName string, pathInError string, getSyscall func(dest uintptr, nbytes int) (int, error)) ([]byte, error) {
+func extattrGet(syscallName string, pathInError func() string, getSyscall func(dest uintptr, nbytes int) (int, error)) ([]byte, error) {
 	size, errno := getSyscall(uintptr(unsafe.Pointer(nil)), 0)
 	if errno != nil {
 		if errno == unix.ENOATTR {
 			return nil, nil
 		}
-		return nil, &os.PathError{Op: syscallName, Path: pathInError, Err: errno}
+		return nil, &os.PathError{Op: syscallName, Path: pathInError(), Err: errno}
 	}
 	if size == 0 {
 		return []byte{}, nil
@@ -27,7 +26,7 @@ func extattrGet(syscallName string, pathInError string, getSyscall func(dest uin
 	dest := make([]byte, size)
 	size, errno = getSyscall(uintptr(unsafe.Pointer(&dest[0])), size)
 	if errno != nil {
-		return nil, &os.PathError{Op: syscallName, Path: pathInError, Err: errno}
+		return nil, &os.PathError{Op: syscallName, Path: pathInError(), Err: errno}
 	}
 
 	return dest[:size], nil
@@ -38,7 +37,7 @@ func extattrGet(syscallName string, pathInError string, getSyscall func(dest uin
 // If the path is a symbolic link, the extended attribute is retrieved from the link itself.
 // Returns a []byte slice if the extattr is set and nil otherwise.
 func ExtattrGetLink(path string, attrnamespace int, attrname string) ([]byte, error) {
-	return extattrGet("extattr_get_link", path, func(dest uintptr, nbytes int) (int, error) {
+	return extattrGet("extattr_get_link", func() string { return path }, func(dest uintptr, nbytes int) (int, error) {
 		return unix.ExtattrGetLink(path, attrnamespace, attrname, dest, nbytes)
 	})
 }
@@ -46,8 +45,8 @@ func ExtattrGetLink(path string, attrnamespace int, attrname string) ([]byte, er
 // extattrGetFd retrieves the value of the extended attribute identified by attrname
 // in the given namespace and associated with the given file descriptor.
 // Returns a []byte slice if the extattr is set and nil otherwise.
-func extattrGetFd(fd int, attrnamespace int, attrname string) ([]byte, error) {
-	return extattrGet("extattr_get_fd", strconv.Itoa(fd), func(dest uintptr, nbytes int) (int, error) {
+func extattrGetFd(fd int, pathInError func() string, attrnamespace int, attrname string) ([]byte, error) {
+	return extattrGet("extattr_get_fd", pathInError, func(dest uintptr, nbytes int) (int, error) {
 		return unix.ExtattrGetFd(fd, attrnamespace, attrname, dest, nbytes)
 	})
 }
@@ -68,10 +67,10 @@ func ExtattrSetLink(path string, attrnamespace int, attrname string, data []byte
 }
 
 // extattrList is the logic underlying ExtattrListLink and extattrListFd.
-func extattrList(syscallName string, pathInError string, listSyscall func(dest uintptr, nbytes int) (int, error)) ([]string, error) {
+func extattrList(syscallName string, pathInError func() string, listSyscall func(dest uintptr, nbytes int) (int, error)) ([]string, error) {
 	size, errno := listSyscall(uintptr(unsafe.Pointer(nil)), 0)
 	if errno != nil {
-		return nil, &os.PathError{Op: syscallName, Path: pathInError, Err: errno}
+		return nil, &os.PathError{Op: syscallName, Path: pathInError(), Err: errno}
 	}
 	if size == 0 {
 		return []string{}, nil
@@ -80,7 +79,7 @@ func extattrList(syscallName string, pathInError string, listSyscall func(dest u
 	dest := make([]byte, size)
 	size, errno = listSyscall(uintptr(unsafe.Pointer(&dest[0])), size)
 	if errno != nil {
-		return nil, &os.PathError{Op: syscallName, Path: pathInError, Err: errno}
+		return nil, &os.PathError{Op: syscallName, Path: pathInError(), Err: errno}
 	}
 
 	var attrs []string
@@ -102,15 +101,15 @@ func extattrList(syscallName string, pathInError string, listSyscall func(dest u
 // in the specified namespace. If the path is a symbolic link, the attributes
 // are listed from the link itself.
 func ExtattrListLink(path string, attrnamespace int) ([]string, error) {
-	return extattrList("extattr_list_link", path, func(dest uintptr, nbytes int) (int, error) {
+	return extattrList("extattr_list_link", func() string { return path }, func(dest uintptr, nbytes int) (int, error) {
 		return unix.ExtattrListLink(path, attrnamespace, dest, nbytes)
 	})
 }
 
 // extattrListFd lists extended attributes associated with fd
 // in the specified namespace.
-func extattrListFd(fd int, attrnamespace int) ([]string, error) {
-	return extattrList("extattr_list_fd", strconv.Itoa(fd), func(dest uintptr, nbytes int) (int, error) {
+func extattrListFd(fd int, pathInError func() string, attrnamespace int) ([]string, error) {
+	return extattrList("extattr_list_fd", pathInError, func(dest uintptr, nbytes int) (int, error) {
 		return unix.ExtattrListFd(fd, attrnamespace, dest, nbytes)
 	})
 }

@@ -11,6 +11,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.podman.io/storage/internal/rootlookupcache"
 )
 
 const (
@@ -119,6 +120,37 @@ func TestXattrs(t *testing.T) {
 		}, func(path string) ([]string, error) {
 			return Llistxattr(filepath.Join(dir, path))
 		})
+}
+
+func TestHandleXattrs(t *testing.T) {
+	dir := t.TempDir()
+	root, err := os.OpenRoot(dir)
+	require.NoError(t, err)
+	defer root.Close()
+	rootCache := rootlookupcache.NewCache(root)
+	defer rootCache.Close()
+
+	testXattrs(t, dir,
+		func(path, attr string) ([]byte, error) {
+			parentRoot, fsBasename, err := rootCache.PreparePath(path)
+			require.NoError(t, err)
+			handle, err := NewLHandle(parentRoot, fsBasename, rootCache)
+			require.NoError(t, err)
+			defer handle.Close()
+			return handle.Getxattr(attr)
+		}, func(path string) ([]string, error) {
+			parentRoot, fsBasename, err := rootCache.PreparePath(path)
+			require.NoError(t, err)
+			handle, err := NewLHandle(parentRoot, fsBasename, rootCache)
+			require.NoError(t, err)
+			defer handle.Close()
+			return handle.Listxattr()
+		})
+
+	parentRoot, _, err := rootCache.PreparePath(".") // PreparePath("..") would already reject it.
+	require.NoError(t, err)
+	_, err = NewLHandle(parentRoot, "..", rootCache)
+	assert.Error(t, err)
 }
 
 func TestRootXattrs(t *testing.T) {
