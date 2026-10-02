@@ -71,6 +71,8 @@ func (o overlayWhiteoutConverter) convertWriteWithGetxattr(hdr *tar.Header, fi o
 		hdr.Mode = 0
 		hdr.Typeflag = tar.TypeReg
 		hdr.Size = 0
+		hdr.Uid = 0
+		hdr.Gid = 0
 	}
 
 	if fi.Mode()&os.ModeDir != 0 {

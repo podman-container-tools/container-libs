@@ -692,30 +692,6 @@ func (ta *tarWriter) prepareAddFile(root *os.Root, fsPath, tarName string) (*add
 		}
 	}
 
-	// handle re-mapping container ID mappings back to host ID mappings before
-	// writing tar headers/files. We skip whiteout files because they were written
-	// by the kernel and already have proper ownership relative to the host
-	if !strings.HasPrefix(filepath.Base(hdr.Name), WhiteoutPrefix) && !ta.IDMappings.Empty() {
-		fileIDPair, err := getFileUIDGID(fi.Sys())
-		if err != nil {
-			return nil, err
-		}
-		hdr.Uid, hdr.Gid, err = ta.IDMappings.ToContainer(fileIDPair)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	// explicitly override with ChownOpts
-	if ta.ChownOpts != nil {
-		hdr.Uid = ta.ChownOpts.UID
-		hdr.Gid = ta.ChownOpts.GID
-		// Don’t expose the user names from the local system; they probably don’t match the ta.ChownOpts value anyway,
-		// and they unnecessarily give recipients of the tar file potentially private data.
-		hdr.Uname = ""
-		hdr.Gname = ""
-	}
-
 	// if override timestamp set, replace all times with this
 	if ta.Timestamp != nil {
 		hdr.ModTime = *ta.Timestamp
@@ -746,6 +722,35 @@ func (ta *tarWriter) prepareAddFile(root *os.Root, fsPath, tarName string) (*add
 		if err != nil {
 			return nil, err
 		}
+	}
+
+	// Map host IDs to container IDs after converting whiteouts. Native overlay
+	// whiteouts can be owned by IDs outside the container's mappings.
+	if !strings.HasPrefix(filepath.Base(hdr.Name), WhiteoutPrefix) && !ta.IDMappings.Empty() {
+		fileIDPair, err := getFileUIDGID(fi.Sys())
+		if err != nil {
+			return nil, err
+		}
+		hdr.Uid, hdr.Gid, err = ta.IDMappings.ToContainer(fileIDPair)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// explicitly override with ChownOpts
+	if ta.ChownOpts != nil {
+		hdr.Uid = ta.ChownOpts.UID
+		hdr.Gid = ta.ChownOpts.GID
+		// Don’t expose the user names from the local system; they probably don’t match the ta.ChownOpts value anyway,
+		// and they unnecessarily give recipients of the tar file potentially private data.
+		hdr.Uname = ""
+		hdr.Gname = ""
+	}
+	if result.extraWhiteout != nil {
+		result.extraWhiteout.Uid = hdr.Uid
+		result.extraWhiteout.Gid = hdr.Gid
+		result.extraWhiteout.Uname = hdr.Uname
+		result.extraWhiteout.Gname = hdr.Gname
 	}
 
 	return result, nil
