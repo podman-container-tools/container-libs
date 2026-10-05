@@ -98,8 +98,8 @@ func readSubid(username string, isUser bool) (ranges, error) {
 	}
 	defer C.subid_free(unsafe.Pointer(cRanges))
 
-	for i := 0; i < int(nRanges); i++ {
-		r := C.get_range(cRanges, C.int(i))
+	for i := C.int(0); i < nRanges; i++ {
+		r := C.get_range(cRanges, i)
 		newRange := subIDRange{
 			Start:  int(r.start),
 			Length: int(r.count),
