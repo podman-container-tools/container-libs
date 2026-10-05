@@ -21,12 +21,6 @@ struct subid_range get_range(struct subid_range *ranges, int i)
     return ranges[i];
 }
 
-// helper for stderr to avoid referencing C.stderr from Go code,
-// which breaks cgo on musl due to stderr being declared as FILE *const
-static FILE *subid_stderr(void) {
-    return stderr;
-}
-
 #if !defined(SUBID_ABI_MAJOR) || (SUBID_ABI_MAJOR < 4)
 # define subid_init libsubid_init
 # define subid_get_uid_ranges get_subuid_ranges
@@ -36,6 +30,13 @@ static FILE *subid_stderr(void) {
 #if !defined(SUBID_ABI_MAJOR) || (SUBID_ABI_MAJOR < 5)
 # define subid_free free
 #endif
+
+// Define our own static init function here instead of calling subid_init
+// from the go code so we can have the storage string inlined here.
+// static variables cannot be referenced from the go code.
+static void containers_storage_subid_init() {
+    subid_init("storage", stderr);
+}
 
 */
 import "C"
@@ -69,7 +70,7 @@ func readSubid(username string, isUser bool) (ranges, error) {
 	defer runtime.UnlockOSThread()
 
 	if !subidInitialized {
-		C.subid_init(C.CString("storage"), C.subid_stderr())
+		C.containers_storage_subid_init()
 		subidInitialized = true
 	}
 
