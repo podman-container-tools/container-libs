@@ -710,7 +710,7 @@ func GetHostIDMappings(pid string) ([]specs.LinuxIDMapping, []specs.LinuxIDMappi
 func GetSubIDMappings(usernameForUIDs, usernameForGIDs string) ([]specs.LinuxIDMapping, []specs.LinuxIDMapping, error) {
 	mappings, err := idtools.NewIDMappings(usernameForUIDs, usernameForGIDs)
 	if err != nil {
-		return nil, nil, fmt.Errorf("reading subuid mappings for user %q and subgid mappings for user %q: %w", usernameForUIDs, usernameForGIDs, err)
+		return nil, nil, err
 	}
 	var uidmap, gidmap []specs.LinuxIDMapping
 	for _, m := range mappings.UIDs() {
