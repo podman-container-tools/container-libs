@@ -102,9 +102,12 @@ func (d *Driver) List() (secrets []string, err error) {
 		return nil, fmt.Errorf("failed to read secret directory: %w", err)
 	}
 	for _, f := range files {
-		fileName := f.Name()
-		withoutSuffix := fileName[:len(fileName)-len(".gpg")]
-		secrets = append(secrets, withoutSuffix)
+		if f.IsDir() {
+			continue
+		}
+		if name, ok := strings.CutSuffix(f.Name(), ".gpg"); ok {
+			secrets = append(secrets, name)
+		}
 	}
 	sort.Strings(secrets)
 	return secrets, nil
@@ -117,8 +120,16 @@ func (d *Driver) Lookup(id string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Check file existence before invoking GPG. GPG exits non-zero both when
+	// the file is missing and when decryption fails (e.g. expired agent cache)
+	if err := fileutils.Exists(key); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("%s: %w", id, define.ErrNoSuchSecret)
+		}
+		return nil, fmt.Errorf("accessing secret %s: %w", id, err)
+	}
 	if err := d.gpg(context.TODO(), nil, out, "--decrypt", key); err != nil {
-		return nil, fmt.Errorf("%s: %w", id, define.ErrNoSuchSecret)
+		return nil, fmt.Errorf("decrypting secret %s: %w", id, err)
 	}
 	if out.Len() == 0 {
 		return nil, fmt.Errorf("%s: %w", id, define.ErrNoSuchSecret)
@@ -128,14 +139,14 @@ func (d *Driver) Lookup(id string) ([]byte, error) {
 
 // Store saves the bytes associated with an ID. An error is returned if the ID already exists.
 func (d *Driver) Store(id string, data []byte) error {
-	if _, err := d.Lookup(id); err == nil {
-		return fmt.Errorf("%s: %w", id, define.ErrSecretIDExists)
-	}
-	in := bytes.NewReader(data)
 	key, err := d.getPath(id)
 	if err != nil {
 		return err
 	}
+	if err := fileutils.Exists(key); err == nil {
+		return fmt.Errorf("%s: %w", id, define.ErrSecretIDExists)
+	}
+	in := bytes.NewReader(data)
 	return d.gpg(context.TODO(), in, nil, "--encrypt", "-r", d.KeyID, "-o", key)
 }
 
@@ -162,8 +173,15 @@ func (d *Driver) gpg(ctx context.Context, in io.Reader, out io.Writer, args ...s
 	cmd.Env = os.Environ()
 	cmd.Stdin = in
 	cmd.Stdout = out
-	cmd.Stderr = io.Discard
-	return cmd.Run()
+	var errBuf bytes.Buffer
+	cmd.Stderr = &errBuf
+	if err := cmd.Run(); err != nil {
+		if stderr := strings.TrimSpace(errBuf.String()); stderr != "" {
+			return fmt.Errorf("%w: %s", err, stderr)
+		}
+		return err
+	}
+	return nil
 }
 
 func (d *Driver) getPath(id string) (string, error) {
