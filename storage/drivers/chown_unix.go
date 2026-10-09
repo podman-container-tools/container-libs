@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sync"
 	"syscall"
+	"time"
 
 	"go.podman.io/storage/pkg/idtools"
 	"go.podman.io/storage/pkg/system"
@@ -69,11 +71,7 @@ func (c *platformChowner) LChown(path string, info os.FileInfo, toHost, toContai
 		// inodes on copy-up (as it is with overlay with index=off) to maintain the original
 		// link and correct file ownership.
 
-		// The target already exists so remove it before creating the link to the new target.
-		if err := os.Remove(path); err != nil {
-			return err
-		}
-		return os.Link(oldTarget, path)
+		return relinkPreservingParentMtime(oldTarget, path)
 	}
 
 	// Map an on-disk UID/GID pair from host to container
@@ -131,4 +129,23 @@ func (c *platformChowner) LChown(path string, info os.FileInfo, toHost, toContai
 
 	}
 	return nil
+}
+
+// The caller holds the chowner mutex across capture, relink, and restoration so
+// concurrent hard links in the same directory cannot capture a modified mtime.
+func relinkPreservingParentMtime(oldTarget, path string) (retErr error) {
+	parent := filepath.Dir(path)
+	info, err := os.Stat(parent)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		retErr = errors.Join(retErr, os.Chtimes(parent, time.Time{}, info.ModTime()))
+	}()
+
+	// The target already exists so remove it before creating the link to the new target.
+	if err := os.Remove(path); err != nil {
+		return err
+	}
+	return os.Link(oldTarget, path)
 }
