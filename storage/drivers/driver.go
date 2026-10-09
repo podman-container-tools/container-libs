@@ -414,6 +414,46 @@ type FileGetCloser interface {
 	Close() error
 }
 
+// SplitDirFDStreamDriver is implemented by storage drivers that can give a
+// consumer direct access to the files of a layer.
+//
+// This API is experimental and can be changed without bumping the major version number.
+type SplitDirFDStreamDriver interface {
+	Driver
+
+	// LayerFiles opens access to the files of a layer.  The caller is
+	// responsible for closing the result.
+	//
+	// flatNames maps the name of a tar entry to the name its content is
+	// stored under when the layer is stored in the flat layout composefs
+	// uses, or is nil if that is not known.  The driver knows whether the
+	// layer is stored that way, and ignores flatNames if it is not.
+	LayerFiles(id string, flatNames map[string]string) (LayerFiles, error)
+}
+
+// LayerFiles delegates access to the files making up one layer, so that
+// their content can be referenced in a stream instead of copied into it.
+//
+// This API is experimental and can be changed without bumping the major version number.
+type LayerFiles interface {
+	// DirFDs returns the directories handed to the consumer alongside the
+	// stream.  FileBackedData chunks reference them by index.
+	DirFDs() []*os.File
+
+	// Lookup reports where the consumer can find the content of the tar
+	// entry called name, which is size bytes long.  It returns the index
+	// of the directory in DirFDs() and the name to open relative to it.
+	//
+	// ok is false when the entry has no usable file behind it - it does
+	// not exist under that name, it is not a regular file, it no longer
+	// matches size, or onlyWorldReadable is set and it is not readable by
+	// everyone - in which case the content has to be sent inline.
+	Lookup(name string, size int64, onlyWorldReadable bool) (index int, filename string, ok bool, err error)
+
+	// Close releases the directory file descriptors.
+	Close() error
+}
+
 // Checker makes checks on specified filesystems.
 type Checker interface {
 	// IsMounted returns true if the provided path is mounted for the specific checker

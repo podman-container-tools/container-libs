@@ -16,3 +16,8 @@ import (
 func NewDiffer(ctx context.Context, store storage.Store, blobDigest digest.Digest, blobSize int64, annotations map[string]string, iss ImageSourceSeekable) (graphdriver.Differ, error) {
 	return nil, newErrFallbackToOrdinaryLayerDownload(errors.New("format not supported on this system"))
 }
+
+// LayerFlatFileNames is not supported on this platform.
+func LayerFlatFileNames(store storage.Store, layerID string) (map[string]string, error) {
+	return nil, nil
+}
