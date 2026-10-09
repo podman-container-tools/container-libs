@@ -3,6 +3,7 @@ package test
 
 import (
 	"testing"
+	"time"
 
 	digest "github.com/opencontainers/go-digest"
 	imgspecv1 "github.com/opencontainers/image-spec/specs-go/v1"
@@ -69,6 +70,22 @@ func GenericCache(t *testing.T, newTestCache func(t *testing.T) blobinfocache.Bl
 	}
 }
 
+// recordKnownLocation records a location and then waits until time.Now()
+// returns a different value.
+//
+// These tests depend on candidates coming back in the order their locations
+// were recorded, and the caches use time.Now() to establish that order.
+// time.Now() does not return a distinct value on every call, the resolution
+// can be a microsecond or worse depending on the platform, and recording a
+// location takes well under that. Without waiting, two locations recorded one
+// after the other can end up sharing a timestamp and the order is then
+// undefined.
+func recordKnownLocation(cache blobinfocache.BlobInfoCache2, transport types.ImageTransport, scope types.BICTransportScope, blobDigest digest.Digest, location types.BICLocationReference) {
+	cache.RecordKnownLocation(transport, scope, blobDigest, location)
+	for start := time.Now(); time.Now().Equal(start); {
+	}
+}
+
 func testGenericUncompressedDigest(t *testing.T, cache blobinfocache.BlobInfoCache2) {
 	// Nothing is known.
 	assert.Equal(t, digest.Digest(""), cache.UncompressedDigest(digestUnknown))
@@ -131,8 +148,8 @@ func testGenericRecordKnownLocations(t *testing.T, cache blobinfocache.BlobInfoC
 			for _, digest := range []digest.Digest{digestCompressedA, digestCompressedB} { // Two different digests should not affect each other either.
 				lr1 := types.BICLocationReference{Opaque: scopeName + "1"}
 				lr2 := types.BICLocationReference{Opaque: scopeName + "2"}
-				cache.RecordKnownLocation(transport, scope, digest, lr2)
-				cache.RecordKnownLocation(transport, scope, digest, lr1)
+				recordKnownLocation(cache, transport, scope, digest, lr2)
+				recordKnownLocation(cache, transport, scope, digest, lr1)
 				assert.Equal(t, []types.BICReplacementCandidate{
 					{Digest: digest, Location: lr1},
 					{Digest: digest, Location: lr2},
@@ -230,7 +247,7 @@ func testGenericCandidateLocations(t *testing.T, cache blobinfocache.BlobInfoCac
 		// Record "2" entries before "1" entries; then results should sort "1" (more recent) before "2" (older)
 		for _, suffix := range []string{"2", "1"} {
 			for _, e := range digestNameSet {
-				cache.RecordKnownLocation(transport, scope, e.d, types.BICLocationReference{Opaque: scopeName + e.n + suffix})
+				recordKnownLocation(cache, transport, scope, e.d, types.BICLocationReference{Opaque: scopeName + e.n + suffix})
 			}
 		}
 
@@ -362,7 +379,7 @@ func testGenericCandidateLocations2(t *testing.T, cache blobinfocache.BlobInfoCa
 		// Record "2" entries before "1" entries; then results should sort "1" (more recent) before "2" (older)
 		for _, suffix := range []string{"2", "1"} {
 			for _, e := range digestNameSetPrioritization {
-				cache.RecordKnownLocation(transport, scope, e.d, types.BICLocationReference{Opaque: scopeName + e.n + suffix})
+				recordKnownLocation(cache, transport, scope, e.d, types.BICLocationReference{Opaque: scopeName + e.n + suffix})
 			}
 		}
 		// Clear any "known" compression values, except on the first loop where they've never been set.
@@ -540,7 +557,7 @@ func testGenericCandidateLocations2(t *testing.T, cache blobinfocache.BlobInfoCa
 		// Tests of candidate filtering
 		// ----------------------------
 		for _, e := range digestNameSetFiltering {
-			cache.RecordKnownLocation(transport, scope, e.d, types.BICLocationReference{Opaque: scopeName + e.n})
+			recordKnownLocation(cache, transport, scope, e.d, types.BICLocationReference{Opaque: scopeName + e.n})
 		}
 		for _, e := range digestNameSetFiltering {
 			cache.RecordDigestCompressorData(e.d, blobinfocache.DigestCompressorData{
