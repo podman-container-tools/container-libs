@@ -13,9 +13,9 @@
 %define netavark_epoch 2
 %endif
 
-# Red Hat keys already exist on rhel envs, need them on Fedora
+# Red Hat keys already exist on rhel envs, need them on Fedora, ELN,
 # and CentOS Stream.
-%if %{defined fedora} || %{defined centos}
+%if %{defined fedora} || %{defined centos} || %{defined eln}
 %define need_redhat_keys 1
 %endif
 
