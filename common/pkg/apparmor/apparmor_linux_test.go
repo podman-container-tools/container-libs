@@ -3,8 +3,11 @@
 package apparmor
 
 import (
+	"bytes"
 	"os"
+	"strings"
 	"testing"
+	"text/template"
 )
 
 type versionExpected struct {
@@ -128,6 +131,32 @@ func TestInstallDefault(t *testing.T) {
 		t.Fatalf("Couldn't remove AppArmor profile '%s': %v", profile, err)
 	}
 	checkLoaded(false)
+}
+
+func TestStackedProfileRules(t *testing.T) {
+	compiled, err := template.New("apparmor_profile").Parse(defaultProfileTemplate)
+	if err != nil {
+		t.Fatalf("Failed to parse template: %v", err)
+	}
+
+	p := profileData{
+		Name:    "test-profile",
+		Version: 300000,
+	}
+
+	var buf bytes.Buffer
+	if err := compiled.Execute(&buf, p); err != nil {
+		t.Fatalf("Failed to execute template: %v", err)
+	}
+
+	output := buf.String()
+
+	if !strings.Contains(output, "signal (send,receive) peer=test-profile//&*,") {
+		t.Error("Missing stacked profile signal rule")
+	}
+	if !strings.Contains(output, "ptrace (trace,read) peer=test-profile//&*,") {
+		t.Error("Missing stacked profile ptrace rule")
+	}
 }
 
 func TestDefaultContent(t *testing.T) {
