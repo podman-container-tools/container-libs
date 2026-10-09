@@ -2,7 +2,9 @@ package docker
 
 import (
 	"errors"
+	"fmt"
 	"math"
+	"net"
 	"net/http"
 	"testing"
 	"time"
@@ -11,6 +13,62 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// timeoutValueError implements net.Error with a configurable Timeout() return value.
+type timeoutValueError struct {
+	isTimeout bool
+}
+
+func (e *timeoutValueError) Error() string   { return "network error" }
+func (e *timeoutValueError) Timeout() bool   { return e.isTimeout }
+func (e *timeoutValueError) Temporary() bool { return false }
+
+func TestIsRetryableNetworkError(t *testing.T) {
+	for _, c := range []struct {
+		name     string
+		err      error
+		expected bool
+	}{
+		{
+			// A direct timeout error from the network layer should be retryable.
+			name:     "net.Error with Timeout() true",
+			err:      &timeoutValueError{isTimeout: true},
+			expected: true,
+		},
+		{
+			// Timeout errors wrapped by fmt.Errorf should still be detected
+			// via errors.As unwrapping.
+			name:     "wrapped net.Error with Timeout() true",
+			err:      fmt.Errorf("read failed: %w", &timeoutValueError{isTimeout: true}),
+			expected: true,
+		},
+		{
+			// A net.Error that is not a timeout (e.g. a connection refused)
+			// should not be retryable.
+			name:     "net.Error with Timeout() false",
+			err:      &timeoutValueError{isTimeout: false},
+			expected: false,
+		},
+		{
+			// A plain error with no net.Error in the chain should not be retryable.
+			name:     "plain error",
+			err:      errors.New("something broke"),
+			expected: false,
+		},
+		{
+			// net.OpError is the concrete type returned by real socket operations;
+			// verify that errors.As can unwrap through it to find the timeout.
+			name:     "net.OpError wrapping timeout",
+			err:      &net.OpError{Op: "read", Err: &timeoutValueError{isTimeout: true}},
+			expected: true,
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			result := isRetryableNetworkError(c.err)
+			assert.Equal(t, c.expected, result)
+		})
+	}
+}
 
 func TestParseDecimalInString(t *testing.T) {
 	for _, prefix := range []string{"", "text", "0"} {
