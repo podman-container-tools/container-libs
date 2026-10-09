@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"iter"
 	"net/http"
 	"net/url"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/docker/distribution/registry/api/errcode"
@@ -50,6 +52,7 @@ const (
 	blobsPath               = "/v2/%s/blobs/%s"
 	blobUploadPath          = "/v2/%s/blobs/uploads/"
 	extensionsSignaturePath = "/extensions/v2/%s/signatures/%s"
+	referrersPath           = "/v2/%s/referrers/%s"
 
 	minimumTokenLifetimeSeconds = 60
 
@@ -107,7 +110,10 @@ type dockerClient struct {
 	registryToken          string
 	signatureBase          lookasideStorageBase
 	useSigstoreAttachments bool
-	scope                  authScope
+	// sigstoreAttachmentsWrite selects the mechanisms used to write sigstore attachments.
+	// The zero value is treated as defaultSigstoreAttachmentsWrite.
+	sigstoreAttachmentsWrite sigstoreAttachmentsWriteMode
+	scope                    authScope
 	// namespaceProxy enables OCI distribution-spec registry proxying.
 	// When set, an "ns" query parameter is appended to all requests.
 	namespaceProxy string
@@ -128,6 +134,10 @@ type dockerClient struct {
 	// Private state for logResponseWarnings
 	reportedWarningsLock sync.Mutex
 	reportedWarnings     *set.Set[string]
+	// referrersAPIUnsupported records that the registry answered the Referrers API endpoint in a way
+	// that shows it does not implement it. Set at most once, so that later lookups on this client
+	// (e.g. for the other instances of a manifest list) skip straight to the tag schema fallback.
+	referrersAPIUnsupported atomic.Bool
 }
 
 type authScope struct {
@@ -226,6 +236,7 @@ func newDockerClientFromRef(sys *types.SystemContext, ref dockerReference, regis
 	}
 	client.signatureBase = sigBase
 	client.useSigstoreAttachments = registryConfig.useSigstoreAttachments(ref)
+	client.sigstoreAttachmentsWrite = registryConfig.sigstoreAttachmentsWrite(ref)
 	client.scope.resourceType = "repository"
 	client.scope.actions = actions
 	client.scope.remoteName = reference.Path(ref.ref)
@@ -1244,6 +1255,304 @@ func (c *dockerClient) getSigstoreAttachmentManifest(ctx context.Context, ref do
 		return nil, fmt.Errorf("parsing manifest %s: %w", sigstoreRef.String(), err)
 	}
 	return res, nil
+}
+
+const (
+	// maxReferrersPages is the maximum number of Referrers API pages to follow via Link headers.
+	maxReferrersPages = 32
+	// maxReferrersToScan is the maximum number of referrer index entries to iterate.
+	// This prevents unbounded CPU from scanning a bloated index where most entries
+	// are filtered out by artifact type.
+	maxReferrersToScan = 1024
+	// maxReferrersToProcess is the maximum number of referrer manifests to fetch.
+	// This bounds the network fan-out from a malicious or bloated referrers index.
+	maxReferrersToProcess = 64
+)
+
+// sigstoreReferrerArtifactType is the artifactType cosign uses for OCI 1.1 referrer manifests
+// carrying signatures (as opposed to attestations or SBOMs, which use different types).
+const sigstoreReferrerArtifactType = "application/vnd.dev.cosign.artifact.sig.v1+json"
+
+// getReferrers queries the OCI Referrers API for artifacts attached to the given digest.
+// If artifactType is not empty, the registry is asked to filter by it; callers must still
+// filter the result themselves because registries are allowed to ignore the filter.
+// It falls back to the referrers tag schema if the registry does not support the API.
+// It returns (nil, _, nil) if no referrers are found; apiSupported reports whether the
+// registry answered via the Referrers API (as opposed to the tag schema fallback).
+func (c *dockerClient) getReferrers(ctx context.Context, ref dockerReference, d digest.Digest, artifactType string) (index *imgspecv1.Index, apiSupported bool, err error) {
+	if err := d.Validate(); err != nil { // Make sure d.String() doesn't contain any unexpected characters
+		return nil, false, err
+	}
+	if c.referrersAPIUnsupported.Load() {
+		logrus.Debugf("Not querying the Referrers API for %s: %s is known not to implement it", d, c.registry)
+		index, err := c.getReferrersFallbackTag(ctx, ref, d)
+		return index, false, err
+	}
+	path := fmt.Sprintf(referrersPath, reference.Path(ref.ref), d)
+	if artifactType != "" {
+		// A registry is allowed to ignore the filter, and reports whether it applied it using the
+		// org.opencontainers.referrers.filtersApplied annotation on the returned index. We deliberately
+		// ignore that annotation and always re-filter in the caller: that is correct either way, and
+		// avoids depending on the registry to report accurately.
+		path += "?artifactType=" + url.QueryEscape(artifactType)
+	}
+	headers := map[string][]string{
+		"Accept": {imgspecv1.MediaTypeImageIndex},
+	}
+	// Used as the base for resolving relative Link header URLs.
+	requestURL, err := c.resolveRequestURL(path)
+	if err != nil {
+		return nil, false, err
+	}
+	logrus.Debugf("Looking for OCI referrers for %s in %s", d, ref.ref.Name())
+	res, err := c.makeRequest(ctx, http.MethodGet, path, headers, nil, v2Auth, nil)
+	if err != nil {
+		return nil, false, err
+	}
+	defer func() { // closure: res is reassigned during pagination
+		if res != nil {
+			res.Body.Close()
+		}
+	}()
+	// 401 and 403 are included deliberately: some registries and proxies hide the endpoint behind
+	// credentials that are not the ones used for the rest of the repository. There is nothing the
+	// caller can do about that, and it must not hide the signatures stored in the cosign tag, so
+	// treat it like a registry that does not implement the API instead of failing loudly.
+	if res.StatusCode == http.StatusNotFound || res.StatusCode == http.StatusMethodNotAllowed ||
+		res.StatusCode == http.StatusNotImplemented || res.StatusCode == http.StatusUnauthorized ||
+		res.StatusCode == http.StatusForbidden {
+		logrus.Debugf("Registry does not serve the Referrers API (%d), falling back to tag schema", res.StatusCode)
+		_, _ = io.Copy(io.Discard, res.Body)
+		return c.referrersAPIUnavailable(ctx, ref, d)
+	}
+	if res.StatusCode != http.StatusOK {
+		return nil, false, fmt.Errorf("fetching referrers for %s in %s: %w", d, ref.ref.Name(), registryHTTPResponseToError(res))
+	}
+
+	// A wrong Content-Type on the first page (e.g. an HTML page from a non-conformant proxy)
+	// means the registry does not implement the API; use the tag schema instead.
+	if ct := simplifyContentType(res.Header.Get("Content-Type")); ct != imgspecv1.MediaTypeImageIndex {
+		logrus.Debugf("Unexpected Content-Type %q for referrers response, falling back to tag schema", ct)
+		_, _ = io.Copy(io.Discard, res.Body)
+		return c.referrersAPIUnavailable(ctx, ref, d)
+	}
+
+	var combined imgspecv1.Index
+	for page := 0; ; page++ {
+		body, err := iolimits.ReadAtMost(res.Body, iolimits.MaxManifestBodySize)
+		if err != nil {
+			return nil, true, err
+		}
+		var index imgspecv1.Index
+		if err := json.Unmarshal(body, &index); err != nil {
+			return nil, true, fmt.Errorf("decoding referrers response for %s: %w", d, err)
+		}
+		combined.Manifests = append(combined.Manifests, index.Manifests...)
+		if len(combined.Manifests) >= maxReferrersToScan {
+			logrus.Debugf("Accumulated %d referrer descriptors, stopping pagination early", len(combined.Manifests))
+			break
+		}
+
+		nextLink := nextLinkURL(res.Header.Values("Link"))
+		if nextLink == "" {
+			break
+		}
+		if page+1 >= maxReferrersPages {
+			logrus.Debugf("Reached referrers pagination limit (%d pages), stopping", maxReferrersPages)
+			break
+		}
+		res.Body.Close()
+		res = nil // avoid double-close in the deferred closure
+		nextURL, err := requestURL.Parse(nextLink)
+		if err != nil {
+			return nil, true, fmt.Errorf("parsing referrers Link header URL: %w", err)
+		}
+		// Never follow a Link to a different server: we would send this registry’s credentials there.
+		if nextURL.Scheme != requestURL.Scheme || nextURL.Host != requestURL.Host {
+			return nil, true, fmt.Errorf("referrers Link header for %s points to an unexpected location %s", d, nextURL.Redacted())
+		}
+		res, err = c.makeRequestToResolvedURL(ctx, http.MethodGet, nextURL, headers, nil, -1, v2Auth, nil)
+		if err != nil {
+			return nil, true, err
+		}
+		if res.StatusCode != http.StatusOK {
+			return nil, true, fmt.Errorf("fetching referrers page %d for %s in %s: %w", page+1, d, ref.ref.Name(), registryHTTPResponseToError(res))
+		}
+		// Unlike on the first page, we have already committed to the API here, so a wrong type is an error.
+		if ct := simplifyContentType(res.Header.Get("Content-Type")); ct != imgspecv1.MediaTypeImageIndex {
+			return nil, true, fmt.Errorf("unexpected Content-Type %q on referrers page %d for %s", ct, page+1, d)
+		}
+		requestURL = nextURL
+	}
+	if len(combined.Manifests) == 0 {
+		return nil, true, nil
+	}
+	return &combined, true, nil
+}
+
+// nextLinkURL extracts the URI reference (possibly relative) from the Link header fields
+// in linkHeaders with rel="next". Returns "" if no such link is present.
+func nextLinkURL(linkHeaders []string) string {
+	for _, header := range linkHeaders {
+		rest := header
+		for {
+			// Each link-value is "<" URI-Reference ">" *( ";" link-param ), separated by commas.
+			start := strings.Index(rest, "<")
+			if start < 0 {
+				break
+			}
+			end := strings.Index(rest[start:], ">")
+			if end < 0 {
+				break
+			}
+			uri := rest[start+1 : start+end]
+			var params string
+			params, rest = splitLinkParams(rest[start+end+1:])
+			if hasLinkRel(params, "next") {
+				return uri
+			}
+		}
+	}
+	return ""
+}
+
+// splitLinkParams splits s at the first comma outside of a quoted string,
+// returning the link parameters before it and the remainder after it.
+func splitLinkParams(s string) (params, rest string) {
+	inQuotes := false
+	for i, c := range s {
+		switch {
+		case c == '"':
+			inQuotes = !inQuotes
+		case c == ',' && !inQuotes:
+			return s[:i], s[i+1:]
+		}
+	}
+	return s, ""
+}
+
+// hasLinkRel checks whether a Link header parameter string contains a rel parameter
+// including the relation type rel. Per RFC 8288, the value may be a quoted, space-separated
+// list of relation types, and matching is case-insensitive.
+func hasLinkRel(params, rel string) bool {
+	for param := range strings.SplitSeq(params, ";") {
+		k, v, ok := strings.Cut(strings.TrimSpace(param), "=")
+		if !ok || !strings.EqualFold(strings.TrimSpace(k), "rel") {
+			continue
+		}
+		for relType := range strings.FieldsSeq(strings.Trim(strings.TrimSpace(v), `"`)) {
+			if strings.EqualFold(relType, rel) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// referrersTagSchemaTag returns the OCI referrers tag schema tag for d.
+// Unlike the cosign convention (see sigstoreAttachmentTag), there is no ".sig" suffix.
+func referrersTagSchemaTag(d digest.Digest) (string, error) {
+	if err := d.Validate(); err != nil { // Make sure d.String() doesn’t contain any unexpected characters
+		return "", err
+	}
+	return strings.Replace(d.String(), ":", "-", 1), nil
+}
+
+// referrersAPIUnavailable records that the registry does not implement the Referrers API, so that
+// later lookups on this client skip the endpoint, and returns the tag schema fallback result.
+func (c *dockerClient) referrersAPIUnavailable(ctx context.Context, ref dockerReference, d digest.Digest) (*imgspecv1.Index, bool, error) {
+	c.referrersAPIUnsupported.Store(true)
+	index, err := c.getReferrersFallbackTag(ctx, ref, d)
+	return index, false, err
+}
+
+// getReferrersFallbackTag implements the OCI referrers tag schema fallback
+// for registries that do not support the Referrers API.
+func (c *dockerClient) getReferrersFallbackTag(ctx context.Context, ref dockerReference, d digest.Digest) (*imgspecv1.Index, error) {
+	tag, err := referrersTagSchemaTag(d)
+	if err != nil {
+		return nil, err
+	}
+	logrus.Debugf("Looking for OCI referrers via tag schema: %s", tag)
+	manifestBlob, mimeType, err := c.fetchManifest(ctx, ref, tag)
+	if err != nil {
+		if isManifestUnknownError(err) {
+			logrus.Debugf("Referrers tag %s does not exist: %v", tag, err)
+			return nil, nil
+		}
+		return nil, err
+	}
+	if mimeType != imgspecv1.MediaTypeImageIndex {
+		logrus.Debugf("Unexpected MIME type for referrers tag %s: %q, ignoring", tag, mimeType)
+		return nil, nil
+	}
+	var index imgspecv1.Index
+	if err := json.Unmarshal(manifestBlob, &index); err != nil {
+		return nil, fmt.Errorf("parsing referrers tag %s: %w", tag, err)
+	}
+	if len(index.Manifests) == 0 {
+		return nil, nil
+	}
+	return &index, nil
+}
+
+// isSigstoreReferrerArtifactType reports whether artifactType identifies a cosign signature artifact.
+// Cosign uses other application/vnd.dev.cosign.artifact.* types for attestations and SBOMs, and
+// sigstore bundles use application/vnd.dev.sigstore.bundle.*; none of those are signatures.
+func isSigstoreReferrerArtifactType(artifactType string) bool {
+	return artifactType == sigstoreReferrerArtifactType
+}
+
+// sigstoreReferrerManifests returns an iterator over the manifests of the entries of index that
+// carry cosign signatures.
+// Individual fetch/parse errors are logged and skipped rather than reported, because the Referrers
+// API can return unrelated or corrupt artifacts that should not block processing of valid signatures.
+func (c *dockerClient) sigstoreReferrerManifests(ctx context.Context, ref dockerReference, index *imgspecv1.Index) iter.Seq[*manifest.OCI1] {
+	return func(yield func(*manifest.OCI1) bool) {
+		// The registry was asked to filter by artifactType, but is allowed to ignore that, so filter again here.
+		manifestsFetched := 0
+		for i, referrer := range index.Manifests {
+			if i >= maxReferrersToScan {
+				logrus.Debugf("Reached referrer scan limit (%d entries), skipping remaining", maxReferrersToScan)
+				return
+			}
+			if manifestsFetched >= maxReferrersToProcess {
+				logrus.Debugf("Reached referrer processing limit (%d), skipping remaining", maxReferrersToProcess)
+				return
+			}
+			if !isSigstoreReferrerArtifactType(referrer.ArtifactType) {
+				logrus.Debugf("Skipping referrer %s: artifact type %q is not a sigstore signature", referrer.Digest.String(), referrer.ArtifactType)
+				continue
+			}
+			if err := referrer.Digest.Validate(); err != nil { // Make sure referrer.Digest.String() doesn’t contain any unexpected characters
+				logrus.Debugf("Skipping referrer with invalid digest %q: %v", referrer.Digest.String(), err)
+				continue
+			}
+			logrus.Debugf("Fetching referrer manifest %s (artifactType=%s)", referrer.Digest.String(), referrer.ArtifactType)
+			manifestsFetched++
+			manifestBlob, mimeType, err := c.fetchManifest(ctx, ref, referrer.Digest.String())
+			if err != nil {
+				logrus.Debugf("Fetching referrer manifest %s failed, skipping: %v", referrer.Digest.String(), err)
+				continue
+			}
+			if matches, err := manifest.MatchesDigest(manifestBlob, referrer.Digest); err != nil || !matches {
+				logrus.Debugf("Skipping referrer %s: manifest does not match its digest", referrer.Digest.String())
+				continue
+			}
+			if mimeType != imgspecv1.MediaTypeImageManifest {
+				logrus.Debugf("Skipping referrer %s: unexpected MIME type %q", referrer.Digest.String(), mimeType)
+				continue
+			}
+			ociManifest, err := manifest.OCI1FromManifest(manifestBlob)
+			if err != nil {
+				logrus.Debugf("Parsing referrer manifest %s failed, skipping: %v", referrer.Digest.String(), err)
+				continue
+			}
+			if !yield(ociManifest) {
+				return
+			}
+		}
+	}
 }
 
 // getExtensionsSignatures returns signatures from the X-Registry-Supports-Signatures API extension,

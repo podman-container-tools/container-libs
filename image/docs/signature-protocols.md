@@ -104,6 +104,33 @@ i.e. different namespaces can not associate different sets of signatures to the 
 updating signatures requires a cluster-wide access to the `imagesignatures` resource
 (by default available to the `system:image-signer` role),
 
+## OCI Referrers API
+
+Sigstore signatures can also be attached using the OCI Distribution Spec 1.1 Referrers API,
+as an artifact manifest whose `subject` field points at the signed manifest.
+This is controlled by `use-sigstore-attachments` in the `registries.d` configuration,
+the same setting that controls the cosign tag convention.
+
+### Reading
+
+Both the Referrers API and the cosign tag convention are consulted, and duplicate signatures
+found through both are removed. Only referrers with cosign’s signature artifact type
+(`application/vnd.dev.cosign.artifact.sig.v1+json`) are fetched, and only the sigstore signature
+layers within them are used; other referrers (attestations, SBOMs and the like) are ignored.
+The lookup is best-effort: if it fails, signatures from the cosign tag are still returned.
+
+### Writing
+
+The write destination is selected by `sigstore-attachments-write` in the `registries.d`
+configuration. It defaults to `cosign-tag`, so writing referrers is opt-in.
+
+With `referrers` or `both`, each signature is pushed as a separate artifact manifest using
+cosign’s signature artifact type, so that cosign can discover it as well. On registries that
+do not implement the Referrers API, the referrers tag schema index is updated in addition,
+so that those artifacts remain discoverable.
+Signatures already present as referrers are not written again; they are recognized by their
+payload rather than by the shape of the manifest carrying them.
+
 ## OpenShift-embedded registries
 
 The OpenShift-embedded registry implements the ordinary docker/distribution API,
