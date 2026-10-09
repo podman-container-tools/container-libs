@@ -696,6 +696,10 @@ type LayerOptions struct {
 	// Currently these can only be set when the layer record is created, but that
 	// could change in the future.
 	Flags map[string]any
+	// PreserveCompressedBlob saves the original compressed layer blob
+	// alongside the extracted layer content for later retrieval.
+	// Only effective when the storage driver supports it (currently overlay).
+	PreserveCompressedBlob bool
 }
 
 type LayerBigDataOption struct {
@@ -3405,6 +3409,49 @@ func (s *store) LayersByTOCDigest(d digest.Digest) ([]Layer, error) {
 		return nil, fmt.Errorf("looking for TOC matching digest %q: %w", d, err)
 	}
 	return s.layersByMappedDigest(func(r roLayerStore, d digest.Digest) ([]Layer, error) { return r.LayersByTOCDigest(d) }, d)
+}
+
+// CompressedBlobStore is an optional capability interface for stores that
+// support preserving the original compressed layer blobs alongside extracted
+// content. Callers should type-assert a Store to this interface before use.
+type CompressedBlobStore interface {
+	// CompressedBlobPath returns the path to the preserved compressed blob
+	// and its digest for the given layer, or ("", "") if no blob is preserved.
+	CompressedBlobPath(id string) (string, digest.Digest)
+}
+
+// CompressedBlobPath returns the path to the preserved compressed blob for the
+// given layer and the digest of the compressed representation that was stored.
+// Returns ("", "") if no blob is preserved (feature not enabled, driver does
+// not support it, or the layer was extracted from an uncompressed stream).
+func (s *store) CompressedBlobPath(id string) (string, digest.Digest) {
+	// Resolve the on-disk path under graphLock, then release it before
+	// calling readAllLayerStores (which acquires graphLock internally).
+	var p string
+	if err := s.startUsingGraphDriver(); err != nil {
+		return "", ""
+	}
+	if provider, ok := s.graphDriver.(compressedBlobPathProvider); ok {
+		p = provider.CompressedBlobPath(id)
+	}
+	s.stopUsingGraphDriver()
+
+	if p == "" {
+		return "", ""
+	}
+	if _, err := os.Stat(p); err != nil {
+		return "", ""
+	}
+	if res, done, err := readAllLayerStores(s, func(store roLayerStore) (digest.Digest, bool, error) {
+		layer, err := store.Get(id)
+		if err != nil {
+			return "", false, nil
+		}
+		return layer.CompressedDigest, true, nil
+	}); err == nil && done && res != "" {
+		return p, res
+	}
+	return "", ""
 }
 
 func (s *store) LayerSize(id string) (int64, error) {
