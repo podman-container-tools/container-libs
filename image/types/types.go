@@ -702,6 +702,16 @@ type SystemContext struct {
 	CompressionLevel *int
 }
 
+// ResolvedImageSource is an optional interface that ImageSource implementations
+// can satisfy to report the actual endpoint used when the source was resolved
+// through mirrors or redirects.
+type ResolvedImageSource interface {
+	// ResolvedReference returns the reference to the actual endpoint that
+	// was contacted, which may differ from Reference() when registry
+	// mirrors are configured.
+	ResolvedReference() ImageReference
+}
+
 // ProgressEvent is the type of events a progress reader can produce
 // Warning: new event types may be added any time.
 type ProgressEvent uint
