@@ -99,6 +99,15 @@ described above.  The configuration section is a YAML mapping, with the followin
 
 - `use-sigstore-attachments` specifies whether sigstore image attachments (signatures, attestations and the like) are going to be read/written along with the image.
    If disabled, the images are treated as if no attachments exist; attempts to write attachments fail.
+   When enabled, reading also consults the OCI Referrers API (falling back to the referrers tag schema on registries that do not implement OCI Distribution Spec 1.1) in addition to the cosign tag convention, and removes duplicates found through both.
+
+- `sigstore-attachments-write` specifies where sigstore attachments are written, if `use-sigstore-attachments` is enabled.  One of:
+
+   - `cosign-tag` (the default): write only using the cosign tag convention.
+   - `referrers`: write only as OCI 1.1 referrer artifacts; on registries that do not implement the Referrers API, the referrers tag schema index is updated in addition.
+   - `both`: write using both mechanisms.
+
+   Readers that do not support the Referrers API only find signatures written using the cosign tag convention.
 
 ## Examples
 
