@@ -242,8 +242,8 @@ func (c *CgroupControl) CreateSystemdUserUnit(path string, uid int) error {
 	return systemdCreate(c.config.Resources, path, conn)
 }
 
-func dbusAuthConnection(uid int, createBus func(opts ...dbus.ConnOption) (*dbus.Conn, error)) (*dbus.Conn, error) {
-	conn, err := createBus()
+func dbusAuthConnection(ctx context.Context, uid int, createBus func(opts ...dbus.ConnOption) (*dbus.Conn, error)) (*dbus.Conn, error) {
+	conn, err := createBus(dbus.WithContext(ctx))
 	if err != nil {
 		return nil, err
 	}
@@ -256,6 +256,7 @@ func dbusAuthConnection(uid int, createBus func(opts ...dbus.ConnOption) (*dbus.
 		return nil, err
 	}
 	if err := conn.Hello(); err != nil {
+		conn.Close()
 		return nil, err
 	}
 
@@ -486,8 +487,16 @@ func IsCgroup2UnifiedMode() (bool, error) {
 
 // UserConnection returns an user connection to D-BUS.
 func UserConnection(uid int) (*systemdDbus.Conn, error) {
+	return UserConnectionContext(context.Background(), uid)
+}
+
+// UserConnectionContext returns a user connection to D-Bus. The context controls
+// authentication and the lifetime of both the method and signal connections.
+// Callers must keep it alive until they have finished using the connection.
+// Transport dialing uses godbus defaults and is not controlled by ctx.
+func UserConnectionContext(ctx context.Context, uid int) (*systemdDbus.Conn, error) {
 	return systemdDbus.NewConnection(func() (*dbus.Conn, error) {
-		return dbusAuthConnection(uid, dbus.SessionBusPrivateNoAutoStartup)
+		return dbusAuthConnection(ctx, uid, dbus.SessionBusPrivateNoAutoStartup)
 	})
 }
 

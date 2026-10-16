@@ -99,17 +99,35 @@ func MovePauseProcessToScope(pausePidPath string) {
 }
 
 // RunUnderSystemdScope adds the specified pid to a systemd scope.
+// Use RunUnderSystemdScopeContext to set a deadline or cancel the operation.
 func RunUnderSystemdScope(pid int, slice string, unitName string) error {
+	return RunUnderSystemdScopeContext(context.Background(), pid, slice, unitName)
+}
+
+// RunUnderSystemdScopeContext adds the specified pid to a systemd scope.
+// The context controls D-Bus authentication, method calls, and the wait for job
+// completion. No additional timeout is imposed; callers should set a deadline
+// if they need to bound these waits. Initial transport dialing uses godbus
+// defaults and is not controlled by ctx.
+func RunUnderSystemdScopeContext(ctx context.Context, pid int, slice string, unitName string) (retErr error) {
+	defer func() {
+		// Cancellation closes the D-Bus connections, which can surface as a
+		// socket error. Preserve the context error so callers can avoid retries.
+		if ctx.Err() != nil {
+			retErr = ctx.Err()
+		}
+	}()
+
 	var conn *systemdDbus.Conn
 	var err error
 
 	if unshare.GetRootlessUID() != 0 {
-		conn, err = cgroups.UserConnection(unshare.GetRootlessUID())
+		conn, err = cgroups.UserConnectionContext(ctx, unshare.GetRootlessUID())
 		if err != nil {
 			return err
 		}
 	} else {
-		conn, err = systemdDbus.NewWithContext(context.Background())
+		conn, err = systemdDbus.NewWithContext(ctx)
 		if err != nil {
 			return err
 		}
@@ -121,11 +139,15 @@ func RunUnderSystemdScope(pid int, slice string, unitName string) error {
 		newProp("Delegate", true),
 		newProp("DefaultDependencies", false),
 	}
-	ch := make(chan string)
-	_, err = conn.StartTransientUnitContext(context.Background(), unitName, "replace", properties, ch)
+	// A late completion must not block go-systemd's signal dispatcher.
+	ch := make(chan string, 1)
+	_, err = conn.StartTransientUnitContext(ctx, unitName, "replace", properties, ch)
 	if err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		// On errors check if the cgroup already exists, if it does move the process there
-		if props, err := conn.GetUnitTypePropertiesContext(context.Background(), unitName, "Scope"); err == nil {
+		if props, err := conn.GetUnitTypePropertiesContext(ctx, unitName, "Scope"); err == nil {
 			if cgroup, ok := props["ControlGroup"].(string); ok && cgroup != "" {
 				if err := cgroups.MoveUnderCgroup(cgroup, "", []uint32{uint32(pid)}); err == nil {
 					return nil
@@ -136,10 +158,12 @@ func RunUnderSystemdScope(pid int, slice string, unitName string) error {
 		return err
 	}
 
-	// Block until job is started
-	<-ch
-
-	return nil
+	select {
+	case <-ch:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func newProp(name string, units any) systemdDbus.Property {
