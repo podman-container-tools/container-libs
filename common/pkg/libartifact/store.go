@@ -79,6 +79,13 @@ func NewArtifactStore(storePath string, sc *types.SystemContext) (*ArtifactStore
 			return nil, createErr
 		}
 	}
+
+	artifactStore.lock.Lock()
+	defer artifactStore.lock.Unlock()
+	if err := artifactStore.removeUnnamedArtifacts(context.Background()); err != nil {
+		return nil, err
+	}
+
 	return artifactStore, nil
 }
 
@@ -247,7 +254,18 @@ func (as *ArtifactStore) Pull(ctx context.Context, ref ArtifactReference, opts l
 		return "", err
 	}
 	artifactDigest, err := as.withLockedLayout(ref.String(), func(localRef types.ImageReference) (digest.Digest, error) {
-		return as.copyArtifact(ctx, srcRef, localRef, opts)
+		d, err := as.copyArtifact(ctx, srcRef, localRef, opts)
+		if err != nil {
+			return "", err
+		}
+		// After copyArtifact, c/image's addManifest may have stripped the
+		// AnnotationRefName from an old entry with the same tag. Retag any
+		// unnamed orphans with a digest reference (repo@sha256:...) to keep
+		// them named and accessible.
+		if err := as.retagUnnamedEntries(ref); err != nil {
+			return "", err
+		}
+		return d, nil
 	})
 	if err != nil {
 		return "", err
@@ -256,6 +274,47 @@ func (as *ArtifactStore) Pull(ctx context.Context, ref ArtifactReference, opts l
 		as.writeEvent(&Event{ID: artifactDigest.String(), Name: ref.String(), Time: time.Now(), Type: EventTypeArtifactPull})
 	}
 	return artifactDigest, nil
+}
+
+// retagUnnamedEntries scans index.json for entries missing the
+// AnnotationRefName annotation and sets it to repo@sha256:<digest>,
+// preserving the repository name from the pull reference. This prevents
+// orphaned unnamed entries after a re-pull with changed content.
+// Note: must be called while holding the store lock.
+func (as *ArtifactStore) retagUnnamedEntries(ref ArtifactReference) error {
+	indexPath := as.indexPath()
+	rawData, err := os.ReadFile(indexPath)
+	if err != nil {
+		return err
+	}
+	var index specV1.Index
+	if err := json.Unmarshal(rawData, &index); err != nil {
+		return err
+	}
+
+	repo := reference.TrimNamed(ref.ref).String()
+	modified := false
+	for i, desc := range index.Manifests {
+		if _, ok := desc.Annotations[specV1.AnnotationRefName]; ok {
+			continue
+		}
+		digestRef := repo + "@" + desc.Digest.String()
+		if index.Manifests[i].Annotations == nil {
+			index.Manifests[i].Annotations = make(map[string]string)
+		}
+		index.Manifests[i].Annotations[specV1.AnnotationRefName] = digestRef
+		modified = true
+	}
+
+	if !modified {
+		return nil
+	}
+
+	rawData, err = json.Marshal(&index)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(indexPath, rawData, 0o644)
 }
 
 // Push an artifact to an image registry.
@@ -292,6 +351,35 @@ func createNewArtifactManifest(options *libartTypes.AddOptions) specV1.Manifest 
 		Config:       specV1.DescriptorEmptyJSON,
 		Layers:       make([]specV1.Descriptor, 0),
 		Annotations:  annotations,
+	}
+}
+
+// removeUnnamedArtifacts deletes index entries missing org.opencontainers.image.ref.name.
+// Legacy unnamed orphans cannot be retagged (their repository name is unknown).
+// Note: must be called while holding the store lock.
+//
+// DeleteImage mutates index.json; layout.List must be called again after each removal
+// instead of walking the first snapshot and deleting every unnamed entry in one pass.
+func (as *ArtifactStore) removeUnnamedArtifacts(ctx context.Context) error {
+	for {
+		lrs, err := layout.List(as.storePath)
+		if err != nil {
+			return err
+		}
+		var deleted bool
+		for _, l := range lrs {
+			if _, ok := l.ManifestDescriptor.Annotations[specV1.AnnotationRefName]; ok {
+				continue
+			}
+			if err := l.Reference.DeleteImage(ctx, as.SystemContext); err != nil {
+				return err
+			}
+			deleted = true
+			break
+		}
+		if !deleted {
+			return nil
+		}
 	}
 }
 
