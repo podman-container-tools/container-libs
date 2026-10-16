@@ -128,6 +128,33 @@ func (s *Source) TarManifest() []ManifestItem {
 	return s.archive.Manifest
 }
 
+func (s *Source) uncompressedLayerSize(layerPath string, h *tar.Header, layerReader io.Reader) (int64, error) {
+	underlying := io.NopCloser(layerReader)
+	if h.FileInfo().Mode()&os.ModeType == os.ModeSymlink {
+		var err error
+		underlying, h, err = s.archive.openTarComponent(layerPath)
+		if err != nil {
+			return 0, err
+		}
+	}
+	defer underlying.Close()
+
+	uncompressedStream, isCompressed, err := compression.AutoDecompress(underlying)
+	if err != nil {
+		return 0, err
+	}
+	defer uncompressedStream.Close()
+
+	if isCompressed {
+		uncompressedSize, err := io.Copy(io.Discard, uncompressedStream)
+		if err != nil {
+			return 0, err
+		}
+		return uncompressedSize, nil
+	}
+	return h.Size, nil
+}
+
 func (s *Source) prepareLayerData(tarManifest *ManifestItem, parsedConfig *manifest.Schema2Image) (map[digest.Digest]*layerInfo, error) {
 	// Collect layer data available in manifest and config.
 	if len(tarManifest.Layers) != len(parsedConfig.RootFS.DiffIDs) {
@@ -177,18 +204,9 @@ func (s *Source) prepareLayerData(tarManifest *ManifestItem, parsedConfig *manif
 			// incorrectly report the size. Pretty critical, since tools like
 			// umoci always compress layer blobs. Obviously we only bother with
 			// the slower method of checking if it's compressed.
-			uncompressedStream, isCompressed, err := compression.AutoDecompress(t)
+			uncompressedSize, err := s.uncompressedLayerSize(layerPath, h, t)
 			if err != nil {
-				return nil, fmt.Errorf("auto-decompressing %q to determine its size: %w", layerPath, err)
-			}
-			defer uncompressedStream.Close()
-
-			uncompressedSize := h.Size
-			if isCompressed {
-				uncompressedSize, err = io.Copy(io.Discard, uncompressedStream)
-				if err != nil {
-					return nil, fmt.Errorf("reading %q to find its size: %w", layerPath, err)
-				}
+				return nil, fmt.Errorf("determining uncompressed size of %q: %w", layerPath, err)
 			}
 			li.size = uncompressedSize
 			delete(unknownLayerSizes, layerPath)
@@ -277,7 +295,7 @@ func (s *Source) GetBlob(ctx context.Context, info types.BlobInfo, cache types.B
 	}
 
 	if li, ok := s.knownLayers[info.Digest]; ok { // diffID is a digest of the uncompressed tarball,
-		underlyingStream, err := s.archive.openTarComponent(li.path)
+		underlyingStream, _, err := s.archive.openTarComponent(li.path)
 		if err != nil {
 			return nil, 0, err
 		}
