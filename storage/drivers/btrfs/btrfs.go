@@ -31,7 +31,6 @@ import (
 
 	"github.com/docker/go-units"
 	"github.com/opencontainers/selinux/go-selinux/label"
-	"github.com/sirupsen/logrus"
 	graphdriver "go.podman.io/storage/drivers"
 	"go.podman.io/storage/internal/driver"
 	"go.podman.io/storage/internal/tempdir"
@@ -294,21 +293,6 @@ func subvolDelete(dirpath, name string, quotaEnabled bool) error {
 	}
 	if err := filepath.WalkDir(path.Join(dirpath, name), walkSubvolumes); err != nil {
 		return fmt.Errorf("recursively walking subvolumes for %s failed: %w", dirpath, err)
-	}
-
-	if quotaEnabled {
-		if qgroupid, err := subvolLookupQgroup(fullPath); err == nil {
-			var args C.struct_btrfs_ioctl_qgroup_create_args
-			args.qgroupid = C.__u64(qgroupid)
-
-			_, _, errno := unix.Syscall(unix.SYS_IOCTL, getDirFd(dir), C.BTRFS_IOC_QGROUP_CREATE,
-				uintptr(unsafe.Pointer(&args)))
-			if errno != 0 {
-				logrus.Errorf("Failed to delete btrfs qgroup %v for %s: %v", qgroupid, fullPath, errno.Error())
-			}
-		} else {
-			logrus.Errorf("Failed to lookup btrfs qgroup for %s: %v", fullPath, err.Error())
-		}
 	}
 
 	// all subvolumes have been removed
