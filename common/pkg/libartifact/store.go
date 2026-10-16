@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -80,6 +81,13 @@ func NewArtifactStore(storePath string, sc *types.SystemContext) (*ArtifactStore
 			return nil, createErr
 		}
 	}
+
+	artifactStore.lock.Lock()
+	defer artifactStore.lock.Unlock()
+	if err := artifactStore.removeUnnamedArtifacts(context.Background()); err != nil {
+		return nil, err
+	}
+
 	return artifactStore, nil
 }
 
@@ -472,6 +480,31 @@ func createNewArtifactManifest(options *libartTypes.AddOptions) specV1.Manifest 
 		Config:       specV1.DescriptorEmptyJSON,
 		Layers:       make([]specV1.Descriptor, 0),
 		Annotations:  annotations,
+	}
+}
+
+// removeUnnamedArtifacts deletes index entries missing org.opencontainers.image.ref.name.
+// Note: must be called while holding the store lock.
+func (as *ArtifactStore) removeUnnamedArtifacts(ctx context.Context) error {
+	// DeleteImage mutates index.json; re-list after each removal instead of deleting every
+	// unnamed entry from a single layout.List snapshot.
+	for {
+		lrs, err := layout.List(as.storePath)
+		if err != nil {
+			return err
+		}
+		imageToDelete := slices.IndexFunc(lrs, func(l layout.ListResult) bool {
+			_, hasRefName := l.ManifestDescriptor.Annotations[specV1.AnnotationRefName]
+			return !hasRefName
+		})
+		if imageToDelete == -1 {
+			return nil
+		}
+		l := lrs[imageToDelete]
+		logrus.Debugf("Removing unnamed artifact manifest %s from %q", l.ManifestDescriptor.Digest, as.storePath)
+		if err := l.Reference.DeleteImage(ctx, as.SystemContext); err != nil {
+			return err
+		}
 	}
 }
 

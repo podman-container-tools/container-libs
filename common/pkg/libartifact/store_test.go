@@ -943,6 +943,42 @@ func TestArtifactStore_copyArtifact(t *testing.T) {
 	assert.Equal(t, "file1.txt", copiedArtifact.Manifest.Layers[0].Annotations[specV1.AnnotationTitle])
 }
 
+func TestNewArtifactStore_removesUnnamedOrphans(t *testing.T) {
+	ctx := t.Context()
+	sc := &types.SystemContext{}
+	storePath := filepath.Join(t.TempDir(), "store")
+
+	as, err := NewArtifactStore(storePath, sc)
+	require.NoError(t, err)
+
+	namedRef := "quay.io/test/named:v1"
+	orphanRef := "quay.io/test/orphan:v1"
+	_, _ = helperAddArtifact(t, as, namedRef, map[string]int{"named.txt": 64}, nil)
+	_, _ = helperAddArtifact(t, as, orphanRef, map[string]int{"orphan.txt": 64}, nil)
+
+	lrs, err := layout.List(storePath)
+	require.NoError(t, err)
+	require.Len(t, lrs, 2)
+
+	manifests := make([]specV1.Descriptor, 0, len(lrs))
+	for _, lr := range lrs {
+		desc := lr.ManifestDescriptor
+		if desc.Annotations[specV1.AnnotationRefName] == orphanRef {
+			delete(desc.Annotations, specV1.AnnotationRefName)
+		}
+		manifests = append(manifests, desc)
+	}
+	writeIndex(t, as, specV1.Index{Manifests: manifests})
+
+	as2, err := NewArtifactStore(storePath, sc)
+	require.NoError(t, err)
+
+	artifacts, err := as2.List(ctx)
+	require.NoError(t, err)
+	require.Len(t, artifacts, 1)
+	assert.Equal(t, namedRef, artifacts[0].Name)
+}
+
 // TestPull_releaseThenCopyKeepsOldDigestNamed exercises Pull's release-before-copy sequence
 // without a registry: release the tag to repo@digest, then layout->layout copy of new content
 // onto the same tag (what c/image does during pull).
