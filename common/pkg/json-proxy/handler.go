@@ -10,10 +10,12 @@ import (
 	"os"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/opencontainers/go-digest"
 	imgspecv1 "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/sirupsen/logrus"
+	"go.podman.io/common/pkg/config"
 	"go.podman.io/image/v5/image"
 	"go.podman.io/image/v5/manifest"
 	"go.podman.io/image/v5/pkg/blobinfocache"
@@ -104,6 +106,54 @@ func (h *handler) Initialize(ctx context.Context, args []any) (replyBuf, error) 
 		value: protocolVersion,
 	}
 	return r, nil
+}
+
+// GetEngineConfig returns a curated subset of the host containers.conf
+// [engine] settings (new in 0.2.9). Today this is the retry policy; clients
+// use it to drive retries with the same defaults as `podman pull` without
+// having to read containers.conf themselves.
+//
+// Note the proxy only advertises the configuration; it does not perform
+// retries itself, since a partially streamed blob cannot be transparently
+// resumed.
+func (h *handler) GetEngineConfig(_ context.Context, args []any) (replyBuf, error) {
+	h.lock.Lock()
+	defer h.lock.Unlock()
+
+	var ret replyBuf
+
+	if h.sysctx == nil {
+		return ret, errors.New("client error: must invoke Initialize")
+	}
+	if len(args) != 0 {
+		return ret, errors.New("invalid request, expecting zero arguments")
+	}
+
+	// config.Default() memoizes internally, so this is cheap to call here.
+	cfg, err := config.Default()
+	if err != nil {
+		return ret, fmt.Errorf("loading containers.conf: %w", err)
+	}
+
+	ec := engineConfig{
+		Retry: cfg.Engine.Retry,
+	}
+	// An empty retry_delay means "use exponential backoff"; only advertise a
+	// concrete value when one is configured. We normalize to milliseconds so
+	// clients don't have to parse Go's duration syntax.
+	if cfg.Engine.RetryDelay != "" {
+		d, err := time.ParseDuration(cfg.Engine.RetryDelay)
+		if err != nil {
+			return ret, fmt.Errorf("parsing containers.conf retry_delay %q: %w", cfg.Engine.RetryDelay, err)
+		}
+		// A negative delay is meaningless; treat it as unset (exponential
+		// backoff) rather than advertising a nonsensical value to clients.
+		if ms := d.Milliseconds(); ms > 0 {
+			ec.RetryDelayMS = &ms
+		}
+	}
+
+	return replyBuf{value: ec}, nil
 }
 
 // OpenImage accepts a string image reference i.e. TRANSPORT:REF - like `skopeo copy`.
@@ -706,6 +756,8 @@ func (h *handler) processRequest(ctx context.Context, readBytes []byte) (rb repl
 	switch req.Method {
 	case "Initialize":
 		rb, err = h.Initialize(ctx, req.Args)
+	case "GetEngineConfig":
+		rb, err = h.GetEngineConfig(ctx, req.Args)
 	case "OpenImage":
 		rb, err = h.OpenImage(ctx, req.Args)
 	case "OpenImageOptional":
