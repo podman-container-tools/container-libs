@@ -29,8 +29,14 @@ func TestSave(t *testing.T) {
 	// reload the images for each test.
 	saveOptions := &SaveOptions{}
 	saveOptions.Writer = os.Stdout
-	imageCache := filepath.Join(t.TempDir(), "saveimagecache")
-	err = runtime.Save(ctx, []string{"alpine", "busybox"}, "docker-archive", imageCache, saveOptions)
+	dockerImageCache := filepath.Join(t.TempDir(), "savedockerimagecache")
+	err = runtime.Save(ctx, []string{"alpine", "busybox"}, "docker-archive", dockerImageCache, saveOptions)
+	require.NoError(t, err)
+
+	saveOptions = &SaveOptions{}
+	saveOptions.Writer = os.Stdout
+	ociImageCache := filepath.Join(t.TempDir(), "saveociimagecache")
+	err = runtime.Save(ctx, []string{"alpine", "busybox"}, "oci-archive", ociImageCache, saveOptions)
 	require.NoError(t, err)
 
 	loadOptions := &LoadOptions{}
@@ -54,8 +60,10 @@ func TestSave(t *testing.T) {
 		// oci
 		{[]string{"busybox"}, nil, "oci-dir", true, false},
 		{[]string{"busybox"}, nil, "oci-archive", false, false},
-		// oci-archive doesn't support multi-image archives
-		{[]string{"busybox", "alpine"}, nil, "oci-archive", false, true},
+		// oci-archive now supports multi-image archives
+		{[]string{"busybox", "alpine"}, nil, "oci-archive", false, false},
+		// additional tags and multi-images conflict
+		{[]string{"busybox", "alpine"}, []string{"tag"}, "oci-archive", false, true},
 		// docker
 		{[]string{"busybox"}, nil, "docker-archive", false, false},
 		{[]string{"busybox"}, []string{"localhost/tag:1", "quay.io/repo/image:tag"}, "docker-archive", false, false},
@@ -67,8 +75,13 @@ func TestSave(t *testing.T) {
 		// First clean up all images and load the cache.
 		_, rmErrors := runtime.RemoveImages(ctx, nil, nil)
 		require.Nil(t, rmErrors)
-		_, err = runtime.Load(ctx, imageCache, loadOptions)
-		require.NoError(t, err)
+		if test.format == "oci-archive" {
+			_, err = runtime.Load(ctx, ociImageCache, loadOptions)
+			require.NoError(t, err)
+		} else {
+			_, err = runtime.Load(ctx, dockerImageCache, loadOptions)
+			require.NoError(t, err)
+		}
 
 		tmp := t.TempDir()
 		if !test.isDir {
