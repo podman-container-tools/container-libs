@@ -276,7 +276,8 @@ func (s *SecretsManager) Delete(nameOrID string) (string, error) {
 	}
 
 	err = driver.Delete(secretID)
-	if err != nil {
+	// If the driver does not have that secret, it's considered to be deleted
+	if err != nil && !errors.Is(err, define.ErrNoSuchSecret) {
 		return "", fmt.Errorf("deleting secret %s: %w", nameOrID, err)
 	}
 
