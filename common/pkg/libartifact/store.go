@@ -32,6 +32,7 @@ import (
 	"go.podman.io/image/v5/pkg/blobinfocache/none"
 	"go.podman.io/image/v5/types"
 	"go.podman.io/storage/pkg/fileutils"
+	"go.podman.io/storage/pkg/ioutils"
 	"go.podman.io/storage/pkg/lockfile"
 )
 
@@ -241,12 +242,31 @@ func (as *ArtifactStore) copyArtifact(ctx context.Context, srcRef types.ImageRef
 }
 
 // Pull an artifact from an image registry to a local store.
+//
+// When the store already holds ref, the index entry with that tag is renamed to
+// repo@sha256:<digest> before copy so c/image does not leave an unnamed manifest.
+// If copy fails, the tag is restored on that entry only (see restoreTaggedManifestForPull).
 func (as *ArtifactStore) Pull(ctx context.Context, ref ArtifactReference, opts libimage.CopyOptions) (_ digest.Digest, pullErr error) {
-	srcRef, err := docker.NewReference(ref.ref)
+	srcRef, err := docker.NewReference(ref.named())
 	if err != nil {
 		return "", err
 	}
-	artifactDigest, err := as.withLockedLayout(ref.String(), func(localRef types.ImageReference) (digest.Digest, error) {
+	artifactDigest, err := as.withLockedLayout(ref.String(), func(localRef types.ImageReference) (_ digest.Digest, retErr error) {
+		previousDigest := as.getManifestDigestForTag(ref.String())
+		tagReleased := false
+		defer func() {
+			if retErr != nil && tagReleased {
+				if rbErr := as.restoreTaggedManifestForPull(ref, previousDigest); rbErr != nil {
+					retErr = fmt.Errorf("%w (rollback ref name: %v)", retErr, rbErr)
+				}
+			}
+		}()
+		if previousDigest != "" {
+			if retErr = as.releaseTaggedManifestForPull(ref, previousDigest); retErr != nil {
+				return "", retErr
+			}
+			tagReleased = true
+		}
 		return as.copyArtifact(ctx, srcRef, localRef, opts)
 	})
 	if err != nil {
@@ -258,9 +278,169 @@ func (as *ArtifactStore) Pull(ctx context.Context, ref ArtifactReference, opts l
 	return artifactDigest, nil
 }
 
+// readOCIIndex reads index.json.
+// Note: must be called while holding the store lock.
+func (as *ArtifactStore) readOCIIndex() (specV1.Index, error) {
+	rawData, err := os.ReadFile(as.indexPath())
+	if err != nil {
+		return specV1.Index{}, err
+	}
+	var index specV1.Index
+	if err := json.Unmarshal(rawData, &index); err != nil {
+		return specV1.Index{}, err
+	}
+	return index, nil
+}
+
+// writeOCIIndex writes index.json.
+// Note: must be called while holding the store lock.
+func (as *ArtifactStore) writeOCIIndex(index specV1.Index) error {
+	rawData, err := json.Marshal(&index)
+	if err != nil {
+		return err
+	}
+	return ioutils.AtomicWriteFile(as.indexPath(), rawData, 0o644)
+}
+
+// getManifestDigestForTag returns the manifest digest for a tag in index.json.
+// Note: must be called while holding the store lock.
+func (as *ArtifactStore) getManifestDigestForTag(tagName string) digest.Digest {
+	lrs, err := layout.List(as.storePath)
+	if err != nil {
+		return ""
+	}
+	for _, l := range lrs {
+		if l.ManifestDescriptor.Annotations[specV1.AnnotationRefName] == tagName {
+			return l.ManifestDescriptor.Digest
+		}
+	}
+	return ""
+}
+
+// setIndexManifestRefName updates org.opencontainers.image.ref.name on one index entry.
+// When requireCurrent is set, only an entry with that annotation value is updated
+// (needed when the same digest may appear under multiple names).
+// An empty refName removes AnnotationRefName from the descriptor instead of setting it
+// to ""; that is how releaseTaggedManifestForPull clears a tag when repo@digest is
+// already taken by another index entry.
+// Note: must be called while holding the store lock.
+func (as *ArtifactStore) setIndexManifestRefName(manifestDigest digest.Digest, refName string, requireCurrent string) error {
+	index, err := as.readOCIIndex()
+	if err != nil {
+		return err
+	}
+	for i, desc := range index.Manifests {
+		if manifestDigest != "" && desc.Digest != manifestDigest {
+			continue
+		}
+		if requireCurrent != "" && desc.Annotations[specV1.AnnotationRefName] != requireCurrent {
+			continue
+		}
+		if refName == "" {
+			delete(index.Manifests[i].Annotations, specV1.AnnotationRefName)
+		} else {
+			if index.Manifests[i].Annotations == nil {
+				index.Manifests[i].Annotations = make(map[string]string)
+			}
+			index.Manifests[i].Annotations[specV1.AnnotationRefName] = refName
+		}
+		return as.writeOCIIndex(index)
+	}
+	return nil
+}
+
+// setIndexManifestRefNameOnUnnamed sets refName on the first matching digest with no ref.name.
+// Note: must be called while holding the store lock.
+func (as *ArtifactStore) setIndexManifestRefNameOnUnnamed(manifestDigest digest.Digest, refName string) error {
+	index, err := as.readOCIIndex()
+	if err != nil {
+		return err
+	}
+	for i, desc := range index.Manifests {
+		if manifestDigest != "" && desc.Digest != manifestDigest {
+			continue
+		}
+		if desc.Annotations[specV1.AnnotationRefName] != "" {
+			continue
+		}
+		if index.Manifests[i].Annotations == nil {
+			index.Manifests[i].Annotations = make(map[string]string)
+		}
+		index.Manifests[i].Annotations[specV1.AnnotationRefName] = refName
+		return as.writeOCIIndex(index)
+	}
+	return nil
+}
+
+// hasIndexRefName reports whether any index entry has org.opencontainers.image.ref.name set to refName.
+// Note: must be called while holding the store lock.
+func (as *ArtifactStore) hasIndexRefName(refName string) bool {
+	lrs, err := layout.List(as.storePath)
+	if err != nil {
+		return false
+	}
+	for _, l := range lrs {
+		if l.ManifestDescriptor.Annotations[specV1.AnnotationRefName] == refName {
+			return true
+		}
+	}
+	return false
+}
+
+// releaseTaggedManifestForPull moves the pull tag to repo@sha256:<digest> on the manifest that
+// currently holds it, so copyArtifact can attach the tag to the new manifest without leaving
+// an unnamed index entry.
+// Note: must be called while holding the store lock.
+func (as *ArtifactStore) releaseTaggedManifestForPull(ref ArtifactReference, manifestDigest digest.Digest) error {
+	digestName, err := ref.digestReference(manifestDigest)
+	if err != nil {
+		return err
+	}
+	tagName := ref.String()
+	if tagName == digestName {
+		return nil
+	}
+	if as.hasIndexRefName(digestName) {
+		return as.setIndexManifestRefName(manifestDigest, "", tagName)
+	}
+	return as.setIndexManifestRefName(manifestDigest, digestName, tagName)
+}
+
+// restoreTaggedManifestForPull puts the pull tag back on a manifest after a failed pull.
+// Note: must be called while holding the store lock.
+func (as *ArtifactStore) restoreTaggedManifestForPull(ref ArtifactReference, manifestDigest digest.Digest) error {
+	digestName, err := ref.digestReference(manifestDigest)
+	if err != nil {
+		return err
+	}
+	tagName := ref.String()
+	if as.hasIndexUnnamedDigestEntry(manifestDigest) {
+		return as.setIndexManifestRefNameOnUnnamed(manifestDigest, tagName)
+	}
+	return as.setIndexManifestRefName(manifestDigest, tagName, digestName)
+}
+
+// hasIndexUnnamedDigestEntry reports whether any index entry for manifestDigest has no ref.name.
+// Note: must be called while holding the store lock.
+func (as *ArtifactStore) hasIndexUnnamedDigestEntry(manifestDigest digest.Digest) bool {
+	index, err := as.readOCIIndex()
+	if err != nil {
+		return false
+	}
+	for _, desc := range index.Manifests {
+		if manifestDigest != "" && desc.Digest != manifestDigest {
+			continue
+		}
+		if desc.Annotations[specV1.AnnotationRefName] == "" {
+			return true
+		}
+	}
+	return false
+}
+
 // Push an artifact to an image registry.
 func (as *ArtifactStore) Push(ctx context.Context, src, dest ArtifactReference, opts libimage.CopyOptions) (_ digest.Digest, pushErr error) {
-	destRef, err := docker.NewReference(dest.ref)
+	destRef, err := docker.NewReference(dest.named())
 	if err != nil {
 		return "", err
 	}
