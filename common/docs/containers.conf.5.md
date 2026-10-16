@@ -1,13 +1,12 @@
 % containers.conf 5 Container engine configuration file
 
 # NAME
-containers.conf - The container engine configuration file specifies default
-configuration options and command-line flags for container engines.
+containers.conf - The container engine configuration file specifies default configuration options and command-line flags for container engines.
 
 # DESCRIPTION
-Container engines like Podman & Buildah read containers.conf file, if it exists
-and modify the defaults for running containers on the host. containers.conf uses
-a TOML format that can be easily modified and versioned.
+Container engines like Podman & Buildah read `containers.conf` file, if it
+exists and modify the defaults for running containers on the host. The file
+`containers.conf` uses a TOML format that can be easily modified and versioned.
 
 By default, the configuration is read from `$XDG_CONFIG_HOME/containers/containers.conf` (or from `$HOME/.config/containers/containers.conf` if `$XDG_CONFIG_HOME` is unset), if it exists; otherwise from `/etc/containers/containers.conf`;  otherwise from `/usr/share/containers/containers.conf`.
 
@@ -209,7 +208,7 @@ the container.
 **dns_servers**=[]
 
 A list of dns servers to override the DNS configuration passed to the
-container. The special value “none” can be specified to disable creation of
+container. The special value "none" can be specified to disable creation of
 /etc/resolv.conf in the container.
 
 **env**=["PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"]
@@ -273,7 +272,8 @@ the `--init` for podman-create and podman-run is set.
 **interface_name**=""
 
 Default way to set interface names inside containers. Defaults to legacy pattern
-of ethX, where X is an integer, when left undefined.
+of `ethX`, where `X` is an integer, when left undefined.
+
 Options are:
   `device`   Uses the network_interface name from the network config as interface name. Falls back to the ethX pattern if the network_interface is not set.
 
@@ -282,7 +282,7 @@ Options are:
 Default way to create a IPC namespace for the container.
 Options are:
   `host`     Share host IPC Namespace with the container.
-  `none`     Create shareable IPC Namespace for the container without a private /dev/shm.
+  `none`     Create shareable IPC Namespace for the container without a private `/dev/shm`.
   `private`  Create private IPC Namespace for the container, other containers are not allowed to share it.
   `shareable` Create shareable IPC Namespace for the container.
 
@@ -300,11 +300,14 @@ Indicates whether the container engine uses MAC(SELinux) container separation vi
 label_users indicates whether to enforce confined users in containers on
 SELinux systems. This option causes containers to maintain the current user
 and role field of the calling process. By default SELinux containers run with
-the user system_u, and the role system_r.
+the user `system_u`, and the role `system_r`.
 
 **log_driver**=""
 
-Logging driver for the container. Currently available options are k8s-file, journald, none and passthrough, with json-file aliased to k8s-file for scripting compatibility.  The journald driver is used by default if the systemd journal is readable and writable.  Otherwise, the k8s-file driver is used.
+Logging driver for the container. Currently available options are k8s-file,
+journald, none and passthrough, with json-file aliased to k8s-file for
+scripting compatibility.  The journald driver is used by default if the systemd
+journal is readable and writable.  Otherwise, the k8s-file driver is used.
 
 **log_path**=""
 
@@ -323,7 +326,9 @@ limit is never exceeded.
 
 **log_tag**=""
 
-Default format tag for container log messages. This is useful for creating a specific tag for container log messages. Container log messages default to using the truncated container ID as a tag.
+Default format tag for container log messages. This is useful for creating a
+specific tag for container log messages. Container log messages default to
+using the truncated container ID as a tag.
 
 **mounts**=[]
 
@@ -335,8 +340,11 @@ Example:  [ "type=bind,source=/var/lib/foobar,destination=/var/lib/foobar,ro", ]
 **netns**=""
 
 Default way to create a NET namespace for the container.
-The option is mapped to the **--network** argument for the podman commands, it accepts the same values as that option.
-For example it can be set to `bridge`, `host`, `none`, `pasta` and more, see the [podman-create(1)](https://docs.podman.io/en/latest/markdown/podman-create.1.html#network-mode-net)
+The option is mapped to the **--network** argument for the podman commands, it
+accepts the same values as that option.
+For example it can be set to `bridge`, `host`, `none`, `pasta` and more, see
+the
+[podman-create(1)](https://docs.podman.io/en/latest/markdown/podman-create.1.html#network-mode-net)
 manual for all available options.
 
 **no_hosts**=false
@@ -452,9 +460,11 @@ netavark_plugin_dirs = [
 
 **default_network**="podman"
 
-The name of the default network as seen in `podman network ls`. This option only effects the network assignment when
-the bridge network mode is selected, i.e. `--network bridge`. It is the default for rootful containers but not as
-rootless. To change the default network mode use the **netns** option under the `[containers]` table.
+The name of the default network as seen in `podman network ls`. This option
+only effects the network assignment when the bridge network mode is selected,
+i.e. `--network bridge`. It is the default for rootful containers but not as
+rootless. To change the default network mode use the **netns** option under the
+`[containers]` table.
 
 Note: This should not be changed while you have any containers using this network.
 
@@ -462,7 +472,8 @@ Note: This should not be changed while you have any containers using this networ
 
 The subnet to use for the default network (named above in **default_network**).
 
-Note: This should not be changed if any containers are currently running on the default network.
+Note: This should not be changed if any containers are currently running on the
+default network.
 
 **default_subnet_pools**=[]
 
@@ -537,25 +548,29 @@ Note that explicitly specifying a host IP in the `-p` flag (e.g., `-p 192.168.1.
 will always override this default.
 
 ## ENGINE TABLE
-The `engine` table contains configuration options used to set up container engines such as Podman and Buildah.
+The `engine` table contains configuration options used to set up container
+engines such as Podman and Buildah.
 
 **active_service**=""
 
-Name of destination for accessing the Podman service. See SERVICE DESTINATION TABLE below.
+Name of destination for accessing the Podman service.
+See SERVICE DESTINATION TABLE below.
 
 **add_compression**=[]
 
-List of compression algorithms. If set makes sure that requested compression variant
-for each platform is added to the manifest list keeping original instance intact in
-the same manifest list on every `manifest push`. Supported values are (`gzip`, `zstd` and `zstd:chunked`).
-`zstd:chunked` is incompatible with encrypting images, and will be treated as `zstd` with a warning
-in that case.
+List of compression algorithms. If set makes sure that requested compression
+variant for each platform is added to the manifest list keeping original
+instance intact in the same manifest list on every `manifest push`. Supported
+values are (`gzip`, `zstd` and `zstd:chunked`).  `zstd:chunked` is incompatible
+with encrypting images, and will be treated as `zstd` with a warning in that
+case.
 
 
-Note: This is different from `compression_format` which allows users to select a default
-compression format for `push` and `manifest push`, while `add_compression` is limited to
-`manifest push` and allows users to append new instances to manifest list with specified compression
-algorithms in `add_compression` for each platform.
+Note: This is different from `compression_format` which allows users to select
+a default compression format for `push` and `manifest push`, while
+`add_compression` is limited to `manifest push` and allows users to append new
+instances to manifest list with specified compression algorithms in
+`add_compression` for each platform.
 
 **cgroup_manager**="systemd"
 
@@ -773,7 +788,9 @@ specify an image to pull.
 
 **kube_generate_type**="pod"
 
-Default Kubernetes kind/specification of the kubernetes yaml generated with the `podman kube generate` command. The possible options are `pod` and `deployment`.
+Default Kubernetes kind/specification of the kubernetes yaml generated with the
+`podman kube generate` command. The possible options are `pod` and
+`deployment`.
 
 **lock_type**="shm"
 
@@ -785,7 +802,10 @@ change the lock type.
 
 **multi_image_archive**=false
 
-Allows for creating archives (e.g., tarballs) with more than one image. Some container engines, such as Podman, interpret additional arguments as tags for one image and hence do not store more than one image. The default behavior can be altered with this option.
+Allows for creating archives (e.g., tarballs) with more than one image. Some
+container engines, such as Podman, interpret additional arguments as tags for
+one image and hence do not store more than one image. The default behavior can
+be altered with this option.
 
 **namespace**=""
 
@@ -820,14 +840,20 @@ Set the exit policy of the pod when the last container exits.  Supported policie
 
 Pull image before running or creating a container. The default is **missing**.
 
-- **missing**: attempt to pull the latest image from the registries listed in registries.conf if a local image does not exist. Raise an error if the image is not in any listed registry and is not present locally.
-- **always**: pull the image from the first registry it is found in as listed in registries.conf. Raise an error if not found in the registries, even if the image is present locally.
-- **never**: do not pull the image from the registry, use only the local version. Raise an error if the image is not present locally.
+- **missing**: attempt to pull the latest image from the registries listed in
+  `registries.conf` if a local image does not exist. Raise an error if the image
+  is not in any listed registry and is not present locally.
+- **always**: pull the image from the first registry it is found in as listed
+  in `registries.conf`. Raise an error if not found in the registries, even if
+  the image is present locally.
+- **never**: do not pull the image from the registry, use only the local
+  version. Raise an error if the image is not present locally.
 
 **remote** = false
 
-Indicates whether the application should be running in remote mode. This flag modifies the
---remote option on container engines. Setting the flag to true will default `podman --remote=true` for access to the remote Podman service.
+Indicates whether the application should be running in remote mode. This flag
+modifies the `--remote` option on container engines. Setting the flag to true
+will default `podman --remote=true` for access to the remote Podman service.
 
 **retry** = 3
 
@@ -835,7 +861,9 @@ Number of times to retry pulling/pushing images in case of failure.
 
 **retry_delay** = ""
 
-Delay between retries in case pulling/pushing image fails. If set, container engines will retry at the set interval, otherwise they delay 2 seconds and then exponentially back off.
+Delay between retries in case pulling/pushing image fails. If set, container
+engines will retry at the set interval, otherwise they delay 2 seconds and then
+exponentially back off.
 
 **runtime**=""
 
@@ -906,7 +934,8 @@ Specifies the compression format to use when pushing an image. Supported values
 are: `gzip`, `zstd` and `zstd:chunked`. This field is ignored when pushing
 images to the docker-daemon and docker-archive formats. It is also ignored
 when the manifest format is set to v2s2.
-`zstd:chunked` is incompatible with encrypting images, and will be treated as `zstd` with a warning
+`zstd:chunked` is incompatible with encrypting images, and will be treated as
+`zstd` with a warning
 in that case.
 
 **compression_level**="5"
