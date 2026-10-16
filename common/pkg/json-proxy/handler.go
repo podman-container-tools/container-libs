@@ -18,6 +18,7 @@ import (
 	"go.podman.io/image/v5/manifest"
 	"go.podman.io/image/v5/pkg/blobinfocache"
 	"go.podman.io/image/v5/signature"
+	"go.podman.io/image/v5/storage"
 	"go.podman.io/image/v5/transports/alltransports"
 	"go.podman.io/image/v5/types"
 )
@@ -689,6 +690,37 @@ func (h *handler) FinishPipe(ctx context.Context, args []any) (replyBuf, error) 
 	return ret, err
 }
 
+// OpenVarlinkSocket returns a socket FD over which the client can speak the
+// varlink protocol.
+// The json-proxy does not interpret the protocol; it just brokers the socket.
+// The only argument is an image opened with OpenImage, which has to be a
+// containers-storage image; the socket serves the layers of that image.
+func (h *handler) OpenVarlinkSocket(ctx context.Context, args []any) (replyBuf, error) {
+	h.lock.Lock()
+	defer h.lock.Unlock()
+
+	var ret replyBuf
+
+	if h.sysctx == nil {
+		return ret, errors.New("client error: must invoke Initialize")
+	}
+	if len(args) != 1 {
+		return ret, fmt.Errorf("found %d args, expecting (imgid)", len(args))
+	}
+	imgref, err := h.parseImageFromID(args[0])
+	if err != nil {
+		return ret, err
+	}
+
+	sockFile, err := storage.SplitFDStreamSocket(imgref.src)
+	if err != nil {
+		return ret, err
+	}
+
+	ret.fd = sockFile
+	return ret, nil
+}
+
 // processRequest dispatches a remote request.
 // replyBuf is the result of the invocation.
 // terminate should be true if processing of requests should halt.
@@ -728,6 +760,8 @@ func (h *handler) processRequest(ctx context.Context, readBytes []byte) (rb repl
 		rb, err = h.GetLayerInfoPiped(ctx, req.Args)
 	case "FinishPipe":
 		rb, err = h.FinishPipe(ctx, req.Args)
+	case "OpenVarlinkSocket":
+		rb, err = h.OpenVarlinkSocket(ctx, req.Args)
 	case "Shutdown":
 		terminate = true
 	// NOTE: If you add a method here, you should very likely be bumping the
