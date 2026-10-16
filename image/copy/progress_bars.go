@@ -3,6 +3,7 @@ package copy
 import (
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/vbauerster/mpb/v8"
 	"github.com/vbauerster/mpb/v8/decor"
@@ -38,6 +39,45 @@ func customPartialBlobDecorFunc(s decor.Statistics) string {
 type progressBar struct {
 	*mpb.Bar
 	originalSize int64 // or -1 if unknown
+}
+
+func (bar *progressBar) customProxyReader(r io.Reader) io.Reader {
+	return &ewmaTimedProxyReader{reader: r, bar: bar, lastUpdatedAt: time.Now()}
+}
+
+// ewmaTimedProxyReader is an io.Reader wrapper that increments progressBar's EWMA counters
+// based on effective throughput (bytes read in a window)
+//
+// Why do this? Coz mpb's proxyReader just considers time taken for pure Read calls. When
+// consumer / dest of a copy is the bottleneck (network IO / slow storage), the proxyReader
+// reports inflated values due to short bursts of Read calls.
+type ewmaTimedProxyReader struct {
+	reader io.Reader
+	bar    *progressBar
+
+	// Throughput counters for EWMA
+	bytesSinceUpdate int64
+	lastUpdatedAt    time.Time
+}
+
+// ewmaUpdateMinInterval is the minimum window used to measure the transfer throughput
+const ewmaUpdateMinInterval = 10 * time.Millisecond
+
+func (r *ewmaTimedProxyReader) Read(p []byte) (int, error) {
+	n, err := r.reader.Read(p)
+
+	end := time.Now()
+	elapsed := end.Sub(r.lastUpdatedAt)
+	r.bytesSinceUpdate += int64(n)
+	if elapsed >= ewmaUpdateMinInterval {
+		// Why? EWMA algo weights each 'dur/n' sample equally, so any spikes / troughs during
+		// transfer (e.g. bursty reads) can skew results, but a minimum window smoothens it
+		r.bar.EwmaIncrInt64(r.bytesSinceUpdate, elapsed)
+		r.bytesSinceUpdate = 0
+		r.lastUpdatedAt = end
+	}
+
+	return n, err
 }
 
 // createProgressBar creates a progressBar in pool.  Note that if the copier's reportWriter
