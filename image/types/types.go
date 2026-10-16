@@ -700,6 +700,11 @@ type SystemContext struct {
 	CompressionFormat *compression.Algorithm
 	// CompressionLevel specifies what compression level is used
 	CompressionLevel *int
+
+	// PreserveCompressedBlobs preserves the original compressed layer blobs
+	// alongside the extracted layer content during image pulls.
+	// Only effective with storage drivers that support it (overlay).
+	PreserveCompressedBlobs bool
 }
 
 // ProgressEvent is the type of events a progress reader can produce
