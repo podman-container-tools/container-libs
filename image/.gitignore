@@ -10,3 +10,6 @@ tools.timestamp
 
 # trash
 trash.lock
+
+# Generated man pages
+*.5

@@ -1,19 +1,5 @@
-GOMD2MAN ?= $(shell command -v go-md2man || echo '$(GOBIN)/go-md2man')
-PREFIX ?= ${DESTDIR}/usr
-MANINSTALLDIR=${PREFIX}/share/man
-MANPAGES_MD = $(wildcard docs/*.5.md)
-MANPAGES ?= $(MANPAGES_MD:%.md=%)
+MAN_INSTALL_DIR=/usr/share/man/man5
 
-.PHONY: docs
-docs: $(patsubst %.md,%.1,$(filter-out %.5.md,$(wildcard *.md))) containers-storage.conf.5
+MANPAGES := $(patsubst %.5.md,%.5,$(wildcard *.5.md)) $(patsubst %.md,%.1,$(filter-out %.5.md,$(wildcard *.md)))
 
-%.1: %.md
-	$(GOMD2MAN) -in $^ -out $@
-
-containers-storage.conf.5: containers-storage.conf.5.md
-	$(GOMD2MAN) -in $^ -out $@
-
-.PHONY: install
-install:
-	install -d -m 755 ${MANINSTALLDIR}/man5
-	install -m 644 *.5 ${MANINSTALLDIR}/man5/
+include ../../hack/man-docs.mk
