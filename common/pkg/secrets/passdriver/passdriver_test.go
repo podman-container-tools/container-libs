@@ -28,6 +28,21 @@ func setupDriver(t *testing.T) *Driver {
 	return driver
 }
 
+func TestDriverConfig(t *testing.T) {
+	driver, err := NewDriver(map[string]string{
+		"gpgprogram": "gpg-wrapper",
+		"showstderr": "true",
+	})
+	require.NoError(t, err)
+	require.Equal(t, "gpg-wrapper", driver.GPGProgram)
+	require.True(t, driver.ShowGPGStderr)
+
+	driver, err = NewDriver(nil)
+	require.NoError(t, err)
+	require.Equal(t, "gpg", driver.GPGProgram)
+	require.False(t, driver.ShowGPGStderr)
+}
+
 func TestStoreAndLookup(t *testing.T) {
 	cases := []struct {
 		name         string
