@@ -311,12 +311,9 @@ func TestCopyFileContent(t *testing.T) {
 
 	newFile, newSize, err = copyFileContent(int(file.Fd()), &metadataCopyHardLinks, rootFd, 0o755, true, false)
 	require.NoError(t, err)
-	assert.Nil(t, newFile)
+	assert.NotNil(t, newFile)
 
 	// validate it was created as an inode
-	newFile, err = openFileUnderRoot(rootFd, metadataCopyHardLinks.FileMetadata.Name, syscall.O_RDONLY, 0)
-	require.NoError(t, err)
-
 	assert.Equal(t, size, int(newSize))
 
 	st2 = syscall.Stat_t{}
