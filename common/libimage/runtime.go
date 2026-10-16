@@ -232,7 +232,10 @@ func (r *Runtime) LookupImage(name string, options *LookupImageOptions) (*Image,
 	storageRef, err := alltransports.ParseImageName(name)
 	if err == nil {
 		if storageRef.Transport().Name() != storageTransport.Transport.Name() {
-			return nil, "", fmt.Errorf("unsupported transport %q for looking up local images", storageRef.Transport().Name())
+			if dref := storageRef.DockerReference(); dref != nil {
+				return nil, "", fmt.Errorf("%q is not a local image name; did you mean %q?", name, dref.String())
+			}
+			return nil, "", fmt.Errorf("%q is not a local image name; pull it first, then use its local name", name)
 		}
 		_, img, err := storageTransport.ResolveReference(storageRef)
 		if err != nil {
