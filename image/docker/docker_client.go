@@ -113,9 +113,12 @@ type dockerClient struct {
 	namespaceProxy string
 
 	// The following members are detected registry properties:
-	// They are set after a successful detectProperties(), and never change afterwards.
+	// They are set after a successful detectProperties(), and never change afterwards,
+	// with the exception of challenges: if detectProperties() did not see any, a later
+	// response can still record some, see recordMissingChallenges.
 	client             *http.Client
 	scheme             string
+	challengesLock     sync.RWMutex // Protects challenges.
 	challenges         []challenge
 	supportsSignatures bool
 
@@ -510,30 +513,66 @@ func (c *dockerClient) resolveRequestURL(path string) (*url.URL, error) {
 	return res, nil
 }
 
-// Checks if the auth headers in the response contain an indication of a failed
-// authorization because of an "insufficient_scope" error. If that's the case,
-// returns the required scope to be used for fetching a new token.
-func needsRetryWithUpdatedScope(res *http.Response) (bool, *authScope) {
-	if res.StatusCode == http.StatusUnauthorized {
-		for challenge := range iterateAuthHeader(res.Header) {
-			if challenge.Scheme == "bearer" {
-				if errmsg, ok := challenge.Parameters["error"]; ok && errmsg == "insufficient_scope" {
-					if scope, ok := challenge.Parameters["scope"]; ok && scope != "" {
-						if newScope, err := parseAuthScope(scope); err == nil {
-							return true, newScope
-						} else {
-							logrus.WithFields(logrus.Fields{
-								"error":     err,
-								"scope":     scope,
-								"challenge": challenge,
-							}).Error("Failed to parse the authentication scope from the given challenge")
-						}
+// needsRetryWithUpdatedScope checks whether res indicates that the request should be retried with
+// updated authentication, updating c if necessary. It handles two cases:
+//   - The authorization failed with an "insufficient_scope" error; then the returned scope is the
+//     one which must be used to fetch a new token.
+//   - We have not recorded any authentication challenges (detectProperties() did not see any), but
+//     this response carries some; then they are recorded and a retry can use them. The returned
+//     scope is nil in that case, i.e. the caller should keep using the scope it already has.
+func (c *dockerClient) needsRetryWithUpdatedScope(res *http.Response) (bool, *authScope) {
+	if res.StatusCode != http.StatusUnauthorized {
+		return false, nil
+	}
+
+	// Do this first: if we don’t have any challenges, we sent the request unauthenticated, and
+	// no updated scope alone would make a retry succeed.
+	missingChallengesRecorded := c.recordMissingChallenges(res.Header)
+
+	for challenge := range iterateAuthHeader(res.Header) {
+		if challenge.Scheme == "bearer" {
+			if errmsg, ok := challenge.Parameters["error"]; ok && errmsg == "insufficient_scope" {
+				if scope, ok := challenge.Parameters["scope"]; ok && scope != "" {
+					if newScope, err := parseAuthScope(scope); err == nil {
+						return true, newScope
+					} else {
+						logrus.WithFields(logrus.Fields{
+							"error":     err,
+							"scope":     scope,
+							"challenge": challenge,
+						}).Error("Failed to parse the authentication scope from the given challenge")
 					}
 				}
 			}
 		}
 	}
+
+	if missingChallengesRecorded {
+		return true, nil
+	}
 	return false, nil
+}
+
+// recordMissingChallenges records the authentication challenges advertised in header if c does not
+// have any yet, and reports whether it did.
+//
+// A registry may allow unauthenticated GET/HEAD but require authentication for writes; then the
+// GET /v2/ ping in detectProperties() succeeds without advertising any challenge, we send the write
+// unauthenticated, and we would have no way to act on the resulting 401. The challenges in that 401
+// tell us how to authenticate, so record them and let the caller retry.
+func (c *dockerClient) recordMissingChallenges(header http.Header) bool {
+	c.challengesLock.Lock()
+	defer c.challengesLock.Unlock()
+	if len(c.challenges) != 0 {
+		return false
+	}
+	newChallenges := slices.Collect(iterateAuthHeader(header))
+	if len(newChallenges) == 0 {
+		return false
+	}
+	logrus.Debugf("Registry did not advertise any authentication challenge on ping, recording the %d challenge(s) from a 401 response", len(newChallenges))
+	c.challenges = newChallenges
+	return true
 }
 
 // parseRetryAfter determines the delay required by the "Retry-After" header in res and returns it,
@@ -590,17 +629,21 @@ func (c *dockerClient) makeRequestToResolvedURL(ctx context.Context, method stri
 		// We also cannot retry with a body (stream != nil) as stream
 		// was already read
 		if attempts == 1 && stream == nil && auth != noAuth {
-			if retry, newScope := needsRetryWithUpdatedScope(res); retry {
-				logrus.Debug("Detected insufficient_scope error, will retry request with updated scope")
+			if retry, newScope := c.needsRetryWithUpdatedScope(res); retry {
+				logrus.Debug("Detected insufficient_scope error or missing challenges, will retry request with updated authentication")
 				res.Body.Close()
-				// Note: This retry ignores extraScope. That’s, strictly speaking, incorrect, but we don’t currently
-				// expect the insufficient_scope errors to happen for those callers. If that changes, we can add support
-				// for more than one extra scope.
-				res, err = c.makeRequestToResolvedURLOnce(ctx, method, requestURL, headers, stream, streamLen, auth, newScope)
+				if newScope != nil {
+					// Note: This retry ignores the extraScope we were called with. That’s, strictly speaking,
+					// incorrect, but we don’t currently expect the insufficient_scope errors to happen for those
+					// callers. If that changes, we can add support for more than one extra scope.
+					extraScope = newScope
+				}
+				// If newScope is nil we only recorded challenges we did not have before; the scope we were
+				// called with is still the right one, so keep it.
+				res, err = c.makeRequestToResolvedURLOnce(ctx, method, requestURL, headers, stream, streamLen, auth, extraScope)
 				if err != nil {
 					return nil, err
 				}
-				extraScope = newScope
 			}
 		}
 
@@ -735,11 +778,15 @@ func parseRegistryWarningHeader(header string) string {
 //
 // debugging: https://github.com/containers/image/pull/211#issuecomment-273426236 and follows up
 func (c *dockerClient) setupRequestAuth(req *http.Request, extraScope *authScope) error {
-	if len(c.challenges) == 0 {
+	c.challengesLock.RLock()
+	challenges := c.challenges
+	c.challengesLock.RUnlock()
+
+	if len(challenges) == 0 {
 		return nil
 	}
-	schemeNames := make([]string, 0, len(c.challenges))
-	for _, challenge := range c.challenges {
+	schemeNames := make([]string, 0, len(challenges))
+	for _, challenge := range challenges {
 		schemeNames = append(schemeNames, challenge.Scheme)
 		switch challenge.Scheme {
 		case "basic":
@@ -1010,7 +1057,9 @@ func (c *dockerClient) detectPropertiesHelper(ctx context.Context) error {
 		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusUnauthorized {
 			return registryHTTPResponseToError(resp)
 		}
+		c.challengesLock.Lock()
 		c.challenges = slices.Collect(iterateAuthHeader(resp.Header))
+		c.challengesLock.Unlock()
 		c.scheme = scheme
 		c.supportsSignatures = resp.Header.Get("X-Registry-Supports-Signatures") == "1"
 		return nil
