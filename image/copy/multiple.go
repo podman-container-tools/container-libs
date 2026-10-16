@@ -413,7 +413,7 @@ func (c *copier) copyMultipleImages(ctx context.Context) (copiedManifest []byte,
 		}
 
 		// Save the manifest list.
-		err = c.dest.PutManifest(ctx, attemptedManifestList, nil)
+		err = c.putManifest(ctx, attemptedManifestList, nil)
 		if err != nil {
 			logrus.Debugf("Upload of manifest list type %s failed: %v", thisListType, err)
 			errs = append(errs, fmt.Sprintf("%s(%v)", thisListType, err))

@@ -1,6 +1,7 @@
 package copy
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -153,6 +154,13 @@ type Options struct {
 	// exists (and is equivalent). Making the eventual (no-op) copy more performant for this case. Enabling the option
 	// is slightly pessimistic if the destination image doesn't exist, or is not equivalent.
 	OptimizeDestinationImageAlreadyExists bool
+
+	// When OmitPrimaryManifestUpdateIfUnchanged is set, the image's primary manifest is not
+	// written to the destination if the destination already contains a byte-for-byte identical
+	// one. That way a copy which changes nothing does not fail against destinations which reject
+	// writing to a name that already exists, e.g. registries enforcing tag immutability.
+	// Manifest instances of a manifest list are not affected, see (*copier).putManifest.
+	OmitPrimaryManifestUpdateIfUnchanged bool
 
 	// Download layer contents with "nondistributable" media types ("foreign" layers) and translate the layer media type
 	// to not indicate "nondistributable".
@@ -423,6 +431,44 @@ func Image(ctx context.Context, policyContext *signature.PolicyContext, destRef,
 // to pass a parameter to every (go tool vet) invocation.
 func (c *copier) Printf(format string, a ...any) {
 	fmt.Fprintf(c.reportWriter, format, a...)
+}
+
+// putManifest writes man to c.dest, with instanceDigest interpreted as in
+// private.ImageDestination.PutManifest.
+//
+// If c.options.OmitPrimaryManifestUpdateIfUnchanged is set, the write is skipped when the
+// destination already contains a byte-for-byte identical primary manifest; some destinations
+// reject writing to a name that already exists, so an otherwise no-op copy would fail there.
+//
+// That check costs an extra read from the destination, so it is deliberately limited to the
+// primary manifest (instanceDigest == nil): instances of a manifest list are written by digest,
+// which such destinations don't restrict, and there can be arbitrarily many of them.
+func (c *copier) putManifest(ctx context.Context, man []byte, instanceDigest *digest.Digest) error {
+	if c.options.OmitPrimaryManifestUpdateIfUnchanged && instanceDigest == nil {
+		if unchanged, err := c.destinationManifestEqual(ctx, man); err != nil {
+			// Not being able to read the destination is not fatal, we can still just write.
+			logrus.Debugf("Error reading manifest from destination, writing unconditionally: %v", err)
+		} else if unchanged {
+			logrus.Debugf("Skipping manifest write, destination already contains an identical manifest")
+			return nil
+		}
+	}
+	return c.dest.PutManifest(ctx, man, instanceDigest)
+}
+
+// destinationManifestEqual reports whether the primary manifest currently stored at the
+// destination is byte-for-byte identical to man.
+func (c *copier) destinationManifestEqual(ctx context.Context, man []byte) (bool, error) {
+	src, err := c.dest.Reference().NewImageSource(ctx, c.options.DestinationCtx)
+	if err != nil {
+		return false, err
+	}
+	defer src.Close()
+	destManifest, _, err := src.GetManifest(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	return bytes.Equal(man, destManifest), nil
 }
 
 // close tears down state owned by copier.
