@@ -31,6 +31,15 @@ func (q *Control) GetQuota(targetPath string, quota *Quota) error {
 	return errors.New("filesystem does not support, or has not enabled quotas")
 }
 
+// ReleaseQuota clears the quota limits for targetPath's project ID and removes
+// targetPath from the quotas map.
+func (q *Control) ReleaseQuota(targetPath string) error {
+	return errors.New("filesystem does not support, or has not enabled quotas")
+}
+
 // ClearQuota removes the map entry in the quotas map for targetPath.
 // It does so to prevent the map leaking entries as directories are deleted.
+//
+// Deprecated: use ReleaseQuota to also clear the underlying project quota
+// limits.
 func (q *Control) ClearQuota(targetPath string) {}
