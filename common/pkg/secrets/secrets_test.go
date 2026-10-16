@@ -2,9 +2,13 @@ package secrets
 
 import (
 	"bytes"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"go.podman.io/common/pkg/secrets/filedriver"
+	"go.podman.io/common/pkg/secrets/shelldriver"
 )
 
 var drivertype = "file"
@@ -299,4 +303,91 @@ func TestSecretList(t *testing.T) {
 	allSecrets, err := manager.List()
 	require.NoError(t, err)
 	require.Len(t, allSecrets, 2)
+}
+
+// Creating a new secret with Replace=true should not remove other existing secrets.
+func TestReplaceNewSecretDoesNotDeleteOthers(t *testing.T) {
+	manager, _ := setup(t)
+
+	// file driver storage
+	pathFile := t.TempDir()
+	fileOpts := StoreOptions{DriverOpts: map[string]string{"path": pathFile}}
+
+	// shell driver storage (different directory)
+	shellBase := t.TempDir()
+	shellOptsMap := map[string]string{
+		"store":  fmt.Sprintf("cat - > %s/${SECRET_ID}", shellBase),
+		"lookup": fmt.Sprintf("cat %s/${SECRET_ID}", shellBase),
+		"delete": "true", // emulate a non-zero exit code
+		"list":   "true",
+	}
+	shellOpts := StoreOptions{DriverOpts: shellOptsMap, Replace: true}
+
+	// Store first secret using file driver
+	id1, err := manager.Store("test1", []byte("data1"), "file", fileOpts)
+	require.NoError(t, err)
+	require.NotEmpty(t, id1)
+
+	// Store a new secret using shell driver and Replace=true (should not affect test1)
+	id2, err := manager.Store("test2", []byte("data2"), "shell", shellOpts)
+	require.NoError(t, err)
+	require.NotEmpty(t, id2)
+
+	// Both secrets should exist in the manager
+	all, err := manager.List()
+	require.NoError(t, err)
+	require.Len(t, all, 2)
+
+	// Verify file driver data still contains id1
+	fd, err := filedriver.NewDriver(pathFile)
+	require.NoError(t, err)
+	d1, err := fd.Lookup(id1)
+	require.NoError(t, err)
+	require.Equal(t, []byte("data1"), d1)
+
+	// Verify shell storage contains id2
+	sd, err := shelldriver.NewDriver(shellOptsMap)
+	require.NoError(t, err)
+	d2, err := sd.Lookup(id2)
+	require.NoError(t, err)
+	require.Equal(t, []byte("data2"), d2)
+}
+
+func TestReplaceUsesOriginalDriverToDelete(t *testing.T) {
+	manager, _ := setup(t)
+
+	// Two separate filedriver storage roots
+	path1 := t.TempDir()
+	path2 := t.TempDir()
+
+	// Store secret initially in path1
+	storeOpts1 := StoreOptions{DriverOpts: map[string]string{"path": path1}}
+	id1, err := manager.Store("mysecret", []byte("orig"), "file", storeOpts1)
+	require.NoError(t, err)
+	require.NotEmpty(t, id1)
+
+	// Ensure the secret entry exists in path1 data file
+	fd1, err := filedriver.NewDriver(path1)
+	require.NoError(t, err)
+	dOrig, err := fd1.Lookup(id1)
+	require.NoError(t, err)
+	require.Equal(t, []byte("orig"), dOrig)
+
+	// Replace the secret using a different driver storage path (path2)
+	storeOpts2 := StoreOptions{DriverOpts: map[string]string{"path": path2}, Replace: true}
+	id2, err := manager.Store("mysecret", []byte("new"), "file", storeOpts2)
+	require.NoError(t, err)
+	require.NotEmpty(t, id2)
+	require.NotEqual(t, id1, id2)
+
+	// Old id should no longer exist in path1 (deleted via previous driver)
+	_, err = fd1.Lookup(id1)
+	require.Error(t, err, "old secret id should no longer exist in path1")
+
+	// New id should exist in path2
+	fd2, err := filedriver.NewDriver(path2)
+	require.NoError(t, err)
+	dNew, err := fd2.Lookup(id2)
+	require.NoError(t, err)
+	require.Equal(t, []byte("new"), dNew)
 }

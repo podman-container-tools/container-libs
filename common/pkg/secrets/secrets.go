@@ -199,6 +199,26 @@ func (s *SecretsManager) Store(name string, data []byte, driverType string, opti
 		if options.IgnoreIfExists {
 			return secr.ID, nil
 		}
+
+		if options.Replace {
+			// We must call Delete using whatever driver the secret was created with,
+			// which is not necessarily driver where the new value will go
+			prevDriver, err := getDriver(secr.Driver, secr.DriverOptions)
+			if err != nil {
+				return "", err
+			}
+			err = prevDriver.Delete(secr.ID)
+			if err != nil {
+				if !errors.Is(err, define.ErrNoSuchSecret) {
+					return "", fmt.Errorf("deleting driver secret %s: %w", secr.ID, err)
+				}
+			} else {
+				if err := s.delete(secr.ID); err != nil && !errors.Is(err, define.ErrNoSuchSecret) {
+					return "", fmt.Errorf("deleting secret %s: %w", secr.ID, err)
+				}
+			}
+		}
+
 		secr.UpdatedAt = time.Now()
 	} else {
 		secr = new(Secret)
@@ -225,19 +245,6 @@ func (s *SecretsManager) Store(name string, data []byte, driverType string, opti
 	driver, err := getDriver(driverType, options.DriverOpts)
 	if err != nil {
 		return "", err
-	}
-
-	if options.Replace {
-		err := driver.Delete(secr.ID)
-		if err != nil {
-			if !errors.Is(err, define.ErrNoSuchSecret) {
-				return "", fmt.Errorf("deleting driver secret %s: %w", secr.ID, err)
-			}
-		} else {
-			if err := s.delete(secr.ID); err != nil && !errors.Is(err, define.ErrNoSuchSecret) {
-				return "", fmt.Errorf("deleting secret %s: %w", secr.ID, err)
-			}
-		}
 	}
 
 	secr.ID, err = s.newID()
