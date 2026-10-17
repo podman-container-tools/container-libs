@@ -55,7 +55,7 @@ github.com/VividCortex/ewma
 # github.com/acarl005/stripansi v0.0.0-20180116102854-5a71ef0e047d
 ## explicit
 github.com/acarl005/stripansi
-# github.com/aperturerobotics/protobuf-go-lite v0.15.0
+# github.com/aperturerobotics/protobuf-go-lite v0.19.0
 ## explicit; go 1.23
 github.com/aperturerobotics/protobuf-go-lite
 # github.com/cespare/xxhash/v2 v2.3.0
@@ -64,8 +64,8 @@ github.com/cespare/xxhash/v2
 # github.com/checkpoint-restore/checkpointctl v1.6.0
 ## explicit; go 1.25.0
 github.com/checkpoint-restore/checkpointctl/lib
-# github.com/checkpoint-restore/go-criu/v8 v8.4.0
-## explicit; go 1.25.0
+# github.com/checkpoint-restore/go-criu/v8 v8.5.0
+## explicit; go 1.26.0
 github.com/checkpoint-restore/go-criu/v8/stats
 # github.com/chzyer/readline v1.5.1
 ## explicit; go 1.15

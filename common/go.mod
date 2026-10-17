@@ -6,7 +6,7 @@ go 1.26.0
 
 require (
 	github.com/checkpoint-restore/checkpointctl v1.6.0
-	github.com/checkpoint-restore/go-criu/v8 v8.4.0
+	github.com/checkpoint-restore/go-criu/v8 v8.5.0
 	github.com/containerd/platforms v1.0.0-rc.5
 	github.com/containers/ocicrypt v1.3.2
 	github.com/coreos/go-systemd/v22 v22.7.0
@@ -57,7 +57,7 @@ require (
 	github.com/ProtonMail/go-crypto v1.5.2 // indirect
 	github.com/VividCortex/ewma v1.2.0 // indirect
 	github.com/acarl005/stripansi v0.0.0-20180116102854-5a71ef0e047d // indirect
-	github.com/aperturerobotics/protobuf-go-lite v0.15.0 // indirect
+	github.com/aperturerobotics/protobuf-go-lite v0.19.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/chzyer/readline v1.5.1 // indirect
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
