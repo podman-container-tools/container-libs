@@ -24,5 +24,5 @@ func TestOCI1IndexFromManifest(t *testing.T) {
 		"ociv1.manifest.json",
 	})
 	// Extra fields are rejected
-	testValidManifestWithExtraFieldsIsRejected(t, parser, validManifest, []string{"config", "fsLayers", "history", "layers"})
+	testValidManifestWithExtraFieldsIsRejected(t, parser, validManifest, []string{"config", "fsLayers", "history", "layers", "signatures"})
 }
