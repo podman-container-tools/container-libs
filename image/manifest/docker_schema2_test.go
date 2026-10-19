@@ -61,7 +61,7 @@ func TestSchema2FromManifest(t *testing.T) {
 		"ociv1.manifest.json", "ociv1.image.index.json",
 	})
 	// Extra fields are rejected
-	testValidManifestWithExtraFieldsIsRejected(t, parser, validManifest, []string{"fsLayers", "history", "manifests"})
+	testValidManifestWithExtraFieldsIsRejected(t, parser, validManifest, []string{"fsLayers", "history", "manifests", "signatures"})
 }
 
 func TestSchema2Clone(t *testing.T) {

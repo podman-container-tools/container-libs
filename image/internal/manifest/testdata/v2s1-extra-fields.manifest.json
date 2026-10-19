@@ -1,0 +1,19 @@
+{
+   "schemaVersion": 1,
+   "name": "busybox",
+   "tag": "latest",
+   "architecture": "amd64",
+   "fsLayers": [],
+   "history": [],
+   "config": {},
+   "layers": [],
+   "signatures": [
+      {
+         "header": {
+            "alg": "ES256"
+         },
+         "signature": "AAAA",
+         "protected": "eyJmb3JtYXRMZW5ndGgiOjAsImZvcm1hdFRhaWwiOiJDbjAifQ"
+      }
+   ]
+}

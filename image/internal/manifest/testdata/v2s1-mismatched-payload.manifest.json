@@ -1,0 +1,25 @@
+{
+   "schemaVersion": 1,
+   "name": "busybox",
+   "tag": "latest",
+   "architecture": "amd64",
+   "fsLayers": [
+      {
+         "blobSum": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+   ],
+   "history": [
+      {
+         "v1Compatibility": "{}"
+      }
+   ],
+   "signatures": [
+      {
+         "header": {
+            "alg": "ES256"
+         },
+         "signature": "AAAA",
+         "protected": "eyJmb3JtYXRMZW5ndGgiOiAwLCAiZm9ybWF0VGFpbCI6ICJleUp6WTJobGJXRldaWEp6YVc5dUlqb3hMQ0p1WVcxbElqb2liM1JvWlhJdmFXMWhaMlVpTENKMFlXY2lPaUpzWVhSbGMzUWlMQ0poY21Ob2FYUmxZM1IxY21VaU9pSmhiV1EyTkNJc0ltWnpUR0Y1WlhKeklqcGJYU3dpYUdsemRHOXllU0k2VzExOSJ9"
+      }
+   ]
+}
