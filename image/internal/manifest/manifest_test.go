@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/containers/libtrust"
 	digest "github.com/opencontainers/go-digest"
 	imgspecv1 "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/stretchr/testify/assert"
@@ -63,14 +64,41 @@ func TestDigest(t *testing.T) {
 		assert.Equal(t, c.expectedDigest, actualDigest)
 	}
 
-	manifest, err := os.ReadFile("testdata/v2s1-invalid-signatures.manifest.json")
-	require.NoError(t, err)
-	_, err = Digest(manifest)
-	assert.Error(t, err)
+	for _, path := range []string{
+		"v2s1-invalid-signatures.manifest.json",
+		"v2s1-extra-fields.manifest.json",
+		"v2s1-mismatched-payload.manifest.json",
+	} {
+		manifest, err := os.ReadFile(filepath.Join("testdata", path))
+		require.NoError(t, err)
+		_, err = Digest(manifest)
+		assert.Error(t, err, path)
+	}
 
 	actualDigest, err := Digest([]byte{})
 	require.NoError(t, err)
 	assert.Equal(t, digest.Digest(digestSha256EmptyTar), actualDigest)
+}
+
+func TestEnsureSchema1BlobMatchesPayload(t *testing.T) {
+	for _, c := range []struct {
+		blob, payload string
+		wantErr       bool
+	}{
+		{`{"schemaVersion":1,"name":"a"}`, `{"schemaVersion":1,"name":"a"}`, false},                                  // identical
+		{`{"schemaVersion":1,"name":"a","signatures":[{"x":1}]}`, `{"schemaVersion":1,"name":"a"}`, false},           // differ only in signatures (ignored)
+		{`{"schemaVersion":1,"name":"a","signatures":[1]}`, `{"schemaVersion":1,"name":"a","signatures":[1]}`, true}, // payload unexpectedly carries signatures
+		{`{"schemaVersion":1,"name":"a"}`, `{"schemaVersion":1,"name":"b"}`, true},                                   // differ in a field
+		{`{`, `{}`, true}, // invalid blob JSON
+		{`{}`, `{`, true}, // invalid payload JSON
+	} {
+		err := ensureSchema1BlobMatchesPayload([]byte(c.blob), []byte(c.payload))
+		if c.wantErr {
+			assert.Error(t, err, c.blob)
+		} else {
+			assert.NoError(t, err, c.blob)
+		}
+	}
 }
 
 func TestMatchesDigest(t *testing.T) {
@@ -104,6 +132,22 @@ func TestMatchesDigest(t *testing.T) {
 	require.NoError(t, err)
 	// Even a correct SHA256 hash is rejected if we can't strip the JSON signature.
 	res, err := MatchesDigest(manifest, digest.FromBytes(manifest))
+	assert.False(t, res)
+	assert.Error(t, err)
+
+	manifest, err = os.ReadFile("testdata/v2s1-mismatched-payload.manifest.json")
+	require.NoError(t, err)
+	// A signed manifest whose JWS payload does not match the body is rejected,
+	// so neither the digest of the manifest nor the digest of the JWS payload
+	// matches it.
+	res, err = MatchesDigest(manifest, digest.FromBytes(manifest))
+	assert.False(t, res)
+	assert.Error(t, err)
+	sig, err := libtrust.ParsePrettySignature(manifest, "signatures")
+	require.NoError(t, err)
+	payload, err := sig.Payload()
+	require.NoError(t, err)
+	res, err = MatchesDigest(manifest, digest.FromBytes(payload))
 	assert.False(t, res)
 	assert.Error(t, err)
 
