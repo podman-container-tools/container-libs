@@ -51,6 +51,101 @@ func TestCacheRootForDir(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestCacheRootForDirStaysConsistentAfterPartialFailure(t *testing.T) {
+	const idBasename = "id"
+
+	tempDir := t.TempDir()
+	root, err := os.OpenRoot(tempDir)
+	require.NoError(t, err)
+	defer root.Close()
+
+	for _, dir := range []string{"p/q", "p/r"} {
+		err := root.MkdirAll(dir, 0o700)
+		require.NoError(t, err)
+		err = root.WriteFile(filepath.Join(dir, idBasename), []byte(dir), 0o600)
+		require.NoError(t, err)
+	}
+
+	cache := NewCache(root)
+	defer func() {
+		err := cache.Close()
+		require.NoError(t, err)
+	}()
+
+	dirRoot, err := cache.RootForDir("p/q")
+	require.NoError(t, err)
+	contents, err := dirRoot.ReadFile(idBasename)
+	require.NoError(t, err)
+	assert.Equal(t, "p/q", string(contents))
+
+	// "p/r/s" is intentionally not created, so RootForDir("p/r/s") fails only after
+	// already having opened a new frame for "r" (replacing the previously cached "q").
+	_, err = cache.RootForDir("p/r/s")
+	assert.Error(t, err)
+
+	dirRoot, err = cache.RootForDir("p/q")
+	require.NoError(t, err)
+	contents, err = dirRoot.ReadFile(idBasename)
+	require.NoError(t, err)
+	assert.Equal(t, "p/q", string(contents))
+}
+
+func TestCacheRootForDirHandlesDeepChains(t *testing.T) {
+	const idBasename = "id"
+	const chainDepth = maxFrames + 8
+
+	tempDir := t.TempDir()
+	root, err := os.OpenRoot(tempDir)
+	require.NoError(t, err)
+	defer root.Close()
+
+	makeDir := func(dir string) {
+		err := root.MkdirAll(dir, 0o700)
+		require.NoError(t, err)
+		err = root.WriteFile(filepath.Join(dir, idBasename), []byte(dir), 0o600)
+		require.NoError(t, err)
+	}
+
+	var deepChain string
+	for i := range chainDepth {
+		deepChain = path.Join(deepChain, fmt.Sprintf("x%d", i))
+		makeDir(deepChain)
+	}
+
+	cache := NewCache(root)
+	defer func() {
+		err := cache.Close()
+		require.NoError(t, err)
+	}()
+
+	checkDir := func(dir string) *os.Root {
+		t.Helper()
+		dirRoot, err := cache.RootForDir(dir)
+		require.NoError(t, err)
+		contents, err := dirRoot.ReadFile(idBasename)
+		require.NoError(t, err)
+		assert.Equal(t, dir, string(contents))
+		return dirRoot
+	}
+
+	shallowDir := path.Join("x0", "x1", "x2")
+	deepAncestor := path.Dir(path.Dir(deepChain))
+
+	// Descending two more levels keeps deepAncestor cached, so returning to it should reuse its root.
+	deepAncestorRoot := checkDir(deepAncestor)
+	checkDir(deepChain)
+	assert.Same(t, deepAncestorRoot, checkDir(deepAncestor), "the deep ancestor is still in the cache window")
+
+	// shallowDir has fallen outside the cache window. Check that we can still return to it.
+	checkDir(shallowDir)
+
+	// Descend again to evict shallowDir before looking up a different child under it.
+	checkDir(deepChain)
+	shallowDirDistinctChild := path.Join(shallowDir, "sibling")
+	makeDir(shallowDirDistinctChild)
+	checkDir(shallowDirDistinctChild)
+}
+
 func TestCachePreparePath(t *testing.T) {
 	const idBasename = "id"
 
