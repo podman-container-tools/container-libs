@@ -51,6 +51,111 @@ func TestCacheRootForDir(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestCacheRootForDirReusesCachedFrameAfterAscend(t *testing.T) {
+	tempDir := t.TempDir()
+	root, err := os.OpenRoot(tempDir)
+	require.NoError(t, err)
+	defer root.Close()
+
+	require.NoError(t, root.MkdirAll(filepath.Join("dir", "subdir"), 0o700))
+
+	cache := NewCache(root)
+	defer func() {
+		err := cache.Close()
+		require.NoError(t, err)
+	}()
+
+	dirFirst, err := cache.RootForDir("dir")
+	require.NoError(t, err)
+
+	_, err = cache.RootForDir(filepath.Join("dir", "subdir"))
+	require.NoError(t, err)
+
+	dirSecond, err := cache.RootForDir("dir")
+	require.NoError(t, err)
+	assert.Same(t, dirFirst, dirSecond, "descending into a subdirectory and back should not reopen the still-valid parent frame")
+}
+
+func TestCacheRootForDirStaysConsistentAfterPartialFailure(t *testing.T) {
+	const idBasename = "id"
+
+	tempDir := t.TempDir()
+	root, err := os.OpenRoot(tempDir)
+	require.NoError(t, err)
+	defer root.Close()
+
+	for _, dir := range []string{"p/q", "p/r"} {
+		err := root.MkdirAll(dir, 0o700)
+		require.NoError(t, err)
+		err = root.WriteFile(filepath.Join(dir, idBasename), []byte(dir), 0o600)
+		require.NoError(t, err)
+	}
+
+	cache := NewCache(root)
+	defer func() {
+		err := cache.Close()
+		require.NoError(t, err)
+	}()
+
+	dirRoot, err := cache.RootForDir("p/q")
+	require.NoError(t, err)
+	contents, err := dirRoot.ReadFile(idBasename)
+	require.NoError(t, err)
+	assert.Equal(t, "p/q", string(contents))
+
+	// "p/r/s" is intentionally not created, so RootForDir("p/r/s") fails only after
+	// already having opened a new frame for "r" (replacing the previously cached "q").
+	_, err = cache.RootForDir("p/r/s")
+	assert.Error(t, err)
+
+	dirRoot, err = cache.RootForDir("p/q")
+	require.NoError(t, err)
+	contents, err = dirRoot.ReadFile(idBasename)
+	require.NoError(t, err)
+	assert.Equal(t, "p/q", string(contents))
+}
+
+func TestCacheRootForDirHandlesDeepChains(t *testing.T) {
+	const idBasename = "id"
+	const chainDepth = maxFrames + 8
+
+	tempDir := t.TempDir()
+	root, err := os.OpenRoot(tempDir)
+	require.NoError(t, err)
+	defer root.Close()
+
+	makeDir := func(dir string) {
+		err := root.MkdirAll(dir, 0o700)
+		require.NoError(t, err)
+		err = root.WriteFile(filepath.Join(dir, idBasename), []byte(dir), 0o600)
+		require.NoError(t, err)
+	}
+
+	var deepChain string
+	for i := range chainDepth {
+		deepChain = filepath.Join(deepChain, fmt.Sprintf("x%d", i))
+		makeDir(deepChain)
+	}
+
+	cache := NewCache(root)
+	defer func() {
+		err := cache.Close()
+		require.NoError(t, err)
+	}()
+
+	checkDir := func(dir string) {
+		t.Helper()
+		dirRoot, err := cache.RootForDir(dir)
+		require.NoError(t, err)
+		contents, err := dirRoot.ReadFile(idBasename)
+		require.NoError(t, err)
+		assert.Equal(t, dir, string(contents))
+	}
+
+	checkDir(deepChain)                       // Walk all the way down, closing early frames.
+	checkDir(filepath.Join("x0", "x1", "x2")) // Reopen a frame closed by the window above.
+}
+
 func TestCachePreparePath(t *testing.T) {
 	const idBasename = "id"
 
