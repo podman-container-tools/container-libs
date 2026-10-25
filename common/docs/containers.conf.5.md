@@ -687,6 +687,14 @@ setting it to false.
 
 Default is true.
 
+**healthcheck_events_on_change**=true|false
+
+When enabled, healthcheck events are emitted only when the health status
+changes instead of for every healthcheck run. This setting only applies when
+**healthcheck_events** is true.
+
+Default is false.
+
 **helper_binaries_dir**=["/usr/libexec/podman", ...]
 
 A is a list of directories which are used to search for helper binaries.
