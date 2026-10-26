@@ -151,6 +151,7 @@ type Driver struct {
 	stagingDirsLocks map[string]*staging_lockfile.StagingLockFile
 
 	supportsIDMappedMounts *bool
+	supportProgramCgroup   string
 }
 
 type additionalLayerStore struct {
@@ -470,6 +471,7 @@ func Init(home string, options graphdriver.Options) (graphdriver.Driver, error) 
 		supportsVolatile:      supportsVolatile,
 		usingComposefs:        opts.useComposefs,
 		options:               *opts,
+		supportProgramCgroup:  options.SupportProgramCgroup,
 		stagingDirsLocksMutex: sync.Mutex{},
 		stagingDirsLocks:      make(map[string]*staging_lockfile.StagingLockFile),
 	}
@@ -1816,19 +1818,7 @@ func (d *Driver) get(id string, disableShifting bool, options graphdriver.MountO
 				label = label + ",xattr_permissions=2"
 			}
 
-			mountProgram := exec.Command(d.options.mountProgram, "-o", label, target)
-			mountProgram.Dir = d.home
-			var b bytes.Buffer
-			mountProgram.Stderr = &b
-			err := mountProgram.Run()
-			if err != nil {
-				output := b.String()
-				if output == "" {
-					output = "<stderr empty>"
-				}
-				return fmt.Errorf("using mount program %s: %s: %w", d.options.mountProgram, output, err)
-			}
-			return nil
+			return runMountProgram(d.options.mountProgram, d.home, label, target, d.supportProgramCgroup)
 		}
 	} else if len(mountData) >= pageSize {
 		// Use mountFrom when the mount data has exceeded the page size. The mount syscall fails if

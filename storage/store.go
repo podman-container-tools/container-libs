@@ -791,24 +791,25 @@ type store struct {
 	//   may undo that. So, holding graphLock is required throughout the duration of Shutdown(), and the duration of any mount
 	//   (but not unmount) calls.
 	// - Within this store object, protects access to some related in-memory state.
-	graphLock       *lockfile.LockFile
-	usernsLock      *lockfile.LockFile
-	graphRoot       string
-	graphOptions    []string
-	imageStoreDir   string
-	pullOptions     map[string]string
-	uidMap          []idtools.IDMap
-	gidMap          []idtools.IDMap
-	autoUsernsUser  string
-	autoNsMinSize   uint32
-	autoNsMaxSize   uint32
-	imageStore      rwImageStore
-	rwImageStores   []rwImageStore
-	roImageStores   []roImageStore
-	containerStore  rwContainerStore
-	digestLockRoot  string
-	disableVolatile bool
-	transientStore  bool
+	graphLock            *lockfile.LockFile
+	usernsLock           *lockfile.LockFile
+	graphRoot            string
+	graphOptions         []string
+	imageStoreDir        string
+	pullOptions          map[string]string
+	uidMap               []idtools.IDMap
+	gidMap               []idtools.IDMap
+	autoUsernsUser       string
+	autoNsMinSize        uint32
+	autoNsMaxSize        uint32
+	imageStore           rwImageStore
+	rwImageStores        []rwImageStore
+	roImageStores        []roImageStore
+	containerStore       rwContainerStore
+	digestLockRoot       string
+	disableVolatile      bool
+	transientStore       bool
+	supportProgramCgroup string
 
 	// splitFDStreamLock protects splitFDStreamServer.  It is not graphLock:
 	// Shutdown stops the server while holding no lock, because what it
@@ -924,22 +925,23 @@ func GetStore(options types.StoreOptions) (Store, error) {
 		autoNsMaxSize = AutoUserNsMaxSize
 	}
 	s := &store{
-		runRoot:             options.RunRoot,
-		graphDriverName:     options.GraphDriverName,
-		graphDriverPriority: options.GraphDriverPriority,
-		graphLock:           graphLock,
-		usernsLock:          usernsLock,
-		graphRoot:           options.GraphRoot,
-		graphOptions:        options.GraphDriverOptions,
-		imageStoreDir:       options.ImageStore,
-		pullOptions:         options.PullOptions,
-		uidMap:              copySlicePreferringNil(options.UIDMap),
-		gidMap:              copySlicePreferringNil(options.GIDMap),
-		autoUsernsUser:      options.RootAutoNsUser,
-		autoNsMinSize:       autoNsMinSize,
-		autoNsMaxSize:       autoNsMaxSize,
-		disableVolatile:     options.DisableVolatile,
-		transientStore:      options.TransientStore,
+		runRoot:              options.RunRoot,
+		graphDriverName:      options.GraphDriverName,
+		graphDriverPriority:  options.GraphDriverPriority,
+		graphLock:            graphLock,
+		usernsLock:           usernsLock,
+		graphRoot:            options.GraphRoot,
+		graphOptions:         options.GraphDriverOptions,
+		imageStoreDir:        options.ImageStore,
+		pullOptions:          options.PullOptions,
+		uidMap:               copySlicePreferringNil(options.UIDMap),
+		gidMap:               copySlicePreferringNil(options.GIDMap),
+		autoUsernsUser:       options.RootAutoNsUser,
+		autoNsMinSize:        autoNsMinSize,
+		autoNsMaxSize:        autoNsMaxSize,
+		disableVolatile:      options.DisableVolatile,
+		transientStore:       options.TransientStore,
+		supportProgramCgroup: options.SupportProgramCgroup,
 
 		additionalUIDs: nil,
 		additionalGIDs: nil,
@@ -1151,11 +1153,12 @@ func (s *store) stopUsingGraphDriver() {
 // The caller must hold s.graphLock.
 func (s *store) createGraphDriverLocked() (drivers.Driver, error) {
 	config := drivers.Options{
-		Root:           s.graphRoot,
-		ImageStore:     s.imageStoreDir,
-		RunRoot:        s.runRoot,
-		DriverPriority: s.graphDriverPriority,
-		DriverOptions:  s.graphOptions,
+		Root:                 s.graphRoot,
+		ImageStore:           s.imageStoreDir,
+		RunRoot:              s.runRoot,
+		DriverPriority:       s.graphDriverPriority,
+		DriverOptions:        s.graphOptions,
+		SupportProgramCgroup: s.supportProgramCgroup,
 	}
 	return drivers.New(s.graphDriverName, config)
 }
