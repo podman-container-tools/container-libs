@@ -8,7 +8,6 @@ import (
 )
 
 type cacheFrame struct {
-	path    string
 	dirRoot *os.Root
 	dirFile *os.File // lazily opened; nil until FileForRoot needs it
 }
@@ -49,7 +48,8 @@ type Cache struct {
 	// the best we can do; but callers that implement tree walks manually could also explicitly manage the lifetime
 	// / equality of cache values (e.g. while recursing to subdirectories, the caller knows when it returns back to a
 	// parent, and could perhaps maintain some kind of a direct reference to a cache entry).
-	frames []cacheFrame
+	previousComponents []string
+	frames             []cacheFrame
 }
 
 // NewCache creates a cache for operations within root.
@@ -84,31 +84,35 @@ func (c *Cache) RootForDir(dir string) (*os.Root, error) {
 		return c.root, nil
 	}
 
-	components := strings.Split(dir, "/")
-	targetIndex := len(components) - 1
+	currentComponents := strings.Split(dir, "/")
+	targetIndex := len(currentComponents) - 1
+	maxIndex := min(targetIndex, len(c.previousComponents)-1)
+	mismatchIndex := 0
 
-	deepestValidIndex := min(targetIndex, len(c.frames)-1)
-	for deepestValidIndex >= 0 && c.frames[deepestValidIndex].path !=
-		strings.Join(components[:deepestValidIndex+1], "/") {
-		deepestValidIndex--
+	for mismatchIndex <= maxIndex && currentComponents[mismatchIndex] == c.previousComponents[mismatchIndex] {
+		mismatchIndex++
 	}
-	c.truncateFrames(deepestValidIndex + 1)
 
-	parent := c.root
-	if deepestValidIndex >= 0 {
-		parent = c.frames[deepestValidIndex].dirRoot
+	c.truncateFrames(mismatchIndex)
+
+	var parent *os.Root
+	if mismatchIndex == 0 {
+		parent = c.root
+	} else {
+		parent = c.frames[mismatchIndex-1].dirRoot
 	}
-	for componentIndex := deepestValidIndex + 1; componentIndex <= targetIndex; componentIndex++ {
-		dirRoot, err := parent.OpenRoot(components[componentIndex])
+	for i := mismatchIndex; i <= targetIndex; i++ {
+		dirRoot, err := parent.OpenRoot(currentComponents[i])
 		if err != nil {
 			return nil, err
 		}
 		c.frames = append(c.frames, cacheFrame{
-			path:    strings.Join(components[:componentIndex+1], "/"),
 			dirRoot: dirRoot,
 		})
 		parent = dirRoot
 	}
+
+	c.previousComponents = currentComponents
 
 	return c.frames[targetIndex].dirRoot, nil
 }
