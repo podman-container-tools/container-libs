@@ -1816,19 +1816,7 @@ func (d *Driver) get(id string, disableShifting bool, options graphdriver.MountO
 				label = label + ",xattr_permissions=2"
 			}
 
-			mountProgram := exec.Command(d.options.mountProgram, "-o", label, target)
-			mountProgram.Dir = d.home
-			var b bytes.Buffer
-			mountProgram.Stderr = &b
-			err := mountProgram.Run()
-			if err != nil {
-				output := b.String()
-				if output == "" {
-					output = "<stderr empty>"
-				}
-				return fmt.Errorf("using mount program %s: %s: %w", d.options.mountProgram, output, err)
-			}
-			return nil
+			return runMountProgram(d.options.mountProgram, d.home, label, target)
 		}
 	} else if len(mountData) >= pageSize {
 		// Use mountFrom when the mount data has exceeded the page size. The mount syscall fails if

@@ -7,8 +7,10 @@ module go.podman.io/storage
 require (
 	github.com/BurntSushi/toml v1.6.0
 	github.com/containerd/stargz-snapshotter/estargz v0.19.0
+	github.com/coreos/go-systemd/v22 v22.7.0
 	github.com/cyphar/filepath-securejoin v0.7.0
 	github.com/docker/go-units v0.5.0
+	github.com/godbus/dbus/v5 v5.2.4
 	github.com/google/go-intervals v0.0.2
 	github.com/json-iterator/go v1.1.12
 	github.com/klauspost/compress v1.20.3

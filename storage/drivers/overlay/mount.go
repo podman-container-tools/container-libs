@@ -6,17 +6,80 @@ import (
 	"bytes"
 	"flag"
 	"fmt"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 
+	"github.com/sirupsen/logrus"
 	"go.podman.io/storage/pkg/reexec"
+	"go.podman.io/storage/pkg/systemd"
+	"go.podman.io/storage/pkg/unshare"
 	"golang.org/x/sys/unix"
 )
 
 func init() {
 	reexec.Register("storage-mountfrom", mountOverlayFromMain)
+	reexec.Register("storage-mountprogram", mountProgramMain)
+}
+
+func runMountProgram(mountProgramPath, home, label, target string) error {
+	var b bytes.Buffer
+	var mountProgram *exec.Cmd
+	var w io.WriteCloser
+
+	if unshare.IsRootless() && systemd.RunsOnSystemd() {
+		mountProgram = reexec.Command("storage-mountprogram", mountProgramPath, "-o", label, target)
+		var err error
+		w, err = mountProgram.StdinPipe()
+		if err != nil {
+			return fmt.Errorf("using mount program %s: pipe creation: %w", mountProgramPath, err)
+		}
+	} else {
+		mountProgram = exec.Command(mountProgramPath, "-o", label, target)
+	}
+	mountProgram.Dir = home
+	mountProgram.Stderr = &b
+
+	if w != nil {
+		if err := mountProgram.Start(); err != nil {
+			w.Close()
+			return fmt.Errorf("using mount program %s: %w", mountProgramPath, err)
+		}
+		if err := systemd.MoveMountProcessToScope(mountProgram.Process.Pid); err != nil {
+			logrus.Debugf("Failed to move mount program %s to systemd scope: %v", mountProgramPath, err)
+		}
+		w.Close()
+		if err := mountProgram.Wait(); err != nil {
+			output := b.String()
+			if output == "" {
+				output = "<stderr empty>"
+			}
+			return fmt.Errorf("using mount program %s: %s: %w", mountProgramPath, output, err)
+		}
+		return nil
+	}
+
+	if err := mountProgram.Run(); err != nil {
+		output := b.String()
+		if output == "" {
+			output = "<stderr empty>"
+		}
+		return fmt.Errorf("using mount program %s: %s: %w", mountProgramPath, output, err)
+	}
+	return nil
+}
+
+func mountProgramMain() {
+	if len(os.Args) < 2 {
+		fatal(fmt.Errorf("storage-mountprogram requires at least one argument"))
+	}
+	_, _ = io.Copy(io.Discard, os.Stdin)
+	if err := unix.Exec(os.Args[1], os.Args[1:], os.Environ()); err != nil {
+		fatal(err)
+	}
 }
 
 func fatal(err error) {

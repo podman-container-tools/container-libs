@@ -15,6 +15,8 @@ import (
 	"go.podman.io/storage/pkg/archive"
 	"go.podman.io/storage/pkg/idtools"
 	"go.podman.io/storage/pkg/reexec"
+	"go.podman.io/storage/pkg/systemd"
+	"go.podman.io/storage/pkg/unshare"
 )
 
 const driverName = "overlay"
@@ -366,4 +368,33 @@ func Test_parseOptions(t *testing.T) {
 			assert.Equal(t, tt.want, got)
 		})
 	}
+}
+
+func TestRunMountProgram(t *testing.T) {
+	tmpDir := t.TempDir()
+	outFile := filepath.Join(tmpDir, "out.txt")
+	scriptPath := filepath.Join(tmpDir, "fake-mount.sh")
+	script := "#!/bin/sh\npwd > " + outFile + "\necho \"$@\" >> " + outFile + "\ncat /proc/self/cgroup >> " + outFile + "\n"
+	require.NoError(t, os.WriteFile(scriptPath, []byte(script), 0o755))
+
+	targetDir := filepath.Join(tmpDir, "merged")
+	require.NoError(t, runMountProgram(scriptPath, tmpDir, "lowerdir=a", targetDir))
+
+	data, err := os.ReadFile(outFile)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), tmpDir+"\n-o lowerdir=a "+targetDir+"\n")
+	if unshare.IsRootless() && systemd.RunsOnSystemd() {
+		if conn, err := systemd.UserConnection(unshare.GetRootlessUID()); err == nil {
+			conn.Close()
+			assert.Contains(t, string(data), "/user.slice/fuse-overlayfs-")
+			assert.Contains(t, string(data), ".scope")
+		}
+	}
+
+	failScriptPath := filepath.Join(tmpDir, "fail-mount.sh")
+	failScript := "#!/bin/sh\necho \"custom mount error\" >&2\nexit 1\n"
+	require.NoError(t, os.WriteFile(failScriptPath, []byte(failScript), 0o755))
+
+	err = runMountProgram(failScriptPath, tmpDir, "lowerdir=a", targetDir)
+	require.ErrorContains(t, err, "using mount program "+failScriptPath+": custom mount error")
 }
