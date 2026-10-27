@@ -47,33 +47,69 @@ func (e ArchiveFileNotFoundError) Error() string {
 type ociArchiveImageSource struct {
 	impl.Compat
 
-	ref             ociArchiveReference
-	unpackedSrc     private.ImageSource
-	unpackedArchive *unpackedArchive
+	ref                   ociArchiveReference
+	unpackedSrc           private.ImageSource
+	individualReaderOrNil *Reader
+	root                  *os.Root
 }
 
 // newImageSource returns an ImageSource for reading from an existing directory.
 // newImageSource untars the file and saves it in a temp directory
-func newImageSource(ctx context.Context, sys *types.SystemContext, ref ociArchiveReference) (private.ImageSource, error) {
-	unpackedArchive, err := unpackArchive(sys, ref)
-	if err != nil {
-		return nil, fmt.Errorf("creating temp directory: %w", err)
+func newImageSource(ctx context.Context, sys *types.SystemContext, ref ociArchiveReference) (types.ImageSource, error) {
+	var (
+		archive, individualReaderOrNil *Reader
+		layoutRef                      types.ImageReference
+		err                            error
+	)
+	if ref.archiveReader != nil {
+		archive = ref.archiveReader
+		individualReaderOrNil = nil
+	} else {
+		archive, err = NewReader(ctx, sys, ref.resolvedFile) // changed signature to match NewReader
+		if err != nil {
+			return nil, err
+		}
+		individualReaderOrNil = archive
 	}
 
-	unpackedSrc, err := unpackedArchive.ociRefExtracted.NewImageSource(ctx, sys)
+	// Create confined root to prevent symlink path escapes
+	root, err := os.OpenRoot(archive.tempDirectory)
 	if err != nil {
-		if _, ok := errors.AsType[ocilayout.ImageNotFoundError](err); ok {
-			err = ImageNotFoundError{ref: ref}
-		}
-		if err := unpackedArchive.Close(); err != nil {
-			return nil, fmt.Errorf("deleting temp directory %q: %w", unpackedArchive.tempDirectory, err)
+		if individualReaderOrNil != nil {
+			individualReaderOrNil.Close()
 		}
 		return nil, err
 	}
+	layoutReader := ocilayout.NewReaderWithRoot(root)
+
+	if ref.sourceIndex != -1 {
+		layoutRef, err = layoutReader.NewIndexReference(archive.tempDirectory, ref.sourceIndex)
+	} else {
+		layoutRef, err = layoutReader.NewReference(archive.tempDirectory, ref.image)
+	}
+
+	if err != nil {
+		root.Close()
+		if individualReaderOrNil != nil {
+			individualReaderOrNil.Close()
+		}
+		return nil, err
+	}
+
+	src, err := layoutRef.NewImageSource(ctx, sys)
+	if err != nil {
+		root.Close()
+		if individualReaderOrNil != nil {
+			individualReaderOrNil.Close()
+		}
+		return nil, err
+	}
+
 	s := &ociArchiveImageSource{
-		ref:             ref,
-		unpackedSrc:     imagesource.FromPublic(unpackedSrc),
-		unpackedArchive: unpackedArchive,
+		ref:                   ref,
+		unpackedSrc:           imagesource.FromPublic(src),
+		individualReaderOrNil: individualReaderOrNil,
+		root:                  root, // Passed into struct for cleanup
 	}
 	s.Compat = impl.AddCompat(s)
 	return s, nil
@@ -116,11 +152,21 @@ func (s *ociArchiveImageSource) Reference() types.ImageReference {
 // Close removes resources associated with an initialized ImageSource, if any.
 // Close deletes the temporary directory at dst
 func (s *ociArchiveImageSource) Close() error {
-	defer func() {
-		err := s.unpackedArchive.Close()
-		logrus.Debugf("error deleting tmp dir: %v", err)
-	}()
-	return s.unpackedSrc.Close()
+	var retErr error
+	if err := s.unpackedSrc.Close(); err != nil {
+		retErr = err
+	}
+	if s.root != nil {
+		if err := s.root.Close(); err != nil && retErr == nil {
+			retErr = err
+		}
+	}
+	if s.individualReaderOrNil != nil {
+		if err := s.individualReaderOrNil.Close(); err != nil && retErr == nil {
+			retErr = err
+		}
+	}
+	return retErr
 }
 
 // GetManifest returns the image's manifest along with its MIME type (which may be empty when it can't be determined but the manifest is available).

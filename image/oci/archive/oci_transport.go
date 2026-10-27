@@ -27,9 +27,12 @@ type ociArchiveTransport struct{}
 
 // ociArchiveReference is an ImageReference for OCI Archive paths
 type ociArchiveReference struct {
-	file         string
-	resolvedFile string
-	image        string
+	file          string
+	resolvedFile  string
+	image         string
+	sourceIndex   int
+	archiveReader *Reader
+	archiveWriter *Writer
 }
 
 func (t ociArchiveTransport) Name() string {
@@ -49,26 +52,49 @@ func (t ociArchiveTransport) ValidatePolicyConfigurationScope(scope string) erro
 
 // ParseReference converts a string, which should not start with the ImageTransport.Name prefix, into an OCI archive ImageReference.
 func ParseReference(reference string) (types.ImageReference, error) {
-	file, image := internal.SplitPathAndImage(reference)
-	return NewReference(file, image)
+	file, image, index, err := internal.ParseReferenceIntoElements(reference)
+	if err != nil {
+		return nil, err
+	}
+	return newReference(file, image, index, nil, nil)
+}
+
+// NewReference returns an OCI reference for a file and an image.
+func NewReference(file, image string) (types.ImageReference, error) {
+	return newReference(file, image, -1, nil, nil)
+}
+
+// NewIndexReference returns an OCI reference for a file and a zero-based source manifest index.
+func NewIndexReference(file string, sourceIndex int) (types.ImageReference, error) {
+	return newReference(file, "", sourceIndex, nil, nil)
 }
 
 // NewReference returns an OCI archive reference for a file and an optional image name annotation (if not "").
-func NewReference(file, image string) (types.ImageReference, error) {
+func newReference(file, image string, sourceIndex int, archiveReader *Reader, archiveWriter *Writer) (types.ImageReference, error) {
 	resolved, err := explicitfilepath.ResolvePathToFullyExplicit(file)
 	if err != nil {
 		return nil, err
 	}
-
 	if err := internal.ValidateOCIPath(file); err != nil {
 		return nil, err
 	}
-
 	if err := internal.ValidateImageName(image); err != nil {
 		return nil, err
 	}
-
-	return ociArchiveReference{file: file, resolvedFile: resolved, image: image}, nil
+	if sourceIndex != -1 && sourceIndex < 0 {
+		return nil, fmt.Errorf("index @%d must not be negative", sourceIndex)
+	}
+	if sourceIndex != -1 && image != "" {
+		return nil, fmt.Errorf("cannot set image %s and index @%d at the same time", image, sourceIndex)
+	}
+	return ociArchiveReference{
+		file:          file,
+		resolvedFile:  resolved,
+		image:         image,
+		sourceIndex:   sourceIndex,
+		archiveReader: archiveReader,
+		archiveWriter: archiveWriter,
+	}, nil
 }
 
 func (ref ociArchiveReference) Transport() types.ImageTransport {
@@ -78,7 +104,10 @@ func (ref ociArchiveReference) Transport() types.ImageTransport {
 // StringWithinTransport returns a string representation of the reference, which MUST be such that
 // reference.Transport().ParseReference(reference.StringWithinTransport()) returns an equivalent reference.
 func (ref ociArchiveReference) StringWithinTransport() string {
-	return fmt.Sprintf("%s:%s", ref.file, ref.image)
+	if ref.sourceIndex == -1 {
+		return fmt.Sprintf("%s:%s", ref.file, ref.image) // formatting fixed for string
+	}
+	return fmt.Sprintf("%s:@%d", ref.file, ref.sourceIndex)
 }
 
 // DockerReference returns a Docker reference associated with this reference

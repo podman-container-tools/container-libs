@@ -60,11 +60,17 @@ func testParseReference(t *testing.T, fn func(string) (types.ImageReference, err
 		"relativepath",
 		tmpDir + "/thisdoesnotexist",
 	} {
-		for _, image := range []struct{ suffix, image string }{
-			{":notlatest:image", "notlatest:image"},
-			{":latestimage", "latestimage"},
-			{":", ""},
-			{"", ""},
+		for _, image := range []struct {
+			suffix string
+			image  string
+			index  int
+		}{
+			{":notlatest:image", "notlatest:image", -1},
+			{":latestimage", "latestimage", -1},
+			{":", "", -1},
+			{"", "", -1},
+			{":@0", "", 0},
+			{":@5", "", 5},
 		} {
 			input := path + image.suffix
 			ref, err := fn(input)
@@ -73,6 +79,7 @@ func testParseReference(t *testing.T, fn func(string) (types.ImageReference, err
 			require.True(t, ok)
 			assert.Equal(t, path, ociArchRef.file, input)
 			assert.Equal(t, image.image, ociArchRef.image, input)
+			assert.Equal(t, image.index, ociArchRef.sourceIndex, input)
 		}
 	}
 
@@ -182,7 +189,9 @@ func TestReferenceStringWithinTransport(t *testing.T) {
 
 	for _, c := range []struct{ input, result string }{
 		{"/dir1:notlatest:notlatest", "/dir1:notlatest:notlatest"}, // Explicit image
-		{"/dir3:", "/dir3:"}, // No image
+		{"/dir3:", "/dir3:"},     // No image
+		{"/dir4:@0", "/dir4:@0"}, // Index reference
+		{"/dir5:@3", "/dir5:@3"}, // Index reference
 	} {
 		ref, err := ParseReference(tmpDir + c.input)
 		require.NoError(t, err, c.input)
@@ -296,4 +305,150 @@ func TestReferenceDeleteImage(t *testing.T) {
 	ref, _ := refToTempOCI(t)
 	err := ref.DeleteImage(context.Background(), nil)
 	assert.Error(t, err)
+}
+
+func TestNewIndexReference(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	ref, err := NewIndexReference(tmpDir, 0)
+	require.NoError(t, err)
+	ociArchRef, ok := ref.(ociArchiveReference)
+	require.True(t, ok)
+	assert.Equal(t, tmpDir, ociArchRef.file)
+	assert.Equal(t, "", ociArchRef.image)
+	assert.Equal(t, 0, ociArchRef.sourceIndex)
+
+	ref, err = NewIndexReference(tmpDir, 5)
+	require.NoError(t, err)
+	ociArchRef, ok = ref.(ociArchiveReference)
+	require.True(t, ok)
+	assert.Equal(t, 5, ociArchRef.sourceIndex)
+
+	// Negative index should fail
+	_, err = NewIndexReference(tmpDir, -2)
+	assert.Error(t, err)
+
+	// Cannot set both image and index
+	_, err = newReference(tmpDir, "someimage", 3, nil, nil)
+	assert.Error(t, err)
+}
+
+func TestReaderAndWriter(t *testing.T) {
+	// Create a minimal OCI layout directory with two manifests
+	srcDir := t.TempDir()
+
+	m := `{
+		"schemaVersion": 2,
+		"manifests": [
+		{
+			"mediaType": "application/vnd.oci.image.manifest.v1+json",
+			"size": 7143,
+			"digest": "sha256:e692418e4cbaf90ca69d05a66403747baa33ee08806650b51fab815ad7fc331f",
+			"annotations": {
+				"org.opencontainers.image.ref.name": "image1:latest"
+			}
+		},
+		{
+			"mediaType": "application/vnd.oci.image.manifest.v1+json",
+			"size": 7143,
+			"digest": "sha256:aaaaaae4cbaf90ca69d05a66403747baa33ee08806650b51fab815ad7fc331f",
+			"annotations": {
+				"org.opencontainers.image.ref.name": "image2:latest"
+			}
+		}
+		]
+	}`
+	err := os.WriteFile(filepath.Join(srcDir, "index.json"), []byte(m), 0o644)
+	require.NoError(t, err)
+
+	// Tar it into an archive
+	tarFile := filepath.Join(t.TempDir(), "multi.tar")
+	err = tarDirectory(srcDir, tarFile, nil)
+	require.NoError(t, err)
+
+	// Test the Reader
+	reader, err := NewReader(context.Background(), nil, tarFile)
+	require.NoError(t, err)
+	defer reader.Close()
+
+	entries, err := reader.List()
+	require.NoError(t, err)
+	require.Len(t, entries, 2)
+
+	// Verify the first entry has the correct image name and no index
+	ref0, ok := entries[0].ImageRef.(ociArchiveReference)
+	require.True(t, ok)
+	assert.Equal(t, "image1:latest", ref0.image)
+	assert.Equal(t, -1, ref0.sourceIndex)
+
+	// Verify the second entry has the correct image name and no index
+	ref1, ok := entries[1].ImageRef.(ociArchiveReference)
+	require.True(t, ok)
+	assert.Equal(t, "image2:latest", ref1.image)
+	assert.Equal(t, -1, ref1.sourceIndex)
+
+	// Test the Writer
+	writerPath := filepath.Join(t.TempDir(), "writer-output.tar")
+	writer, err := NewWriter(nil, writerPath)
+	require.NoError(t, err)
+
+	ref, err := writer.NewReference("test:latest")
+	require.NoError(t, err)
+	writerRef, ok := ref.(ociArchiveReference)
+	require.True(t, ok)
+	assert.Equal(t, "test:latest", writerRef.image)
+	assert.Equal(t, -1, writerRef.sourceIndex)
+
+	err = writer.Close()
+	require.NoError(t, err)
+
+	// Verify the output tar file was created
+	_, err = os.Stat(writerPath)
+	require.NoError(t, err)
+}
+
+func TestReaderListUnnamedImages(t *testing.T) {
+	// Test that unnamed images get an index instead of a name
+	srcDir := t.TempDir()
+
+	m := `{
+		"schemaVersion": 2,
+		"manifests": [
+		{
+			"mediaType": "application/vnd.oci.image.manifest.v1+json",
+			"size": 7143,
+			"digest": "sha256:e692418e4cbaf90ca69d05a66403747baa33ee08806650b51fab815ad7fc331f"
+		},
+		{
+			"mediaType": "application/vnd.oci.image.manifest.v1+json",
+			"size": 7143,
+			"digest": "sha256:aaaaaae4cbaf90ca69d05a66403747baa33ee08806650b51fab815ad7fc331f"
+		}
+		]
+	}`
+	err := os.WriteFile(filepath.Join(srcDir, "index.json"), []byte(m), 0o644)
+	require.NoError(t, err)
+
+	tarFile := filepath.Join(t.TempDir(), "unnamed.tar")
+	err = tarDirectory(srcDir, tarFile, nil)
+	require.NoError(t, err)
+
+	reader, err := NewReader(context.Background(), nil, tarFile)
+	require.NoError(t, err)
+	defer reader.Close()
+
+	entries, err := reader.List()
+	require.NoError(t, err)
+	require.Len(t, entries, 2)
+
+	// Unnamed images should get sourceIndex set to their position
+	ref0, ok := entries[0].ImageRef.(ociArchiveReference)
+	require.True(t, ok)
+	assert.Equal(t, "", ref0.image)
+	assert.Equal(t, 0, ref0.sourceIndex)
+
+	ref1, ok := entries[1].ImageRef.(ociArchiveReference)
+	require.True(t, ok)
+	assert.Equal(t, "", ref1.image)
+	assert.Equal(t, 1, ref1.sourceIndex)
 }
