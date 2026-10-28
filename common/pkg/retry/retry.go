@@ -99,6 +99,10 @@ func IsErrorRetryable(err error) bool {
 		if e.Err == io.EOF { // Happens when a server accepts a HTTP connection and sends EOF
 			return true
 		}
+		// net/http's errServerClosedIdle is unexported, so match its message.
+		if e.Err.Error() == "http: server closed idle connection" {
+			return true
+		}
 		return IsErrorRetryable(e.Err)
 	case syscall.Errno:
 		return isErrnoRetryable(e)
