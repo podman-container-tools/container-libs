@@ -4,7 +4,6 @@ package splitfdstreamserver
 
 import (
 	"io"
-	"os"
 	"testing"
 	"time"
 
@@ -23,10 +22,9 @@ func newCloseRecorder() *closeRecorder {
 	return &closeRecorder{closed: make(chan struct{})}
 }
 
-func (c *closeRecorder) Files() driver.LayerFiles          { return nil }
-func (c *closeRecorder) TarSplit() io.Reader               { return nil }
-func (c *closeRecorder) Get(string) (io.ReadCloser, error) { return nil, os.ErrNotExist }
-func (c *closeRecorder) Close() error                      { close(c.closed); return nil }
+func (c *closeRecorder) Files() driver.LayerFiles { return nil }
+func (c *closeRecorder) TarSplit() io.Reader      { return nil }
+func (c *closeRecorder) Close() error             { close(c.closed); return nil }
 
 // TestLeaseHeldUntilConsumerIsDone checks that the layer stays held until
 // the consumer closes the lifetime descriptor it was handed.
