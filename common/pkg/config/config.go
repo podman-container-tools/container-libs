@@ -348,6 +348,11 @@ type EngineConfig struct {
 	// Default is true.
 	HealthcheckEvents bool `toml:"healthcheck_events,omitempty"`
 
+	// HealthcheckEventsOnChange limits healthcheck events to changes in the
+	// health status instead of emitting an event for every healthcheck run.
+	// This setting only applies when HealthcheckEvents is true. Default is false.
+	HealthcheckEventsOnChange bool `toml:"healthcheck_events_on_change,omitempty"`
+
 	// HelperBinariesDir is a list of directories which are used to search for
 	// helper binaries.
 	HelperBinariesDir configfile.Slice `toml:"helper_binaries_dir,omitempty"`
