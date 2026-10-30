@@ -86,3 +86,9 @@ decisions, non-obvious constraints that require using one approach over another,
 delineate significantly conceptually separate parts of the same function (definitely not
 after every blank line). It should not generally be necessary to document, in a caller, what calling another
 function does — if that is confusing, the callee should probably be renamed or refactored.
+
+# Commit messages
+
+Never add trailers or attribution lines for coding agents to commit messages or PR descriptions
+(for example `Co-authored-by:`, `Assisted-by:`, `Generated-by:`, or "Generated with ..." lines).
+Only the human contributor's `Signed-off-by:` is allowed.
