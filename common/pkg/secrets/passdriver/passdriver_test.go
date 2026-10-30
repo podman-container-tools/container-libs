@@ -2,7 +2,10 @@ package passdriver
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -26,6 +29,21 @@ func setupDriver(t *testing.T) *Driver {
 	require.NoError(t, err)
 
 	return driver
+}
+
+func TestDriverConfig(t *testing.T) {
+	driver, err := NewDriver(map[string]string{
+		"gpg_program": "gpg-wrapper",
+		"show_stderr": "true",
+	})
+	require.NoError(t, err)
+	require.Equal(t, "gpg-wrapper", driver.GPGProgram)
+	require.True(t, driver.ShowGPGStderr)
+
+	driver, err = NewDriver(nil)
+	require.NoError(t, err)
+	require.Equal(t, "gpg", driver.GPGProgram)
+	require.False(t, driver.ShowGPGStderr)
 }
 
 func TestStoreAndLookup(t *testing.T) {
@@ -121,6 +139,27 @@ func TestLookup(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDecryptFailureDoesNotLookLikeMissingSecret(t *testing.T) {
+	driver := setupDriver(t)
+	key := filepath.Join(driver.Root, "broken.gpg")
+	contents := []byte("invalid GPG ciphertext")
+	require.NoError(t, os.WriteFile(key, contents, 0o600))
+
+	_, err := driver.Lookup("broken")
+	require.Error(t, err)
+	require.NotErrorIs(t, err, define.ErrNoSuchSecret)
+	require.ErrorContains(t, err, "decrypting secret broken")
+
+	err = driver.Store("broken", []byte("replacement"))
+	require.ErrorIs(t, err, define.ErrSecretIDExists)
+	stored, err := os.ReadFile(key)
+	require.NoError(t, err)
+	require.Equal(t, contents, stored)
+
+	_, err = driver.Lookup("missing")
+	require.True(t, errors.Is(err, define.ErrNoSuchSecret))
 }
 
 func TestList(t *testing.T) {
