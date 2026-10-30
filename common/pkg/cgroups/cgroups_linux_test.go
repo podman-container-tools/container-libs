@@ -8,7 +8,9 @@ import (
 	"math/big"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/opencontainers/cgroups"
@@ -36,6 +38,84 @@ func TestCreated(t *testing.T) {
 	}
 	if err := cgr.Delete(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestCreateFirstInvalidPaths(t *testing.T) {
+	for _, paths := range [][]string{nil, {"/"}, {"/../outside"}} {
+		if path, cleanup, err := CreateFirst(paths, nil); err == nil || path != "" || cleanup != nil {
+			t.Fatalf("expected invalid paths %v to fail without ownership", paths)
+		}
+	}
+}
+
+func TestCreateFirst(t *testing.T) {
+	if unshare.IsRootless() && os.Getenv("CGROUP_TEST_ROOTLESS") != "1" {
+		t.Skip("set CGROUP_TEST_ROOTLESS=1 only in an isolated writable cgroup namespace")
+	}
+
+	name := fmt.Sprintf("/test-create-first-%d", os.Getpid())
+	// cgroup.procs is not a directory, so the first candidate cannot be created.
+	invalid := "/cgroup.procs" + name
+	path, cleanup, err := CreateFirst([]string{invalid, "/cgroup.procs", name}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if path != name || cleanup == nil {
+		t.Fatalf("expected ownership of %q, got %q", name, path)
+	}
+	t.Cleanup(func() {
+		if err := cleanup(); err != nil {
+			t.Error(err)
+		}
+	})
+
+	path, reusedCleanup, err := CreateFirst([]string{name}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if path != name || reusedCleanup != nil {
+		t.Fatalf("expected reuse of %q without ownership, got %q", name, path)
+	}
+	for _, invalid := range []string{invalid, "/cgroup.procs"} {
+		if path, cleanup, err := CreateFirst([]string{invalid}, nil); err == nil || path != "" || cleanup != nil {
+			t.Fatalf("expected %q to fail without ownership", invalid)
+		}
+	}
+	if err := cleanup(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(cgroupRoot, name)); !os.IsNotExist(err) {
+		t.Fatalf("owned cgroup was not removed: %v", err)
+	}
+}
+
+func TestCreateFirstFailureCleanup(t *testing.T) {
+	if unshare.IsRootless() && os.Getenv("CGROUP_TEST_ROOTLESS") != "1" {
+		t.Skip("set CGROUP_TEST_ROOTLESS=1 only in an isolated writable cgroup namespace")
+	}
+	parent := filepath.Join(cgroupRoot, fmt.Sprintf("test-create-first-threaded-%d", os.Getpid()))
+	threaded := filepath.Join(parent, "threaded")
+	for _, path := range []string{parent, threaded} {
+		if err := os.Mkdir(path, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			if err := os.Remove(path); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+	if err := os.WriteFile(filepath.Join(threaded, "cgroup.type"), []byte("threaded"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	candidate := filepath.Join(parent, "candidate")
+	_, cleanup, err := CreateFirst([]string{strings.TrimPrefix(candidate, cgroupRoot)}, &cgroups.Resources{Memory: 64 << 20})
+	if err == nil || !strings.Contains(err.Error(), "domain controllers") || cleanup != nil {
+		t.Fatalf("expected domain-controller failure without retained ownership, got %v", err)
+	}
+	if _, err := os.Stat(candidate); !os.IsNotExist(err) {
+		t.Fatalf("failed candidate was not removed: %v", err)
 	}
 }
 

@@ -179,6 +179,58 @@ func New(path string, resources *cgroups.Resources) (*CgroupControl, error) {
 	return control, nil
 }
 
+// CreateFirst prepares the first cgroup in paths that can be created, trying
+// candidates with existing parents in order. The optional cleanup removes only
+// the empty cgroup created by this call. Existing cgroups are not owned.
+// The runtime must still apply limits and attach its processes; success here
+// does not guarantee those later operations will succeed.
+func CreateFirst(paths []string, resources *cgroups.Resources) (string, func() error, error) {
+	if len(paths) == 0 {
+		return "", nil, errors.New("no cgroup path specified")
+	}
+	if resources == nil {
+		resources = &cgroups.Resources{}
+	}
+	var errs []error
+	for _, p := range paths {
+		fullPath := filepath.Join(cgroupRoot, p)
+		if !strings.HasPrefix(fullPath, cgroupRoot+"/") {
+			errs = append(errs, fmt.Errorf("invalid cgroup path %q", p))
+			continue
+		}
+		var cleanup func() error
+		if err := os.Mkdir(fullPath, 0o755); err == nil {
+			cleanup = func() error {
+				err := os.Remove(fullPath)
+				if errors.Is(err, os.ErrNotExist) {
+					return nil
+				}
+				return err
+			}
+		} else if !errors.Is(err, os.ErrExist) {
+			errs = append(errs, err)
+			continue
+		} else if info, err := os.Stat(fullPath); err != nil || !info.IsDir() {
+			if err == nil {
+				err = fmt.Errorf("%q is not a cgroup directory", p)
+			}
+			errs = append(errs, err)
+			continue
+		}
+		if err := fs2.CreateCgroupPath(fullPath, &cgroups.Cgroup{Resources: resources}); err != nil {
+			if cleanup != nil {
+				if cleanupErr := cleanup(); cleanupErr != nil {
+					return "", nil, errors.Join(err, cleanupErr)
+				}
+			}
+			errs = append(errs, fmt.Errorf("preparing cgroup %s: %w", p, err))
+			continue
+		}
+		return p, cleanup, nil
+	}
+	return "", nil, errors.Join(errs...)
+}
+
 // NewSystemd creates a new cgroup control.
 func NewSystemd(path string, resources *cgroups.Resources) (*CgroupControl, error) {
 	_, err := IsCgroup2UnifiedMode()
