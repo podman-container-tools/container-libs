@@ -1,7 +1,6 @@
 package hooks
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -17,7 +16,7 @@ import (
 var path string
 
 func TestGoodNew(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	dir := t.TempDir()
 
@@ -82,7 +81,7 @@ func TestGoodNew(t *testing.T) {
 }
 
 func TestBadNew(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	dir := t.TempDir()
 

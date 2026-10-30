@@ -3,7 +3,6 @@ package exec
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -20,14 +19,13 @@ func TestRuntimeConfigFilter(t *testing.T) {
 	fileMode := os.FileMode(0o600)
 	rootUint32 := uint32(0)
 	for _, tt := range []struct {
-		name                   string
-		contextTimeout         time.Duration
-		hooks                  []spec.Hook
-		input                  *spec.Spec
-		expected               *spec.Spec
-		expectedHookError      string
-		expectedRunError       error
-		expectedRunErrorString string
+		name                string
+		contextTimeout      time.Duration
+		hooks               []spec.Hook
+		input               *spec.Spec
+		expected            *spec.Spec
+		expectedErrorIs     error
+		expectedErrorString string
 	}{
 		{
 			name: "no-op",
@@ -187,8 +185,8 @@ func TestRuntimeConfigFilter(t *testing.T) {
 					Path: "rootfs",
 				},
 			},
-			expectedHookError: "^executing \\[sh -c sleep 2]: signal: killed$",
-			expectedRunError:  context.DeadlineExceeded,
+			expectedErrorString: "executing [sh -c sleep 2]: signal: killed",
+			expectedErrorIs:     context.DeadlineExceeded,
 		},
 		{
 			name: "hook timeout",
@@ -211,8 +209,8 @@ func TestRuntimeConfigFilter(t *testing.T) {
 					Path: "rootfs",
 				},
 			},
-			expectedHookError: "^executing \\[sh -c sleep 2]: signal: killed$",
-			expectedRunError:  context.DeadlineExceeded,
+			expectedErrorString: "executing [sh -c sleep 2]: signal: killed",
+			expectedErrorIs:     context.DeadlineExceeded,
 		},
 		{
 			name: "invalid JSON",
@@ -234,32 +232,51 @@ func TestRuntimeConfigFilter(t *testing.T) {
 					Path: "rootfs",
 				},
 			},
-			expectedRunErrorString: unexpectedEndOfJSONInput.Error(),
+			expectedErrorString: unexpectedEndOfJSONInput.Error(),
+		},
+		{
+			name: "stdout/err message logged in error",
+			hooks: []spec.Hook{
+				{
+					Path: path,
+					Args: []string{"sh", "-c", "echo outmsg; echo errmsg >&2; exit 1"},
+				},
+			},
+			input: &spec.Spec{
+				Version: "1.0.0",
+				Root: &spec.Root{
+					Path: "rootfs",
+				},
+			},
+			expected: &spec.Spec{
+				Version: "1.0.0",
+				Root: &spec.Root{
+					Path: "rootfs",
+				},
+			},
+			expectedErrorString: "executing [sh -c echo outmsg; echo errmsg >&2; exit 1]: exit status 1, hook stdout: outmsg\n, stderr: errmsg\n",
 		},
 	} {
 		test := tt
 		t.Run(test.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 			if test.contextTimeout > 0 {
 				var cancel context.CancelFunc
 				ctx, cancel = context.WithTimeout(ctx, test.contextTimeout)
 				defer cancel()
 			}
-			hookErr, err := RuntimeConfigFilterWithOptions(ctx, RuntimeConfigFilterOptions{Hooks: test.hooks, Config: test.input, PostKillTimeout: DefaultPostKillTimeout})
-			if test.expectedRunErrorString != "" {
-				// We have to compare the error strings in that case because
-				// errors.Is works differently.
-				assert.Contains(t, err.Error(), test.expectedRunErrorString)
+			err := RuntimeConfigFilterWithOptions(ctx, RuntimeConfigFilterOptions{Hooks: test.hooks, Config: test.input, PostKillTimeout: DefaultPostKillTimeout})
+			if test.expectedErrorString == "" && test.expectedErrorIs == nil {
+				require.NoError(t, err)
 			} else {
-				assert.True(t, errors.Is(err, test.expectedRunError))
-			}
-			if test.expectedHookError == "" {
-				if hookErr != nil {
-					t.Fatal(hookErr)
+				if test.expectedErrorString != "" {
+					assert.ErrorContains(t, err, test.expectedErrorString)
 				}
-			} else {
-				assert.Regexp(t, test.expectedHookError, hookErr.Error())
+				if test.expectedErrorIs != nil {
+					assert.ErrorIs(t, err, test.expectedErrorIs)
+				}
 			}
+
 			assert.Equal(t, test.expected, test.input)
 		})
 	}
@@ -353,13 +370,12 @@ func TestRuntimeConfigFilterOutputRedirection(t *testing.T) {
 			inputBefore := &spec.Spec{}
 			require.NoError(t, json.Unmarshal(expectedJSON, inputBefore))
 
-			hookErr, err := RuntimeConfigFilterWithOptions(t.Context(), RuntimeConfigFilterOptions{Hooks: hooks, Config: input, PostKillTimeout: DefaultPostKillTimeout})
+			err = RuntimeConfigFilterWithOptions(t.Context(), RuntimeConfigFilterOptions{Hooks: hooks, Config: input, PostKillTimeout: DefaultPostKillTimeout})
 			if test.expectedErr != "" {
 				assert.ErrorContains(t, err, test.expectedErr)
 				return
 			}
 			require.NoError(t, err)
-			require.NoError(t, hookErr)
 
 			assert.Equal(t, inputBefore, input)
 
@@ -391,9 +407,8 @@ func TestRuntimeConfigFilterCreatesStdoutFileWithCorrectMode(t *testing.T) {
 	}
 	hooks := []spec.Hook{{Path: path, Args: []string{"sh", "-c", "cat"}}}
 
-	hookErr, err := RuntimeConfigFilterWithOptions(t.Context(), RuntimeConfigFilterOptions{Hooks: hooks, Config: input, PostKillTimeout: DefaultPostKillTimeout})
+	err := RuntimeConfigFilterWithOptions(t.Context(), RuntimeConfigFilterOptions{Hooks: hooks, Config: input, PostKillTimeout: DefaultPostKillTimeout})
 	require.NoError(t, err)
-	require.NoError(t, hookErr)
 
 	info, err := os.Stat(stdoutPath)
 	require.NoError(t, err)
