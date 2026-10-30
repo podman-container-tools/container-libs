@@ -18,9 +18,10 @@ import (
 // and a potential for improvement.
 
 const (
-	maxDepth      = 4
-	entriesPerDir = 100
-	dirDivider    = 25
+	maxDepth      = 7
+	entriesPerDir = 4
+	dirDivider    = 2
+	chainLength   = 30
 )
 
 func benchmarkDir(b *testing.B) string {
@@ -38,12 +39,16 @@ func createDirs(t testing.TB, parentPath, relParentPath string, depth int, total
 		filePath := filepath.Join(parentPath, idx)
 		relFilePath := filepath.Join(relParentPath, idx)
 		if i%dirDivider == 0 {
+			for range chainLength - 1 {
+				filePath = filepath.Join(filePath, idx)
+				relFilePath = filepath.Join(relFilePath, idx)
+			}
 			err := os.MkdirAll(filePath, 0o700)
 			require.NoError(t, err)
 			if depth != 0 {
 				createDirs(t, filePath, relFilePath, depth-1, totalDirs, totalFiles)
 			}
-			*totalDirs++
+			*totalDirs += chainLength
 		} else {
 			err := os.WriteFile(filePath, []byte(relFilePath), 0o600)
 			require.NoError(t, err)
