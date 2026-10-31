@@ -36,29 +36,75 @@ func assertPublicKeyMatchesCert(t *testing.T, certPEM []byte, pk crypto.PublicKe
 func TestFulcioTrustRootValidate(t *testing.T) {
 	certs := x509.NewCertPool() // Empty is valid enough for our purposes.
 
-	for _, tr := range []fulcioTrustRoot{
+	// Invalid configurations
+	for _, c := range []struct {
+		name string
+		tr   fulcioTrustRoot
+	}{
 		{
-			caCertificates: certs,
-			oidcIssuer:     "",
-			subjectEmail:   "email",
+			name: "Missing OIDC issuer with subjectEmail",
+			tr: fulcioTrustRoot{
+				caCertificates: certs,
+				oidcIssuer:     "",
+				subjectEmail:   "email",
+			},
 		},
 		{
-			caCertificates: certs,
-			oidcIssuer:     "issuer",
-			subjectEmail:   "",
+			name: "Missing OIDC issuer with buildSignerURI",
+			tr: fulcioTrustRoot{
+				caCertificates: certs,
+				oidcIssuer:     "",
+				buildSignerURI: "https://github.com/org/repo/.github/workflows/build.yml@refs/heads/main",
+			},
+		},
+		{
+			name: "Missing both subjectEmail and buildSignerURI",
+			tr: fulcioTrustRoot{
+				caCertificates: certs,
+				oidcIssuer:     "issuer",
+				subjectEmail:   "",
+				buildSignerURI: "",
+			},
 		},
 	} {
-		err := tr.validate()
-		assert.Error(t, err)
+		err := c.tr.validate()
+		assert.Error(t, err, c.name)
 	}
 
-	tr := fulcioTrustRoot{
-		caCertificates: certs,
-		oidcIssuer:     "issuer",
-		subjectEmail:   "email",
+	// Valid configurations
+	for _, c := range []struct {
+		name string
+		tr   fulcioTrustRoot
+	}{
+		{
+			name: "With subjectEmail only",
+			tr: fulcioTrustRoot{
+				caCertificates: certs,
+				oidcIssuer:     "issuer",
+				subjectEmail:   "email",
+			},
+		},
+		{
+			name: "With buildSignerURI only",
+			tr: fulcioTrustRoot{
+				caCertificates: certs,
+				oidcIssuer:     "issuer",
+				buildSignerURI: "https://github.com/org/repo/.github/workflows/build.yml@refs/heads/main",
+			},
+		},
+		{
+			name: "With both subjectEmail and buildSignerURI",
+			tr: fulcioTrustRoot{
+				caCertificates: certs,
+				oidcIssuer:     "issuer",
+				subjectEmail:   "email",
+				buildSignerURI: "https://github.com/org/repo/.github/workflows/build.yml@refs/heads/main",
+			},
+		},
+	} {
+		err := c.tr.validate()
+		assert.NoError(t, err, c.name)
 	}
-	err := tr.validate()
-	assert.NoError(t, err)
 }
 
 // oidIssuerV1Ext creates an certificate.OIDIssuer extension
@@ -81,6 +127,100 @@ func oidIssuerV2Ext(t *testing.T, value string) pkix.Extension {
 	return pkix.Extension{
 		Id:    certificate.OIDIssuerV2,
 		Value: asn1MarshalTest(t, value, "utf8"),
+	}
+}
+
+// oidBuildSignerURIExt creates an certificate.OIDBuildSignerURI extension
+func oidBuildSignerURIExt(t *testing.T, value string) pkix.Extension {
+	return pkix.Extension{
+		Id:    certificate.OIDBuildSignerURI,
+		Value: asn1MarshalTest(t, value, "utf8"),
+	}
+}
+
+func TestFulcioBuildSignerURIInCertificate(t *testing.T) {
+	referenceTime := time.Now()
+	for _, c := range []struct {
+		name          string
+		extensions    []pkix.Extension
+		errorFragment string
+		expected      string
+	}{
+		{
+			name:       "Missing BuildSignerURI extension",
+			extensions: nil,
+			expected:   "", // Not an error, just returns empty string
+		},
+		{
+			name: "Valid BuildSignerURI",
+			extensions: []pkix.Extension{
+				oidBuildSignerURIExt(t, "https://github.com/org/repo/.github/workflows/build.yml@refs/heads/main"),
+			},
+			expected: "https://github.com/org/repo/.github/workflows/build.yml@refs/heads/main",
+		},
+		{
+			name: "Duplicate BuildSignerURI extension",
+			extensions: []pkix.Extension{
+				oidBuildSignerURIExt(t, "https://github.com/org/repo/.github/workflows/build.yml@refs/heads/main"),
+				oidBuildSignerURIExt(t, "https://github.com/org/repo/.github/workflows/other.yml@refs/heads/main"),
+			},
+			// Match both our message and the Go 1.19 message: "certificate contains duplicate extensions"
+			errorFragment: "duplicate",
+		},
+		{
+			name: "Invalid ASN.1 in BuildSignerURI extension",
+			extensions: []pkix.Extension{
+				{
+					Id:    certificate.OIDBuildSignerURI,
+					Value: asn1MarshalTest(t, 1, ""), // not a string type
+				},
+			},
+			errorFragment: "invalid ASN.1 in BuildSignerURI extension: asn1: structure error",
+		},
+		{
+			name: "Trailing data in BuildSignerURI extension",
+			extensions: []pkix.Extension{
+				{
+					Id:    certificate.OIDBuildSignerURI,
+					Value: append(bytes.Clone(asn1MarshalTest(t, "https://", "utf8")), asn1MarshalTest(t, "example.com", "utf8")...),
+				},
+			},
+			errorFragment: "invalid ASN.1 in BuildSignerURI extension, trailing data",
+		},
+	} {
+		testLeafKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		require.NoError(t, err, c.name)
+		testLeafContents := x509.Certificate{
+			Subject:         pkix.Name{CommonName: "leaf"},
+			NotBefore:       referenceTime.Add(-1 * time.Minute),
+			NotAfter:        referenceTime.Add(1 * time.Hour),
+			ExtraExtensions: c.extensions,
+			EmailAddresses:  []string{"test-user@example.com"},
+		}
+		testLeafCert, err := x509.CreateCertificate(rand.Reader, &testLeafContents, &testLeafContents, testLeafKey.Public(), testLeafKey)
+		require.NoError(t, err, c.name)
+		testLeafPEM := pem.EncodeToMemory(&pem.Block{
+			Type:  "CERTIFICATE",
+			Bytes: testLeafCert,
+		})
+
+		parsedLeafCerts, err := cryptoutils.UnmarshalCertificatesFromPEM(testLeafPEM)
+		if err != nil {
+			require.NotEqual(t, "", c.errorFragment, c.name)
+			assert.ErrorContains(t, err, c.errorFragment, c.name)
+		} else {
+			require.Len(t, parsedLeafCerts, 1)
+			parsedLeafCert := parsedLeafCerts[0]
+
+			res, err := fulcioBuildSignerURIInCertificate(parsedLeafCert)
+			if c.errorFragment == "" {
+				require.NoError(t, err, c.name)
+				assert.Equal(t, c.expected, res, c.name)
+			} else {
+				assert.ErrorContains(t, err, c.errorFragment, c.name)
+				assert.Equal(t, "", res, c.name)
+			}
+		}
 	}
 }
 
@@ -417,6 +557,112 @@ func TestFulcioTrustRootVerifyFulcioCertificateAtTime(t *testing.T) {
 			Bytes: testLeafCert,
 		})
 		pk, err := tr.verifyFulcioCertificateAtTime(referenceTime, testLeafPEM, []byte{})
+		if c.errorFragment == "" {
+			require.NoError(t, err, c.name)
+			assertPublicKeyMatchesCert(t, testLeafPEM, pk)
+		} else {
+			assert.ErrorContains(t, err, c.errorFragment, c.name)
+			assert.Nil(t, pk, c.name)
+		}
+	}
+}
+
+func TestFulcioTrustRootVerifyBuildSignerURI(t *testing.T) {
+	referenceTime := time.Now()
+	testCAKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	testCAContents := x509.Certificate{
+		Subject:               pkix.Name{CommonName: "root CA"},
+		NotBefore:             referenceTime.Add(-1 * time.Minute),
+		NotAfter:              referenceTime.Add(1 * time.Hour),
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+	}
+	testCACertBytes, err := x509.CreateCertificate(rand.Reader, &testCAContents, &testCAContents,
+		testCAKey.Public(), testCAKey)
+	require.NoError(t, err)
+	testCACert, err := x509.ParseCertificate(testCACertBytes)
+	require.NoError(t, err)
+	testCACertPool := x509.NewCertPool()
+	testCACertPool.AddCert(testCACert)
+
+	const testBuildSignerURI = "https://github.com/org/repo/.github/workflows/build.yml@refs/heads/main"
+
+	for _, c := range []struct {
+		name          string
+		extensions    []pkix.Extension
+		trustRoot     fulcioTrustRoot
+		errorFragment string
+	}{
+		{
+			name: "Matching BuildSignerURI",
+			extensions: []pkix.Extension{
+				oidIssuerV2Ext(t, "https://token.actions.githubusercontent.com"),
+				oidBuildSignerURIExt(t, testBuildSignerURI),
+			},
+			trustRoot: fulcioTrustRoot{
+				caCertificates: testCACertPool,
+				oidcIssuer:     "https://token.actions.githubusercontent.com",
+				buildSignerURI: testBuildSignerURI,
+			},
+			errorFragment: "",
+		},
+		{
+			name: "BuildSignerURI mismatch",
+			extensions: []pkix.Extension{
+				oidIssuerV2Ext(t, "https://token.actions.githubusercontent.com"),
+				oidBuildSignerURIExt(t, "https://github.com/other/repo/.github/workflows/build.yml@refs/heads/main"),
+			},
+			trustRoot: fulcioTrustRoot{
+				caCertificates: testCACertPool,
+				oidcIssuer:     "https://token.actions.githubusercontent.com",
+				buildSignerURI: testBuildSignerURI,
+			},
+			errorFragment: `Required BuildSignerURI`,
+		},
+		{
+			name: "Missing BuildSignerURI in certificate",
+			extensions: []pkix.Extension{
+				oidIssuerV2Ext(t, "https://token.actions.githubusercontent.com"),
+				// No BuildSignerURI extension
+			},
+			trustRoot: fulcioTrustRoot{
+				caCertificates: testCACertPool,
+				oidcIssuer:     "https://token.actions.githubusercontent.com",
+				buildSignerURI: testBuildSignerURI,
+			},
+			errorFragment: `Required BuildSignerURI`,
+		},
+		{
+			name: "Both subjectEmail and buildSignerURI required, both match",
+			extensions: []pkix.Extension{
+				oidIssuerV2Ext(t, "https://token.actions.githubusercontent.com"),
+				oidBuildSignerURIExt(t, testBuildSignerURI),
+			},
+			trustRoot: fulcioTrustRoot{
+				caCertificates: testCACertPool,
+				oidcIssuer:     "https://token.actions.githubusercontent.com",
+				subjectEmail:   "test@example.com",
+				buildSignerURI: testBuildSignerURI,
+			},
+			errorFragment: `Required email "test@example.com" not found`, // Email not in cert
+		},
+	} {
+		testLeafKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		require.NoError(t, err, c.name)
+		testLeafContents := x509.Certificate{
+			Subject:         pkix.Name{CommonName: "leaf"},
+			NotBefore:       referenceTime.Add(-1 * time.Minute),
+			NotAfter:        referenceTime.Add(1 * time.Hour),
+			ExtraExtensions: c.extensions,
+		}
+		testLeafCert, err := x509.CreateCertificate(rand.Reader, &testLeafContents, testCACert, testLeafKey.Public(), testCAKey)
+		require.NoError(t, err, c.name)
+		testLeafPEM := pem.EncodeToMemory(&pem.Block{
+			Type:  "CERTIFICATE",
+			Bytes: testLeafCert,
+		})
+		pk, err := c.trustRoot.verifyFulcioCertificateAtTime(referenceTime, testLeafPEM, []byte{})
 		if c.errorFragment == "" {
 			require.NoError(t, err, c.name)
 			assertPublicKeyMatchesCert(t, testLeafPEM, pk)

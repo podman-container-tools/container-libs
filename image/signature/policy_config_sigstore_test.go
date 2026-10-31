@@ -658,6 +658,7 @@ func TestNewPRSigstoreSignedFulcio(t *testing.T) {
 	testCAData := []byte("abc")
 	const testOIDCIssuer = "https://example.com"
 	const testSubjectEmail = "test@example.com"
+	const testBuildSignerURI = "https://github.com/org/repo/.github/workflows/build.yml@refs/heads/main"
 
 	// Success:
 	for _, c := range []struct {
@@ -686,6 +687,32 @@ func TestNewPRSigstoreSignedFulcio(t *testing.T) {
 				CAData:       testCAData,
 				OIDCIssuer:   testOIDCIssuer,
 				SubjectEmail: testSubjectEmail,
+			},
+		},
+		{ // With buildSignerURI instead of subjectEmail
+			options: []PRSigstoreSignedFulcioOption{
+				PRSigstoreSignedFulcioWithCAPath(testCAPath),
+				PRSigstoreSignedFulcioWithOIDCIssuer(testOIDCIssuer),
+				PRSigstoreSignedFulcioWithBuildSignerURI(testBuildSignerURI),
+			},
+			expected: prSigstoreSignedFulcio{
+				CAPath:         testCAPath,
+				OIDCIssuer:     testOIDCIssuer,
+				BuildSignerURI: testBuildSignerURI,
+			},
+		},
+		{ // With both subjectEmail and buildSignerURI
+			options: []PRSigstoreSignedFulcioOption{
+				PRSigstoreSignedFulcioWithCAPath(testCAPath),
+				PRSigstoreSignedFulcioWithOIDCIssuer(testOIDCIssuer),
+				PRSigstoreSignedFulcioWithSubjectEmail(testSubjectEmail),
+				PRSigstoreSignedFulcioWithBuildSignerURI(testBuildSignerURI),
+			},
+			expected: prSigstoreSignedFulcio{
+				CAPath:         testCAPath,
+				OIDCIssuer:     testOIDCIssuer,
+				SubjectEmail:   testSubjectEmail,
+				BuildSignerURI: testBuildSignerURI,
 			},
 		},
 	} {
@@ -727,7 +754,7 @@ func TestNewPRSigstoreSignedFulcio(t *testing.T) {
 			PRSigstoreSignedFulcioWithOIDCIssuer(testOIDCIssuer + "1"),
 			PRSigstoreSignedFulcioWithSubjectEmail(testSubjectEmail),
 		},
-		{ // Missing subjectEmail
+		{ // Missing both subjectEmail and buildSignerURI
 			PRSigstoreSignedFulcioWithCAPath(testCAPath),
 			PRSigstoreSignedFulcioWithOIDCIssuer(testOIDCIssuer),
 		},
@@ -736,6 +763,12 @@ func TestNewPRSigstoreSignedFulcio(t *testing.T) {
 			PRSigstoreSignedFulcioWithOIDCIssuer(testOIDCIssuer),
 			PRSigstoreSignedFulcioWithSubjectEmail(testSubjectEmail),
 			PRSigstoreSignedFulcioWithSubjectEmail("1" + testSubjectEmail),
+		},
+		{ // Duplicate buildSignerURI
+			PRSigstoreSignedFulcioWithCAPath(testCAPath),
+			PRSigstoreSignedFulcioWithOIDCIssuer(testOIDCIssuer),
+			PRSigstoreSignedFulcioWithBuildSignerURI(testBuildSignerURI),
+			PRSigstoreSignedFulcioWithBuildSignerURI(testBuildSignerURI + "1"),
 		},
 	} {
 		_, err := newPRSigstoreSignedFulcio(c...)
@@ -770,7 +803,7 @@ func TestPRSigstoreSignedFulcioUnmarshalJSON(t *testing.T) {
 			func(v mSA) { delete(v, "oidcIssuer") },
 			// Invalid "subjectEmail" field
 			func(v mSA) { v["subjectEmail"] = 1 },
-			// "subjectEmail" is missing
+			// Both "subjectEmail" and "buildSignerURI" are missing
 			func(v mSA) { delete(v, "subjectEmail") },
 		},
 		duplicateFields: []string{"caPath", "oidcIssuer", "subjectEmail"},
@@ -792,6 +825,25 @@ func TestPRSigstoreSignedFulcioUnmarshalJSON(t *testing.T) {
 			func(v mSA) { v["caData"] = "this is invalid base64" },
 		},
 		duplicateFields: []string{"caData", "oidcIssuer", "subjectEmail"},
+	}.run(t)
+	// Test buildSignerURI specifics
+	policyJSONUmarshallerTests[PRSigstoreSignedFulcio]{
+		newDest: func() json.Unmarshaler { return &prSigstoreSignedFulcio{} },
+		newValidObject: func() (PRSigstoreSignedFulcio, error) {
+			return NewPRSigstoreSignedFulcio(
+				PRSigstoreSignedFulcioWithCAPath("fixtures/fulcio_v1.crt.pem"),
+				PRSigstoreSignedFulcioWithOIDCIssuer("https://token.actions.githubusercontent.com"),
+				PRSigstoreSignedFulcioWithBuildSignerURI("https://github.com/org/repo/.github/workflows/build.yml@refs/heads/main"),
+			)
+		},
+		otherJSONParser: nil,
+		breakFns: []func(mSA){
+			// Invalid "buildSignerURI" field
+			func(v mSA) { v["buildSignerURI"] = 1 },
+			// Both "subjectEmail" and "buildSignerURI" missing
+			func(v mSA) { delete(v, "buildSignerURI") },
+		},
+		duplicateFields: []string{"caPath", "oidcIssuer", "buildSignerURI"},
 	}.run(t)
 }
 
