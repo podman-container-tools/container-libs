@@ -431,6 +431,12 @@ type Store interface {
 	// Duplicate names are removed from the list automatically.
 	RemoveNames(id string, names []string) error
 
+	// AddImageNameWithDigests adds name to the image with the specified ID,
+	// moving it from another image if needed, and records that the name was
+	// committed with the manifest digests. Each digest must already be in
+	// the image's Digests. Unlike AddNames, it only works on images.
+	AddImageNameWithDigests(id, name string, digests []digest.Digest) error
+
 	// ListImageBigData retrieves a list of the (possibly large) chunks of
 	// named data associated with an image.
 	ListImageBigData(id string) ([]string, error)
@@ -722,6 +728,8 @@ type ImageOptions struct {
 	// NamesHistory is used for guessing for what this image was named when a container was created based
 	// on it, but it no longer has any names.
 	NamesHistory []string
+	// nameDigests is copied to Image.NameDigests when an image from a read-only store is pulled up.
+	nameDigests map[string][]digest.Digest
 	// Flags is a set of named flags and their values to store with the image.  Currently these can only
 	// be set when the image record is created, but that could change in the future.
 	Flags map[string]any
@@ -1755,27 +1763,14 @@ func (s *store) CreateImage(id string, names []string, layer, metadata string, i
 				defer store.stopReading()
 				if i, err := store.Get(id); err == nil {
 					// set information about this image in "options"
-					options = ImageOptions{
-						Metadata:     i.Metadata,
-						CreationDate: i.Created,
-						Digest:       i.Digest,
-						Digests:      copySlicePreferringNil(i.Digests),
-						NamesHistory: copySlicePreferringNil(i.NamesHistory),
+					options, err = readOnlyImageOptions(store, i)
+					if err != nil {
+						return nil, err
 					}
-					for _, key := range i.BigDataNames {
-						data, err := store.BigData(id, key)
-						if err != nil {
-							return nil, err
+					for _, name := range names {
+						if !slices.Contains(i.Names, name) {
+							delete(options.nameDigests, name)
 						}
-						dataDigest, err := store.BigDataDigest(id, key)
-						if err != nil {
-							return nil, err
-						}
-						options.BigData = append(options.BigData, ImageBigDataOption{
-							Key:    key,
-							Data:   data,
-							Digest: dataDigest,
-						})
 					}
 					namesToAddAfterCreating = dedupeStrings(slices.Concat(i.Names, names))
 					break
@@ -1814,7 +1809,7 @@ func (s *store) CreateImage(id string, names []string, layer, metadata string, i
 		if err == nil && len(namesToAddAfterCreating) > 0 {
 			// set any names we pulled up from an additional image store, now that we won't be
 			// triggering a duplicate names error
-			err = s.imageStore.updateNames(res.ID, namesToAddAfterCreating, addNames)
+			err = s.imageStore.addNamesKeepingRecords(res.ID, namesToAddAfterCreating)
 		}
 		return res, err
 	})
@@ -2558,6 +2553,68 @@ func (s *store) RemoveNames(id string, names []string) error {
 	return s.updateNames(id, names, removeNames)
 }
 
+// readOnlyImageOptions returns the ImageOptions that recreate image i of the
+// read-only store in s.imageStore. It does not copy Flags.
+func readOnlyImageOptions(store roImageStore, i *Image) (ImageOptions, error) {
+	options := ImageOptions{
+		CreationDate: i.Created,
+		Digest:       i.Digest,
+		Digests:      copySlicePreferringNil(i.Digests),
+		Metadata:     i.Metadata,
+		NamesHistory: copySlicePreferringNil(i.NamesHistory),
+		nameDigests:  copyNameDigests(i.NameDigests),
+	}
+	for _, key := range i.BigDataNames {
+		data, err := store.BigData(i.ID, key)
+		if err != nil {
+			return ImageOptions{}, err
+		}
+		dataDigest, err := store.BigDataDigest(i.ID, key)
+		if err != nil {
+			return ImageOptions{}, err
+		}
+		options.BigData = append(options.BigData, ImageBigDataOption{
+			Key:    key,
+			Data:   data,
+			Digest: dataDigest,
+		})
+	}
+	return options, nil
+}
+
+// pullUpImageIfReadOnly copies the image from a read-only store into s.imageStore
+// if needed, and returns whether s.imageStore has the image.
+// The caller must hold s.imageStore locked for writing.
+func (s *store) pullUpImageIfReadOnly(id string) (bool, error) {
+	if s.imageStore.Exists(id) {
+		return true, nil
+	}
+
+	// Check if the id refers to a read-only image store -- we want to allow images in
+	// read-only stores to have their names changed.
+	for _, is := range s.roImageStores {
+		store := is
+		if err := store.startReading(); err != nil {
+			return false, err
+		}
+		defer store.stopReading()
+		if i, err := store.Get(id); err == nil {
+			// "pull up" the image so that we can change its names list
+			options, err := readOnlyImageOptions(store, i)
+			if err != nil {
+				return false, err
+			}
+			options.Flags = copyMapPreferringNil(i.Flags)
+			if _, err := s.imageStore.create(id, i.Names, i.TopLayer, options); err != nil {
+				return false, err
+			}
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
 func (s *store) updateNames(id string, names []string, op updateNameOperation) error {
 	deduped := dedupeStrings(names)
 
@@ -2574,50 +2631,10 @@ func (s *store) updateNames(id string, names []string, op updateNameOperation) e
 		return err
 	}
 	defer s.imageStore.stopWriting()
-	if s.imageStore.Exists(id) {
+	if found, err := s.pullUpImageIfReadOnly(id); err != nil {
+		return err
+	} else if found {
 		return s.imageStore.updateNames(id, deduped, op)
-	}
-
-	// Check if the id refers to a read-only image store -- we want to allow images in
-	// read-only stores to have their names changed.
-	for _, is := range s.roImageStores {
-		store := is
-		if err := store.startReading(); err != nil {
-			return err
-		}
-		defer store.stopReading()
-		if i, err := store.Get(id); err == nil {
-			// "pull up" the image so that we can change its names list
-			options := ImageOptions{
-				CreationDate: i.Created,
-				Digest:       i.Digest,
-				Digests:      copySlicePreferringNil(i.Digests),
-				Metadata:     i.Metadata,
-				NamesHistory: copySlicePreferringNil(i.NamesHistory),
-				Flags:        copyMapPreferringNil(i.Flags),
-			}
-			for _, key := range i.BigDataNames {
-				data, err := store.BigData(id, key)
-				if err != nil {
-					return err
-				}
-				dataDigest, err := store.BigDataDigest(id, key)
-				if err != nil {
-					return err
-				}
-				options.BigData = append(options.BigData, ImageBigDataOption{
-					Key:    key,
-					Data:   data,
-					Digest: dataDigest,
-				})
-			}
-			_, err = s.imageStore.create(id, i.Names, i.TopLayer, options)
-			if err != nil {
-				return err
-			}
-			// now make the changes to the writeable image record's names list
-			return s.imageStore.updateNames(id, deduped, op)
-		}
 	}
 
 	if found, err := writeToContainerStore(s, func() (bool, error) {
@@ -2630,6 +2647,21 @@ func (s *store) updateNames(id string, names []string, op updateNameOperation) e
 	}
 
 	return ErrLayerUnknown
+}
+
+func (s *store) AddImageNameWithDigests(id, name string, digests []digest.Digest) error {
+	if err := s.imageStore.startWriting(); err != nil {
+		return err
+	}
+	defer s.imageStore.stopWriting()
+	found, err := s.pullUpImageIfReadOnly(id)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return fmt.Errorf("locating image with ID %q: %w", id, ErrImageUnknown)
+	}
+	return s.imageStore.addNameWithDigests(id, name, digests)
 }
 
 func (s *store) Names(id string) ([]string, error) {
