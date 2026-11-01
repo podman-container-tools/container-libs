@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/opencontainers/go-digest"
+	imgspecv1 "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -736,6 +737,232 @@ func TestDuplicateBlob(t *testing.T) {
 	require.NoError(t, err)
 	err = img.Close()
 	require.NoError(t, err)
+}
+
+func makeManifestList(t *testing.T, descriptors []manifest.Schema2ManifestDescriptor) ([]byte, digest.Digest) {
+	list := manifest.Schema2ListFromComponents(descriptors)
+	listBytes, err := list.Serialize()
+	require.NoError(t, err)
+	listDigest, err := imanifest.Digest(listBytes)
+	require.NoError(t, err)
+	return listBytes, listDigest
+}
+
+func schema2ManifestDescriptorFor(instanceBytes []byte, instanceDigest digest.Digest, arch string) manifest.Schema2ManifestDescriptor {
+	return manifest.Schema2ManifestDescriptor{
+		Schema2Descriptor: manifest.Schema2Descriptor{
+			MediaType: manifest.DockerV2Schema2MediaType,
+			Size:      int64(len(instanceBytes)),
+			Digest:    instanceDigest,
+		},
+		Platform: manifest.Schema2PlatformSpec{Architecture: arch, OS: "linux"},
+	}
+}
+
+func TestCommitRecordsNameDigestsPlainTag(t *testing.T) {
+	ensureTestCanCreateImages(t)
+
+	store := newStore(t)
+	cache := memory.New()
+
+	ref, err := Transport.ParseReference("test")
+	require.NoError(t, err)
+	name := ref.(*storageReference).named.String()
+
+	dest, unparsedToplevel := createUncommittedImageDest(t, ref, cache, []testBlob{makeLayer(t, archive.Gzip)}, nil)
+	manifestDigest, err := imanifest.Digest(unparsedToplevel.(*unparsedImage).manifestBytes)
+	require.NoError(t, err)
+	err = dest.Commit(context.Background(), unparsedToplevel)
+	require.NoError(t, err)
+	err = dest.Close()
+	require.NoError(t, err)
+
+	img, err := store.Image(name)
+	require.NoError(t, err)
+	assert.Equal(t, []string{name}, img.Names)
+	assert.Equal(t, map[string][]digest.Digest{name: {manifestDigest}}, img.NameDigests)
+	assert.Equal(t, []string{name}, img.NamesHistory)
+}
+
+func TestCommitRecordsNameDigestsListToplevel(t *testing.T) {
+	ensureTestCanCreateImages(t)
+
+	store := newStore(t)
+	cache := memory.New()
+
+	ref, err := Transport.ParseReference("test")
+	require.NoError(t, err)
+	name := ref.(*storageReference).named.String()
+
+	dest, unparsedInstance := createUncommittedImageDest(t, ref, cache, []testBlob{makeLayer(t, archive.Gzip)}, nil)
+	instanceBytes := unparsedInstance.(*unparsedImage).manifestBytes
+	instanceDigest, err := imanifest.Digest(instanceBytes)
+	require.NoError(t, err)
+
+	listBytes, listDigest := makeManifestList(t, []manifest.Schema2ManifestDescriptor{
+		schema2ManifestDescriptorFor(instanceBytes, instanceDigest, "amd64"),
+	})
+	unparsedToplevel := &unparsedImage{manifestBytes: listBytes, manifestType: manifest.DockerV2ListMediaType}
+	err = dest.Commit(context.Background(), unparsedToplevel)
+	require.NoError(t, err)
+	err = dest.Close()
+	require.NoError(t, err)
+
+	img, err := store.Image(name)
+	require.NoError(t, err)
+	assert.Equal(t, []string{name}, img.Names)
+	assert.Equal(t, map[string][]digest.Digest{name: {instanceDigest, listDigest}}, img.NameDigests)
+}
+
+func TestCommitRecordsNameDigestsTwoPlatformsOfOneList(t *testing.T) {
+	ensureTestCanCreateImages(t)
+
+	store := newStore(t)
+	cache := memory.New()
+
+	ref, err := Transport.ParseReference("test")
+	require.NoError(t, err)
+	name := ref.(*storageReference).named.String()
+
+	dest1, unparsed1 := createUncommittedImageDest(t, ref, cache, []testBlob{makeLayer(t, archive.Gzip)}, nil)
+	instance1Bytes := unparsed1.(*unparsedImage).manifestBytes
+	instance1Digest, err := imanifest.Digest(instance1Bytes)
+	require.NoError(t, err)
+
+	dest2, unparsed2 := createUncommittedImageDest(t, ref, cache, []testBlob{makeLayer(t, archive.Gzip)}, nil)
+	instance2Bytes := unparsed2.(*unparsedImage).manifestBytes
+	instance2Digest, err := imanifest.Digest(instance2Bytes)
+	require.NoError(t, err)
+	require.NotEqual(t, instance1Digest, instance2Digest)
+
+	listBytes, listDigest := makeManifestList(t, []manifest.Schema2ManifestDescriptor{
+		schema2ManifestDescriptorFor(instance1Bytes, instance1Digest, "amd64"),
+		schema2ManifestDescriptorFor(instance2Bytes, instance2Digest, "arm64"),
+	})
+
+	err = dest1.Commit(context.Background(), &unparsedImage{manifestBytes: listBytes, manifestType: manifest.DockerV2ListMediaType})
+	require.NoError(t, err)
+	err = dest1.Close()
+	require.NoError(t, err)
+
+	img1, err := store.Image(name)
+	require.NoError(t, err)
+	image1ID := img1.ID
+	assert.Equal(t, []string{name}, img1.Names)
+	assert.Equal(t, map[string][]digest.Digest{name: {instance1Digest, listDigest}}, img1.NameDigests)
+
+	err = dest2.Commit(context.Background(), &unparsedImage{manifestBytes: listBytes, manifestType: manifest.DockerV2ListMediaType})
+	require.NoError(t, err)
+	err = dest2.Close()
+	require.NoError(t, err)
+
+	img2, err := store.Image(name)
+	require.NoError(t, err)
+	require.NotEqual(t, image1ID, img2.ID)
+	assert.Equal(t, []string{name}, img2.Names)
+	assert.Equal(t, map[string][]digest.Digest{name: {instance2Digest, listDigest}}, img2.NameDigests)
+
+	// The name moved off image1, but image1 keeps its own record.
+	img1Again, err := store.Image(image1ID)
+	require.NoError(t, err)
+	assert.NotContains(t, img1Again.Names, name)
+	assert.Equal(t, map[string][]digest.Digest{name: {instance1Digest, listDigest}}, img1Again.NameDigests)
+}
+
+func TestCommitRecordsNameDigestsDigestedToplevel(t *testing.T) {
+	ensureTestCanCreateImages(t)
+
+	store := newStore(t)
+	cache := memory.New()
+
+	layer := makeLayer(t, archive.Gzip)
+	config := configForLayers(t, []testBlob{layer})
+	instanceManifest := manifest.Schema2FromComponents(
+		manifest.Schema2Descriptor{MediaType: manifest.DockerV2Schema2ConfigMediaType, Size: config.compressedSize, Digest: config.compressedDigest},
+		[]manifest.Schema2Descriptor{{MediaType: manifest.DockerV2Schema2LayerMediaType, Size: layer.compressedSize, Digest: layer.compressedDigest}},
+	)
+	instanceBytes, err := instanceManifest.Serialize()
+	require.NoError(t, err)
+	instanceDigest, err := imanifest.Digest(instanceBytes)
+	require.NoError(t, err)
+
+	listBytes, listDigest := makeManifestList(t, []manifest.Schema2ManifestDescriptor{
+		schema2ManifestDescriptorFor(instanceBytes, instanceDigest, "amd64"),
+	})
+
+	ref, err := Transport.ParseReference("test@" + listDigest.String())
+	require.NoError(t, err)
+	name := ref.(*storageReference).named.String()
+
+	dest, err := ref.NewImageDestination(context.Background(), nil)
+	require.NoError(t, err)
+	// As the generic copier does; otherwise commitLayer checks DiffIDs against the list digest.
+	err = dest.(private.ImageDestination).NoteOriginalOCIConfig(&imgspecv1.Image{
+		RootFS: imgspecv1.RootFS{Type: "layers", DiffIDs: []digest.Digest{layer.uncompressedDigest}},
+	}, nil)
+	require.NoError(t, err)
+	_ = layer.storeBlob(t, dest, cache, manifest.DockerV2Schema2LayerMediaType, false)
+	_ = config.storeBlob(t, dest, cache, manifest.DockerV2Schema2ConfigMediaType, true)
+	err = dest.PutManifest(context.Background(), instanceBytes, nil)
+	require.NoError(t, err)
+	err = dest.Commit(context.Background(), &unparsedImage{manifestBytes: listBytes, manifestType: manifest.DockerV2ListMediaType})
+	require.NoError(t, err)
+	err = dest.Close()
+	require.NoError(t, err)
+
+	img, err := store.Image(name)
+	require.NoError(t, err)
+	assert.Equal(t, []string{name}, img.Names)
+	assert.Equal(t, map[string][]digest.Digest{name: {instanceDigest, listDigest}}, img.NameDigests)
+}
+
+func TestCommitRecordsNameDigestsSameImageIDRepull(t *testing.T) {
+	ensureTestCanCreateImages(t)
+
+	store := newStore(t)
+	cache := memory.New()
+
+	ref, err := Transport.ParseReference("test")
+	require.NoError(t, err)
+	name := ref.(*storageReference).named.String()
+
+	layer := makeLayer(t, archive.Gzip)
+	config := configForLayers(t, []testBlob{layer})
+
+	// Only the manifest changes; the image ID comes from the config digest.
+	commit := func(configURL string) digest.Digest {
+		dest, err := ref.NewImageDestination(context.Background(), nil)
+		require.NoError(t, err)
+		layerDescriptor := layer.storeBlob(t, dest, cache, manifest.DockerV2Schema2LayerMediaType, false)
+		configDescriptor := config.storeBlob(t, dest, cache, manifest.DockerV2Schema2ConfigMediaType, true)
+		configDescriptor.URLs = []string{configURL}
+		m := manifest.Schema2FromComponents(configDescriptor, []manifest.Schema2Descriptor{layerDescriptor})
+		manifestBytes, err := m.Serialize()
+		require.NoError(t, err)
+		manifestDigest, err := imanifest.Digest(manifestBytes)
+		require.NoError(t, err)
+		err = dest.PutManifest(context.Background(), manifestBytes, nil)
+		require.NoError(t, err)
+		err = dest.Commit(context.Background(), &unparsedImage{manifestBytes: manifestBytes, manifestType: m.MediaType})
+		require.NoError(t, err)
+		err = dest.Close()
+		require.NoError(t, err)
+		return manifestDigest
+	}
+
+	firstDigest := commit("first")
+	img1, err := store.Image(name)
+	require.NoError(t, err)
+
+	secondDigest := commit("second")
+	require.NotEqual(t, firstDigest, secondDigest)
+	img2, err := store.Image(name)
+	require.NoError(t, err)
+
+	assert.Equal(t, img1.ID, img2.ID)
+	assert.Equal(t, map[string][]digest.Digest{name: {secondDigest}}, img2.NameDigests)
+	assert.Contains(t, img2.Digests, firstDigest)
+	assert.Contains(t, img2.Digests, secondDigest)
 }
 
 type unparsedImage struct {

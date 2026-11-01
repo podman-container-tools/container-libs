@@ -1493,19 +1493,20 @@ func (s *storageImageDestination) CommitWithOptions(ctx context.Context, options
 	}
 	// Set up to save the options.UnparsedToplevel's manifest if it differs from
 	// the per-platform one, which is saved below.
+	var toplevelManifestDigest digest.Digest
 	if !bytes.Equal(toplevelManifest, s.manifest) {
-		manifestDigest, err := manifest.Digest(toplevelManifest)
+		toplevelManifestDigest, err = manifest.Digest(toplevelManifest)
 		if err != nil {
 			return fmt.Errorf("digesting top-level manifest: %w", err)
 		}
-		key, err := manifestBigDataKey(manifestDigest)
+		key, err := manifestBigDataKey(toplevelManifestDigest)
 		if err != nil {
 			return err
 		}
 		imgOptions.BigData = append(imgOptions.BigData, storage.ImageBigDataOption{
 			Key:    key,
 			Data:   toplevelManifest,
-			Digest: manifestDigest,
+			Digest: toplevelManifestDigest,
 		})
 	}
 	// Set up to save the image's manifest.  Allow looking it up by digest by using the key convention defined by the Store.
@@ -1613,11 +1614,14 @@ func (s *storageImageDestination) CommitWithOptions(ctx context.Context, options
 		}
 	}()
 
-	// Add the reference's name on the image.  We don't need to worry about avoiding duplicate
-	// values because AddNames() will deduplicate the list that we pass to it.
+	// Add the reference's name on the image, recording the manifest digest(s) it was committed with.
 	if name := s.imageRef.DockerReference(); name != nil {
-		if err := s.imageRef.transport.store.AddNames(img.ID, []string{name.String()}); err != nil {
-			return fmt.Errorf("adding names %v to image %q: %w", name, img.ID, err)
+		digests := []digest.Digest{s.manifestDigest}
+		if toplevelManifestDigest != "" {
+			digests = append(digests, toplevelManifestDigest)
+		}
+		if err := s.imageRef.transport.store.AddImageNameWithDigests(img.ID, name.String(), digests); err != nil {
+			return fmt.Errorf("adding name %q to image %q: %w", name.String(), img.ID, err)
 		}
 		logrus.Debugf("added name %q to image %q", name, img.ID)
 	}
