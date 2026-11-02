@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.podman.io/storage/internal/rootlookupcache"
 	"go.podman.io/storage/pkg/idtools"
 	"go.podman.io/storage/pkg/system"
 	"golang.org/x/sys/unix"
@@ -310,4 +312,61 @@ func assertSameFile(t *testing.T, fi1, fi2 os.FileInfo) {
 	st2 := fi2.Sys().(*syscall.Stat_t)
 	assert.Equal(t, st1.Dev, st2.Dev)
 	assert.Equal(t, st1.Ino, st2.Ino)
+}
+
+// prepareAddFileTestEnv sets up a tarWriter, an os.Root and a cache for a temp
+// directory containing a single regular file, returning everything a
+// prepareAddFile call needs plus the FileInfo captured as the directory walk
+// would have (before any concurrent mutation).
+func prepareAddFileTestEnv(t *testing.T, basename string) (*tarWriter, *os.Root, *rootlookupcache.Cache, os.FileInfo) {
+	t.Helper()
+	dir := t.TempDir()
+	target := filepath.Join(dir, basename)
+	require.NoError(t, os.WriteFile(target, []byte("contents"), 0o600))
+
+	fi, err := os.Lstat(target)
+	require.NoError(t, err)
+
+	root, err := os.OpenRoot(dir)
+	require.NoError(t, err)
+	t.Cleanup(func() { root.Close() })
+
+	rootCache := rootlookupcache.NewCache(root)
+	t.Cleanup(func() { rootCache.Close() })
+
+	ta := newTarWriter(&idtools.IDMappings{}, io.Discard, nil, nil, false)
+	return ta, root, rootCache, fi
+}
+
+// TestPrepareAddFileErrorHandling covers the vanished-file (ENOENT) skip and its
+// selectivity: a file disappearing between the walk and the metadata read is a
+// benign race and must be skipped as (nil, nil); any other error must propagate
+// so the archive fails loudly instead of silently dropping files.
+func TestPrepareAddFileErrorHandling(t *testing.T) {
+	t.Run("vanished_file_is_skipped", func(t *testing.T) {
+		ta, root, rootCache, fi := prepareAddFileTestEnv(t, "victim")
+
+		// The file vanishes before prepareAddFile reads it.
+		require.NoError(t, os.Remove(filepath.Join(root.Name(), "victim")))
+
+		headers, err := ta.prepareAddFile(root, "victim", fi, "victim", rootCache)
+		require.NoError(t, err)
+		require.Nil(t, headers)
+	})
+
+	t.Run("other_error_propagates", func(t *testing.T) {
+		if os.Getuid() == 0 {
+			t.Skip("directory permission bits are not enforced for root")
+		}
+		ta, root, rootCache, fi := prepareAddFileTestEnv(t, "victim")
+
+		// Remove search/read permission so opening the child for xattr reads
+		// fails with EACCES (not ENOENT). Restore before temp-dir cleanup.
+		require.NoError(t, os.Chmod(root.Name(), 0o000))
+		t.Cleanup(func() { _ = os.Chmod(root.Name(), 0o700) })
+
+		_, err := ta.prepareAddFile(root, "victim", fi, "victim", rootCache)
+		require.Error(t, err)
+		require.False(t, errors.Is(err, fs.ErrNotExist))
+	})
 }
