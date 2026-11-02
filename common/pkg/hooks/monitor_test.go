@@ -14,7 +14,7 @@ import (
 )
 
 func TestMonitorOneDirGood(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	dir := t.TempDir()
 
 	manager, err := New(ctx, []string{dir}, []string{})
@@ -109,7 +109,7 @@ func TestMonitorOneDirGood(t *testing.T) {
 }
 
 func TestMonitorTwoDirGood(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	primaryDir := t.TempDir()
 	fallbackDir := t.TempDir()
 
@@ -306,7 +306,7 @@ func TestMonitorTwoDirGood(t *testing.T) {
 }
 
 func TestMonitorBadWatcher(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	manager, err := New(ctx, []string{}, []string{})
 	if err != nil {
