@@ -2,6 +2,7 @@ package retry
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"math"
 	"math/rand/v2"
@@ -35,6 +36,9 @@ func RetryIfNecessary(ctx context.Context, operation func() error, options *Opti
 
 // IfNecessary retries the operation in exponential backoff with the retry Options.
 func IfNecessary(ctx context.Context, operation func() error, options *Options) error {
+	if options.Delay < 0 {
+		return fmt.Errorf("invalid retry delay %v: must not be negative", options.Delay)
+	}
 	var isRetryable func(error) bool
 	if options.IsErrorRetryable != nil {
 		isRetryable = options.IsErrorRetryable
@@ -48,8 +52,12 @@ func IfNecessary(ctx context.Context, operation func() error, options *Options) 
 			delay = options.Delay
 		}
 		logrus.Warnf("Failed, retrying in %s ... (%d/%d). Error: %v", delay, attempt+1, options.MaxRetry, err)
-		delay += rand.N(delay / 10) // 10 % jitter so that a failure blip doesn’t cause a deterministic stampede
-		logrus.Debugf("Retry delay with added jitter: %s", delay)
+		// delay/10 truncates to zero for delays below 10ns, and rand.N panics on a
+		// non-positive argument. Such a delay is honored as-is, just without jitter.
+		if jitter := delay / 10; jitter > 0 {
+			delay += rand.N(jitter) // 10 % jitter so that a failure blip doesn’t cause a deterministic stampede
+			logrus.Debugf("Retry delay with added jitter: %s", delay)
+		}
 		select {
 		case <-time.After(delay):
 			// Do nothing.
