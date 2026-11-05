@@ -285,14 +285,13 @@ func TestCopyFileContent(t *testing.T) {
 		},
 	}
 
-	newFile, newSize, err := copyFileContent(int(file.Fd()), &metadata, rootFd, 0o755, false, false)
+	newFile, err := copyFileContent(int(file.Fd()), &metadata, rootFd, 0o755, false, false)
 	require.NoError(t, err)
-
-	assert.Equal(t, size, int(newSize))
 
 	st2 := syscall.Stat_t{}
 	err = syscall.Fstat(int(newFile.Fd()), &st2)
 	require.NoError(t, err)
+	assert.Equal(t, int64(size), st2.Size)
 
 	err = newFile.Close()
 	require.NoError(t, err)
@@ -309,16 +308,15 @@ func TestCopyFileContent(t *testing.T) {
 		},
 	}
 
-	newFile, newSize, err = copyFileContent(int(file.Fd()), &metadataCopyHardLinks, rootFd, 0o755, true, false)
+	newFile, err = copyFileContent(int(file.Fd()), &metadataCopyHardLinks, rootFd, 0o755, true, false)
 	require.NoError(t, err)
 	assert.NotNil(t, newFile)
 
 	// validate it was created as an inode
-	assert.Equal(t, size, int(newSize))
-
 	st2 = syscall.Stat_t{}
 	err = syscall.Fstat(int(newFile.Fd()), &st2)
 	require.NoError(t, err)
+	assert.Equal(t, int64(size), st2.Size)
 
 	err = newFile.Close()
 	require.NoError(t, err)
