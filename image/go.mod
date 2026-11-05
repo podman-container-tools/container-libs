@@ -22,7 +22,7 @@ require (
 	github.com/klauspost/compress v1.20.3
 	github.com/klauspost/pgzip v1.3.0
 	github.com/manifoldco/promptui v0.9.0
-	github.com/mattn/go-sqlite3 v1.14.52
+	github.com/mattn/go-sqlite3 v1.14.53
 	github.com/moby/moby/api v1.56.1
 	github.com/moby/moby/client v0.6.2
 	github.com/opencontainers/go-digest v1.0.0
