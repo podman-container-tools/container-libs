@@ -2,6 +2,7 @@ package ioutils
 
 import (
 	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -40,6 +41,44 @@ func TestAtomicWriteToFile(t *testing.T) {
 	}
 	if expected := testMode; st.Mode() != expected {
 		t.Fatalf("Mode mismatched, expected %o, got %o", expected, st.Mode())
+	}
+}
+
+// TestAtomicWriteFileWithOpenReader replaces a file while a reader holds it
+// open. The reader must keep seeing the old content, and new readers must
+// see the new content. On Windows the reader has to allow FILE_SHARE_DELETE.
+func TestAtomicWriteFileWithOpenReader(t *testing.T) {
+	fileName := filepath.Join(t.TempDir(), "foo")
+	old := []byte("old")
+	if err := os.WriteFile(fileName, old, testMode); err != nil {
+		t.Fatalf("Error writing to file: %v", err)
+	}
+
+	reader, err := openShareDelete(fileName)
+	if err != nil {
+		t.Fatalf("Error opening file: %v", err)
+	}
+	defer reader.Close()
+
+	expected := []byte("new")
+	if err := AtomicWriteFile(fileName, expected, testMode); err != nil {
+		t.Fatalf("Error writing to file while a reader has it open: %v", err)
+	}
+
+	actual, err := os.ReadFile(fileName)
+	if err != nil {
+		t.Fatalf("Error reading from file: %v", err)
+	}
+	if !bytes.Equal(actual, expected) {
+		t.Fatalf("Data mismatch, expected %q, got %q", expected, actual)
+	}
+
+	actual, err = io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("Error reading from open reader: %v", err)
+	}
+	if !bytes.Equal(actual, old) {
+		t.Fatalf("Open reader data mismatch, expected %q, got %q", old, actual)
 	}
 }
 
