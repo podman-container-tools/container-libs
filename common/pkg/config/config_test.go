@@ -347,6 +347,7 @@ image_copy_tmp_dir="storage"`
 			gomega.Expect(config.Containers.Privileged).To(gomega.BeTrue())
 			gomega.Expect(config.Containers.ReadOnly).To(gomega.BeTrue())
 			gomega.Expect(config.Engine.ImageParallelCopies).To(gomega.Equal(uint(10)))
+			gomega.Expect(config.Engine.Platform).To(gomega.Equal("linux/amd64"))
 			gomega.Expect(config.Engine.PlatformToOCIRuntime).To(gomega.Equal(PlatformToOCIRuntimeMap))
 			gomega.Expect(config.Engine.ImageDefaultFormat).To(gomega.Equal("v2s2"))
 			gomega.Expect(config.Engine.CompressionFormat).To(gomega.BeEquivalentTo("zstd:chunked"))
