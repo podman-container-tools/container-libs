@@ -868,7 +868,7 @@ func (s *storageImageDestination) computeMatchingDigest(m manifest.Manifest) (di
 		return ordinaryDigest, nil
 	}
 	tocImageID := digest.FromString(tocIDInput.String())
-	logrus.Debugf("Ordinary storage image ID %s; a layer was looked up by TOC, so using image ID %s", ordinaryImageID, tocImageID.Encoded())
+	logrus.Debugf("Ordinary matching digest %s; a layer was looked up by TOC, so using matching digest %s", ordinaryImageID, tocImageID.Encoded())
 	return tocImageID, nil
 }
 
@@ -1563,14 +1563,18 @@ func (s *storageImageDestination) CommitWithOptions(ctx context.Context, options
 	}
 
 	// Create the image record, pointing to the most-recently added layer.
+	// The image ID is not derived from the image contents; unless the caller
+	// requested a specific ID, c/storage assigns a random one.  The deterministic
+	// value which identifies "the same image" is stored separately as MatchingDigest.
 	intendedID := s.imageRef.id
+	var matchingDigest digest.Digest
 	if intendedID == "" {
-		matchingDigest, err := s.computeMatchingDigest(man)
+		matchingDigest, err = s.computeMatchingDigest(man)
 		if err != nil {
 			return err
 		}
 		if matchingDigest != "" {
-			intendedID = matchingDigest.Encoded()
+			imgOptions.MatchingDigest = matchingDigest
 		}
 	}
 	oldNames := []string{}
@@ -1580,8 +1584,22 @@ func (s *storageImageDestination) CommitWithOptions(ctx context.Context, options
 			logrus.Debugf("error creating image: %q", err)
 			return fmt.Errorf("creating image %q: %w", intendedID, err)
 		}
-		img, err = s.imageRef.transport.store.Image(intendedID)
+		// An image with the same MatchingDigest, or with the requested ID,
+		// already exists; reuse it.
+		if matchingDigest != "" {
+			img, err = s.imageRef.transport.store.ImageByMatchingDigest(matchingDigest)
+			if err != nil {
+				// Images created by older versions have no MatchingDigest, and
+				// store the matching digest value as their ID.
+				img, err = s.imageRef.transport.store.Image(matchingDigest.Encoded())
+			}
+		} else {
+			img, err = s.imageRef.transport.store.Image(intendedID)
+		}
 		if err != nil {
+			if matchingDigest != "" {
+				return fmt.Errorf("reading image with matching digest %q: %w", matchingDigest, err)
+			}
 			return fmt.Errorf("reading image %q: %w", intendedID, err)
 		}
 		if img.TopLayer != lastLayer {
