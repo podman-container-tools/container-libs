@@ -88,7 +88,18 @@ func golangConnectionCreate(options ConnectionCreateOptions) error {
 	})
 }
 
+// hostWithSSHScheme ensures host carries an ssh:// scheme, which Validate (via
+// url.Parse) requires: without it a bare host or IP is parsed as a URL path,
+// leaving the host empty so the dial target degrades to ":<port>" (#46).
+func hostWithSSHScheme(host string) string {
+	if !strings.HasPrefix(host, "ssh://") {
+		return "ssh://" + host
+	}
+	return host
+}
+
 func golangConnectionDial(options ConnectionDialOptions) (*ConnectionDialReport, error) {
+	options.Host = hostWithSSHScheme(options.Host)
 	_, uri, err := Validate(options.User, options.Host, options.Port, options.Identity)
 	if err != nil {
 		return nil, err
@@ -107,9 +118,7 @@ func golangConnectionDial(options ConnectionDialOptions) (*ConnectionDialReport,
 }
 
 func golangConnectionExec(options ConnectionExecOptions, input io.Reader) (*ConnectionExecReport, error) {
-	if !strings.HasPrefix(options.Host, "ssh://") {
-		options.Host = "ssh://" + options.Host
-	}
+	options.Host = hostWithSSHScheme(options.Host)
 	_, uri, err := Validate(options.User, options.Host, options.Port, options.Identity)
 	if err != nil {
 		return nil, err
@@ -138,9 +147,7 @@ func golangConnectionScp(options ConnectionScpOptions) (*ConnectionScpReport, er
 	}
 
 	// removed for parsing
-	if !strings.HasPrefix(host, "ssh://") {
-		host = "ssh://" + host
-	}
+	host = hostWithSSHScheme(host)
 	_, uri, err := Validate(options.User, host, options.Port, options.Identity)
 	if err != nil {
 		return nil, err
