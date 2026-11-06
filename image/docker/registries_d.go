@@ -40,6 +40,54 @@ type registryNamespace struct {
 	SigStore               string `yaml:"sigstore"`          // For compatibility, deprecated in favor of Lookaside.
 	SigStoreStaging        string `yaml:"sigstore-staging"`  // For compatibility, deprecated in favor of LookasideStaging.
 	UseSigstoreAttachments *bool  `yaml:"use-sigstore-attachments,omitempty"`
+	// SigstoreAttachmentsWrite selects the mechanisms used to write sigstore attachments;
+	// it has no effect on reading, which always consults all of them.
+	SigstoreAttachmentsWrite *sigstoreAttachmentsWriteMode `yaml:"sigstore-attachments-write,omitempty"`
+}
+
+// sigstoreAttachmentsWriteMode is the value of the sigstore-attachments-write option.
+type sigstoreAttachmentsWriteMode string
+
+const (
+	// sigstoreAttachmentsWriteCosignTag writes attachments using the cosign tag convention only.
+	sigstoreAttachmentsWriteCosignTag sigstoreAttachmentsWriteMode = "cosign-tag"
+	// sigstoreAttachmentsWriteReferrers writes attachments as OCI 1.1 referrer artifacts only.
+	sigstoreAttachmentsWriteReferrers sigstoreAttachmentsWriteMode = "referrers"
+	// sigstoreAttachmentsWriteBoth writes attachments using both mechanisms.
+	sigstoreAttachmentsWriteBoth sigstoreAttachmentsWriteMode = "both"
+
+	// defaultSigstoreAttachmentsWrite is used if the option is not set. Writing referrers adds objects
+	// to the registry that older readers ignore, and the layout is hard to walk back, so it is opt-in.
+	defaultSigstoreAttachmentsWrite = sigstoreAttachmentsWriteCosignTag
+)
+
+// UnmarshalYAML implements the yaml.Unmarshaler interface, rejecting unknown values
+// instead of silently ignoring a typo.
+func (m *sigstoreAttachmentsWriteMode) UnmarshalYAML(value *yaml.Node) error {
+	var s string
+	if err := value.Decode(&s); err != nil {
+		return err
+	}
+	switch mode := sigstoreAttachmentsWriteMode(s); mode {
+	case sigstoreAttachmentsWriteCosignTag, sigstoreAttachmentsWriteReferrers, sigstoreAttachmentsWriteBoth:
+		*m = mode
+		return nil
+	default:
+		return fmt.Errorf("invalid \"sigstore-attachments-write\" value %q, expected %q, %q or %q",
+			s, sigstoreAttachmentsWriteCosignTag, sigstoreAttachmentsWriteReferrers, sigstoreAttachmentsWriteBoth)
+	}
+}
+
+// writesCosignTag reports whether m includes the cosign tag convention.
+// The zero value is treated as defaultSigstoreAttachmentsWrite.
+func (m sigstoreAttachmentsWriteMode) writesCosignTag() bool {
+	return m != sigstoreAttachmentsWriteReferrers
+}
+
+// writesReferrers reports whether m includes OCI 1.1 referrer artifacts.
+// The zero value is treated as defaultSigstoreAttachmentsWrite.
+func (m sigstoreAttachmentsWriteMode) writesReferrers() bool {
+	return m == sigstoreAttachmentsWriteReferrers || m == sigstoreAttachmentsWriteBoth
 }
 
 // lookasideStorageBase is an "opaque" type representing a lookaside Docker signature storage.
@@ -216,6 +264,39 @@ func (config *registryConfiguration) useSigstoreAttachments(ref dockerReference)
 		}
 	}
 	return false
+}
+
+// config.sigstoreAttachmentsWrite returns the mechanisms to use when writing sigstore attachments
+// for ref. Reading is not affected; it always consults all of them.
+func (config *registryConfiguration) sigstoreAttachmentsWrite(ref dockerReference) sigstoreAttachmentsWriteMode {
+	if config.Docker != nil {
+		// Look for a full match.
+		identity := ref.PolicyConfigurationIdentity()
+		if ns, ok := config.Docker[identity]; ok {
+			logrus.Debugf(` Sigstore attachments write: using "docker" namespace %s`, identity)
+			if ns.SigstoreAttachmentsWrite != nil {
+				return *ns.SigstoreAttachmentsWrite
+			}
+		}
+
+		// Look for a match of the possible parent namespaces.
+		for _, name := range ref.PolicyConfigurationNamespaces() {
+			if ns, ok := config.Docker[name]; ok {
+				logrus.Debugf(` Sigstore attachments write: using "docker" namespace %s`, name)
+				if ns.SigstoreAttachmentsWrite != nil {
+					return *ns.SigstoreAttachmentsWrite
+				}
+			}
+		}
+	}
+	// Look for a default location
+	if config.DefaultDocker != nil {
+		logrus.Debugf(` Sigstore attachments write: using "default-docker" configuration`)
+		if config.DefaultDocker.SigstoreAttachmentsWrite != nil {
+			return *config.DefaultDocker.SigstoreAttachmentsWrite
+		}
+	}
+	return defaultSigstoreAttachmentsWrite
 }
 
 // ns.signatureTopLevel returns an URL string configured in ns for ref, for write access if “write”.
