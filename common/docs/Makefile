@@ -1,19 +1,7 @@
 PREFIX := /usr/local
-DATADIR := ${PREFIX}/share
-MANDIR := $(DATADIR)/man
-GOMD2MAN ?= $(shell command -v go-md2man || echo '$(GOBIN)/go-md2man')
+MAN_INSTALL_DIR := $(PREFIX)/share/man/man5
 
-docs: $(patsubst %.md,%,$(wildcard *.md))
+MANPAGES := $(patsubst %.md,%,$(wildcard *.md))
+MAN_LINKS := $(shell ls -A links/ 2>/dev/null | sed 's|^|links/|')
 
-%.5:  %.5.md
-	$(GOMD2MAN) -in $^ -out $@
-
-.PHONY: install
-install:
-	install -d ${DESTDIR}/${MANDIR}/man5
-	install -m 0644 *5 ${DESTDIR}/${MANDIR}/man5
-	install -m 0644 links/.*.5 ${DESTDIR}/${MANDIR}/man5
-
-.PHONY: clean
-clean:
-	$(RM) *.5
+include ../../hack/man-docs.mk
