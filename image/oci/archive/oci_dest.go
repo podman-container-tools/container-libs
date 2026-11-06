@@ -9,13 +9,11 @@ import (
 
 	digest "github.com/opencontainers/go-digest"
 	imgspecv1 "github.com/opencontainers/image-spec/specs-go/v1"
-	"github.com/sirupsen/logrus"
 	"go.podman.io/image/v5/internal/imagedestination"
 	"go.podman.io/image/v5/internal/imagedestination/impl"
 	"go.podman.io/image/v5/internal/private"
 	"go.podman.io/image/v5/internal/signature"
-	"go.podman.io/image/v5/internal/tmpdir"
-	"go.podman.io/image/v5/oci/layout"
+	ocilayout "go.podman.io/image/v5/oci/layout"
 	"go.podman.io/image/v5/types"
 	"go.podman.io/storage/pkg/archive"
 	"go.podman.io/storage/pkg/idtools"
@@ -24,38 +22,44 @@ import (
 type ociArchiveImageDestination struct {
 	impl.Compat
 
-	ref          ociArchiveReference
-	unpackedDest private.ImageDestination
-	tempDir      string
+	ref                   ociArchiveReference
+	individualWriterOrNil *Writer
+	unpackedDest          private.ImageDestination
 }
 
 // newImageDestination returns an ImageDestination for writing to an existing directory.
 func newImageDestination(ctx context.Context, sys *types.SystemContext, ref ociArchiveReference) (private.ImageDestination, error) {
-	tempDir, err := tmpdir.MkDirBigFileTemp(sys, "oci")
-	if err != nil {
-		return nil, fmt.Errorf("creating temp directory: %w", err)
+	var (
+		archive, individualWriterOrNil *Writer
+		err                            error
+	)
+	if ref.sourceIndex != -1 {
+		return nil, fmt.Errorf("destination reference must not contain a manifest index @%d", ref.sourceIndex)
 	}
-	succeeded := false
-	defer func() {
-		if !succeeded {
-			os.RemoveAll(tempDir)
+	if ref.archiveWriter != nil {
+		archive = ref.archiveWriter
+		individualWriterOrNil = nil
+	} else {
+		archive, err = NewWriter(sys, ref.resolvedFile)
+		if err != nil {
+			return nil, err
 		}
-	}()
-
-	unpackedRef, err := layout.NewReference(tempDir, ref.image)
+		individualWriterOrNil = archive
+	}
+	layoutRef, err := ocilayout.NewReference(archive.tempDir, ref.image)
 	if err != nil {
+		archive.Close()
 		return nil, err
 	}
-	unpackedDest, err := unpackedRef.NewImageDestination(ctx, sys)
+	dst, err := layoutRef.NewImageDestination(ctx, sys)
 	if err != nil {
+		archive.Close()
 		return nil, err
 	}
-
-	succeeded = true
 	d := &ociArchiveImageDestination{
-		ref:          ref,
-		unpackedDest: imagedestination.FromPublic(unpackedDest),
-		tempDir:      tempDir,
+		ref:                   ref,
+		individualWriterOrNil: individualWriterOrNil,
+		unpackedDest:          imagedestination.FromPublic(dst),
 	}
 	d.Compat = impl.AddCompat(d)
 	return d, nil
@@ -69,11 +73,13 @@ func (d *ociArchiveImageDestination) Reference() types.ImageReference {
 // Close removes resources associated with an initialized ImageDestination, if any
 // Close deletes the temp directory of the oci-archive image
 func (d *ociArchiveImageDestination) Close() error {
-	defer func() {
-		err := os.RemoveAll(d.tempDir)
-		logrus.Debugf("Error deleting temporary directory: %v", err)
-	}()
-	return d.unpackedDest.Close()
+	if err := d.unpackedDest.Close(); err != nil {
+		return err
+	}
+	if d.individualWriterOrNil == nil {
+		return nil
+	}
+	return d.individualWriterOrNil.Close()
 }
 
 func (d *ociArchiveImageDestination) SupportedManifestMIMETypes() []string {
@@ -181,7 +187,13 @@ func (d *ociArchiveImageDestination) CommitWithOptions(ctx context.Context, opti
 		return fmt.Errorf("storing image %q: %w", d.ref.image, err)
 	}
 
-	return tarDirectory(d.tempDir, d.ref.resolvedFile, options.Timestamp)
+	if d.individualWriterOrNil != nil {
+		err := d.individualWriterOrNil.Close()
+		d.individualWriterOrNil = nil
+		return err
+	}
+
+	return nil
 }
 
 // tar converts the directory at src and saves it to dst
