@@ -250,15 +250,33 @@ func TestNeedsRetryOnInsuficientScope(t *testing.T) {
 		actions:      "*",
 	}
 
-	needsRetry, scope := needsRetryWithUpdatedScope(&resp)
+	needsRetry, scopes := needsRetryWithUpdatedScope(&resp)
 
 	if !needsRetry {
 		t.Fatal("Expected needing to retry")
 	}
 
-	if expectedScope != *scope {
-		t.Fatalf("Got an invalid scope, expected '%q' but got '%q'", expectedScope, *scope)
+	assert.Equal(t, []authScope{expectedScope}, scopes)
+}
+
+// A cross-repo blob mount yields a challenge with two space-separated scope tokens.
+func TestNeedsRetryOnInsuficientScopeMultiScope(t *testing.T) {
+	resp := registrySuseComResp
+	resp.Header["Www-Authenticate"] = []string{
+		`Bearer realm="https://gitlab.example.com/jwt/auth",service="container_registry",scope="repository:group/dest:pull,push repository:other/src:pull",error="insufficient_scope"`,
 	}
+	expectedScopes := []authScope{
+		{resourceType: "repository", remoteName: "group/dest", actions: "pull,push"},
+		{resourceType: "repository", remoteName: "other/src", actions: "pull"},
+	}
+
+	needsRetry, scopes := needsRetryWithUpdatedScope(&resp)
+
+	if !needsRetry {
+		t.Fatal("Expected needing to retry")
+	}
+
+	assert.Equal(t, expectedScopes, scopes)
 }
 
 func TestNeedsRetryNoRetryWhenNoAuthHeader(t *testing.T) {
