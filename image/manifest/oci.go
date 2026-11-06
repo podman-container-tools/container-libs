@@ -252,7 +252,7 @@ func (m *OCI1) ImageID(diffIDs []digest.Digest) (string, error) {
 	// by combining the config and blob layer digests).  That still
 	// gives us the option to not fail, and return some value, in the future,
 	// without committing to that approach now.
-	// (The only known caller of ImageID is storage/storageImageDestination.computeID,
+	// (The only known caller of ImageID is storage/storageImageDestination.computeMatchingDigest,
 	// which can’t work with non-image artifacts.)
 	if m.Config.MediaType != imgspecv1.MediaTypeImageConfig {
 		return "", manifest.NewNonImageArtifactError(&m.Manifest)

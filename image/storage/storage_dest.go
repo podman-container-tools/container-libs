@@ -777,11 +777,12 @@ func (s *storageImageDestination) trustedLayerIdentityDataLocked(layerIndex int,
 	return res, true
 }
 
-// computeID computes a recommended image ID based on information we have so far.  If
-// the manifest is not of a type that we recognize, we return an empty value, indicating
-// that since we don't have a recommendation, a random ID should be used if one needs
-// to be allocated.
-func (s *storageImageDestination) computeID(m manifest.Manifest) (string, error) {
+// computeMatchingDigest computes a digest which deterministically identifies the image by
+// its contents, used to decide whether a newly-pulled image is the same as an already-stored
+// one; it is equivalent to the value historically used as the image ID.  If the manifest is
+// not of a type that we recognize, the zero value is returned, indicating that no
+// recommendation is available and a random ID should be used if one needs to be allocated.
+func (s *storageImageDestination) computeMatchingDigest(m manifest.Manifest) (digest.Digest, error) {
 	// This is outside of the scope of HasThreadSafePutBlob, so we don’t need to hold s.lock.
 
 	layerInfos := m.LayerInfos()
@@ -835,6 +836,13 @@ func (s *storageImageDestination) computeID(m manifest.Manifest) (string, error)
 	if err != nil {
 		return "", err
 	}
+	// ImageID returns only the hexadecimal portion of a digest; recover the full digest
+	// (and its algorithm) so that callers get a usable digest.Digest.  For OCI/Schema2
+	// images the algorithm is that of the configuration digest; for Schema1 it is canonical.
+	ordinaryDigest := digest.NewDigestFromEncoded(digest.Canonical, ordinaryImageID)
+	if configDigest := m.ConfigInfo().Digest; configDigest != "" {
+		ordinaryDigest = digest.NewDigestFromEncoded(configDigest.Algorithm(), ordinaryImageID)
+	}
 	var tocIDInput strings.Builder
 	// ordinaryImageID is a digest of a config, which is a JSON value.
 	// To avoid the risk of collisions, start the input with @ so that the input is not a valid JSON.
@@ -857,10 +865,10 @@ func (s *storageImageDestination) computeID(m manifest.Manifest) (string, error)
 	}
 
 	if !hasLayerPulledByTOC {
-		return ordinaryImageID, nil
+		return ordinaryDigest, nil
 	}
-	tocImageID := digest.FromString(tocIDInput.String()).Encoded()
-	logrus.Debugf("Ordinary storage image ID %s; a layer was looked up by TOC, so using image ID %s", ordinaryImageID, tocImageID)
+	tocImageID := digest.FromString(tocIDInput.String())
+	logrus.Debugf("Ordinary storage image ID %s; a layer was looked up by TOC, so using image ID %s", ordinaryImageID, tocImageID.Encoded())
 	return tocImageID, nil
 }
 
@@ -1557,9 +1565,12 @@ func (s *storageImageDestination) CommitWithOptions(ctx context.Context, options
 	// Create the image record, pointing to the most-recently added layer.
 	intendedID := s.imageRef.id
 	if intendedID == "" {
-		intendedID, err = s.computeID(man)
+		matchingDigest, err := s.computeMatchingDigest(man)
 		if err != nil {
 			return err
+		}
+		if matchingDigest != "" {
+			intendedID = matchingDigest.Encoded()
 		}
 	}
 	oldNames := []string{}
