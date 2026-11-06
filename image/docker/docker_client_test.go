@@ -239,6 +239,12 @@ var registrySuseComResp = http.Response{
 	Request: nil,
 }
 
+// clientWithRecordedChallenges returns a dockerClient which already knows about an authentication
+// challenge, so that needsRetryWithUpdatedScope does not take the recordMissingChallenges path.
+func clientWithRecordedChallenges() *dockerClient {
+	return &dockerClient{challenges: []challenge{{Scheme: "bearer"}}}
+}
+
 func TestNeedsRetryOnInsuficientScope(t *testing.T) {
 	resp := registrySuseComResp
 	resp.Header["Www-Authenticate"] = []string{
@@ -250,7 +256,7 @@ func TestNeedsRetryOnInsuficientScope(t *testing.T) {
 		actions:      "*",
 	}
 
-	needsRetry, scope := needsRetryWithUpdatedScope(&resp)
+	needsRetry, scope := clientWithRecordedChallenges().needsRetryWithUpdatedScope(&resp)
 
 	if !needsRetry {
 		t.Fatal("Expected needing to retry")
@@ -265,7 +271,7 @@ func TestNeedsRetryNoRetryWhenNoAuthHeader(t *testing.T) {
 	resp := registrySuseComResp
 	delete(resp.Header, "Www-Authenticate")
 
-	needsRetry, _ := needsRetryWithUpdatedScope(&resp)
+	needsRetry, _ := clientWithRecordedChallenges().needsRetryWithUpdatedScope(&resp)
 
 	if needsRetry {
 		t.Fatal("Expected no need to retry, as no Authentication headers are present")
@@ -278,7 +284,7 @@ func TestNeedsRetryNoRetryWhenNoBearerAuthHeader(t *testing.T) {
 		`OAuth2 realm="https://registry.suse.com/auth",service="SUSE Linux Docker Registry",scope="registry:catalog:*"`,
 	}
 
-	needsRetry, _ := needsRetryWithUpdatedScope(&resp)
+	needsRetry, _ := clientWithRecordedChallenges().needsRetryWithUpdatedScope(&resp)
 
 	if needsRetry {
 		t.Fatal("Expected no need to retry, as no bearer authentication header is present")
@@ -291,7 +297,7 @@ func TestNeedsRetryNoRetryWhenNoErrorInBearer(t *testing.T) {
 		`Bearer realm="https://registry.suse.com/auth",service="SUSE Linux Docker Registry",scope="registry:catalog:*"`,
 	}
 
-	needsRetry, _ := needsRetryWithUpdatedScope(&resp)
+	needsRetry, _ := clientWithRecordedChallenges().needsRetryWithUpdatedScope(&resp)
 
 	if needsRetry {
 		t.Fatal("Expected no need to retry, as no insufficient error is present in the authentication header")
@@ -304,7 +310,7 @@ func TestNeedsRetryNoRetryWhenInvalidErrorInBearer(t *testing.T) {
 		`Bearer realm="https://registry.suse.com/auth",service="SUSE Linux Docker Registry",scope="registry:catalog:*,error="random_error"`,
 	}
 
-	needsRetry, _ := needsRetryWithUpdatedScope(&resp)
+	needsRetry, _ := clientWithRecordedChallenges().needsRetryWithUpdatedScope(&resp)
 
 	if needsRetry {
 		t.Fatal("Expected no need to retry, as no insufficient_error is present in the authentication header")
@@ -317,7 +323,7 @@ func TestNeedsRetryNoRetryWhenInvalidScope(t *testing.T) {
 		`Bearer realm="https://registry.suse.com/auth",service="SUSE Linux Docker Registry",scope="foo:bar",error="insufficient_scope"`,
 	}
 
-	needsRetry, _ := needsRetryWithUpdatedScope(&resp)
+	needsRetry, _ := clientWithRecordedChallenges().needsRetryWithUpdatedScope(&resp)
 
 	if needsRetry {
 		t.Fatal("Expected no need to retry, as no insufficient_error is present in the authentication header")
@@ -350,7 +356,7 @@ func TestNeedsNoRetry(t *testing.T) {
 		},
 	}
 
-	needsRetry, _ := needsRetryWithUpdatedScope(&resp)
+	needsRetry, _ := clientWithRecordedChallenges().needsRetryWithUpdatedScope(&resp)
 	if needsRetry {
 		t.Fatal("Got the need to retry, but none should be required")
 	}
@@ -538,4 +544,95 @@ func TestResolveRequestURLWithNamespaceProxy(t *testing.T) {
 			assert.Equal(t, c.expected, result.String())
 		})
 	}
+}
+
+// TestNeedsRetryWithMissingChallenges covers a registry which allows unauthenticated GET/HEAD, so
+// that the detectProperties() ping records no challenges at all, but requires authentication for
+// writes.
+func TestNeedsRetryWithMissingChallenges(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		// status and wwwAuthenticate describe the response to react on.
+		status          int
+		wwwAuthenticate []string
+		expectedRetry   bool
+		expectedScope   *authScope
+		expectedSchemes []string // challenges recorded on the client afterwards
+	}{
+		{
+			name:            "basic challenge is recorded and retried",
+			status:          http.StatusUnauthorized,
+			wwwAuthenticate: []string{`Basic realm="Password expected here ..."`},
+			expectedRetry:   true,
+			expectedSchemes: []string{"basic"},
+		},
+		{
+			name:            "bearer challenge is recorded and retried",
+			status:          http.StatusUnauthorized,
+			wwwAuthenticate: []string{`Bearer realm="https://registry.example.com/auth",service="registry.example.com"`},
+			expectedRetry:   true,
+			expectedSchemes: []string{"bearer"},
+		},
+		{
+			// The scope must still be reported so that the retry can obtain a usable token.
+			name:            "insufficient_scope still returns the scope",
+			status:          http.StatusUnauthorized,
+			wwwAuthenticate: []string{`Bearer realm="https://registry.example.com/auth",service="registry.example.com",scope="registry:catalog:*",error="insufficient_scope"`},
+			expectedRetry:   true,
+			expectedScope:   &authScope{resourceType: "registry", remoteName: "catalog", actions: "*"},
+			expectedSchemes: []string{"bearer"},
+		},
+		{
+			name:            "401 without any challenge",
+			status:          http.StatusUnauthorized,
+			wwwAuthenticate: nil,
+			expectedRetry:   false,
+			expectedSchemes: nil,
+		},
+		{
+			name:            "challenges on a non-401 response are ignored",
+			status:          http.StatusForbidden,
+			wwwAuthenticate: []string{`Basic realm="Password expected here ..."`},
+			expectedRetry:   false,
+			expectedSchemes: nil,
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			res := http.Response{
+				StatusCode: c.status,
+				Header:     http.Header{},
+			}
+			if c.wwwAuthenticate != nil {
+				res.Header["Www-Authenticate"] = c.wwwAuthenticate
+			}
+
+			client := &dockerClient{} // No challenges recorded, as after a ping which did not need authentication.
+			needsRetry, scope := client.needsRetryWithUpdatedScope(&res)
+			assert.Equal(t, c.expectedRetry, needsRetry)
+			assert.Equal(t, c.expectedScope, scope)
+
+			schemes := []string(nil)
+			for _, challenge := range client.challenges {
+				schemes = append(schemes, challenge.Scheme)
+			}
+			assert.Equal(t, c.expectedSchemes, schemes)
+		})
+	}
+}
+
+// TestNeedsRetryDoesNotOverwriteChallenges verifies that challenges recorded by detectProperties()
+// are not replaced by the contents of a later 401.
+func TestNeedsRetryDoesNotOverwriteChallenges(t *testing.T) {
+	res := http.Response{
+		StatusCode: http.StatusUnauthorized,
+		Header: http.Header{
+			"Www-Authenticate": []string{`Basic realm="Password expected here ..."`},
+		},
+	}
+
+	client := clientWithRecordedChallenges()
+	needsRetry, scope := client.needsRetryWithUpdatedScope(&res)
+	assert.False(t, needsRetry)
+	assert.Nil(t, scope)
+	assert.Equal(t, []challenge{{Scheme: "bearer"}}, client.challenges)
 }
