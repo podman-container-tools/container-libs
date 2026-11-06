@@ -3,11 +3,12 @@
 package ioutils
 
 import (
-	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"golang.org/x/sys/windows"
 )
 
@@ -35,21 +36,15 @@ func openShareDelete(path string) (*os.File, error) {
 // opened with os.Open (no FILE_SHARE_DELETE) still blocks the replace.
 func TestAtomicWriteFileWithOpenReaderNoShareDelete(t *testing.T) {
 	fileName := filepath.Join(t.TempDir(), "foo")
-	if err := os.WriteFile(fileName, []byte("old"), testMode); err != nil {
-		t.Fatalf("Error writing to file: %v", err)
-	}
+	require.NoError(t, os.WriteFile(fileName, []byte("old"), testMode))
 
 	reader, err := os.Open(fileName)
-	if err != nil {
-		t.Fatalf("Error opening file: %v", err)
-	}
+	require.NoError(t, err)
 	defer reader.Close()
 
 	err = AtomicWriteFile(fileName, []byte("new"), testMode)
-	if !errors.Is(err, windows.ERROR_SHARING_VIOLATION) {
-		t.Fatalf("Expected a sharing violation, got: %v", err)
-	}
-	if matches, _ := filepath.Glob(filepath.Join(filepath.Dir(fileName), ".tmp-*")); len(matches) != 0 {
-		t.Fatalf("Temporary files left behind: %v", matches)
-	}
+	assert.ErrorIs(t, err, windows.ERROR_SHARING_VIOLATION)
+
+	matches, _ := filepath.Glob(filepath.Join(filepath.Dir(fileName), ".tmp-*"))
+	assert.Empty(t, matches, "temporary files left behind")
 }
