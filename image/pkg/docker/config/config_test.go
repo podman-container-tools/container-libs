@@ -636,6 +636,21 @@ func TestGetAllCredentials(t *testing.T) {
 			require.Equal(t, d.password, conf.Password, "%v", d)
 		}
 	}
+
+	t.Run("credential helper listing URL keys", func(t *testing.T) {
+		err := os.Chmod(filepath.Join(path, "testdata", "docker-credential-helper-url-keys"), os.ModePerm)
+		require.NoError(t, err)
+		authConfigs, err := GetAllCredentials(&types.SystemContext{
+			SystemRegistriesConfPath:    filepath.Join("testdata", "cred-helper-url-keys.conf"),
+			SystemRegistriesConfDirPath: filepath.Join("testdata", "IdoNotExist"),
+		})
+		require.NoError(t, err)
+		require.Equal(t, map[string]types.DockerAuthConfig{
+			"registry-c.com":      {Username: "foo", Password: "bar"},
+			"index.docker.io":     {Username: "hub", Password: "hubpass"},
+			"registry-d.com/team": {Username: "team", Password: "teampass"},
+		}, authConfigs)
+	})
 }
 
 func TestAuthKeyLookupOrder(t *testing.T) {
