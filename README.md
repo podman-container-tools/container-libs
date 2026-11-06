@@ -21,7 +21,7 @@ Each subproject has its own README.md file with more instructions.
 
 We welcome contributions!
 
-See the **[`CONTRIBUTING.md`](CONTRIBUTING.md)**, **[`CONTRIBUTING_GO.md`](CONTRIBUTING_GO.md)** and **[`CONTRIBUTING_RUST.md`](CONTRIBUTING_RUST.md)** files.
+See the **[`CONTRIBUTING.md`](CONTRIBUTING.md)** and **[`CONTRIBUTING_GO.md`](CONTRIBUTING_GO.md)** files.
 
 ## Code of Conduct
 
