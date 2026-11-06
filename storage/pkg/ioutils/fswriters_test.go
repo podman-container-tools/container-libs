@@ -1,12 +1,14 @@
 package ioutils
 
 import (
-	"bytes"
 	"io"
 	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 var testMode os.FileMode = 0o640
@@ -22,26 +24,15 @@ func TestAtomicWriteToFile(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	expected := []byte("barbaz")
-	if err := AtomicWriteFile(filepath.Join(tmpDir, "foo"), expected, testMode); err != nil {
-		t.Fatalf("Error writing to file: %v", err)
-	}
+	require.NoError(t, AtomicWriteFile(filepath.Join(tmpDir, "foo"), expected, testMode))
 
 	actual, err := os.ReadFile(filepath.Join(tmpDir, "foo"))
-	if err != nil {
-		t.Fatalf("Error reading from file: %v", err)
-	}
-
-	if !bytes.Equal(actual, expected) {
-		t.Fatalf("Data mismatch, expected %q, got %q", expected, actual)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, expected, actual)
 
 	st, err := os.Stat(filepath.Join(tmpDir, "foo"))
-	if err != nil {
-		t.Fatalf("Error statting file: %v", err)
-	}
-	if expected := testMode; st.Mode() != expected {
-		t.Fatalf("Mode mismatched, expected %o, got %o", expected, st.Mode())
-	}
+	require.NoError(t, err)
+	assert.Equal(t, testMode, st.Mode())
 }
 
 // TestAtomicWriteFileWithOpenReader replaces a file while a reader holds it
@@ -50,36 +41,22 @@ func TestAtomicWriteToFile(t *testing.T) {
 func TestAtomicWriteFileWithOpenReader(t *testing.T) {
 	fileName := filepath.Join(t.TempDir(), "foo")
 	old := []byte("old")
-	if err := os.WriteFile(fileName, old, testMode); err != nil {
-		t.Fatalf("Error writing to file: %v", err)
-	}
+	require.NoError(t, os.WriteFile(fileName, old, testMode))
 
 	reader, err := openShareDelete(fileName)
-	if err != nil {
-		t.Fatalf("Error opening file: %v", err)
-	}
+	require.NoError(t, err)
 	defer reader.Close()
 
 	expected := []byte("new")
-	if err := AtomicWriteFile(fileName, expected, testMode); err != nil {
-		t.Fatalf("Error writing to file while a reader has it open: %v", err)
-	}
+	require.NoError(t, AtomicWriteFile(fileName, expected, testMode), "writing to file while a reader has it open")
 
 	actual, err := os.ReadFile(fileName)
-	if err != nil {
-		t.Fatalf("Error reading from file: %v", err)
-	}
-	if !bytes.Equal(actual, expected) {
-		t.Fatalf("Data mismatch, expected %q, got %q", expected, actual)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, expected, actual)
 
 	actual, err = io.ReadAll(reader)
-	if err != nil {
-		t.Fatalf("Error reading from open reader: %v", err)
-	}
-	if !bytes.Equal(actual, old) {
-		t.Fatalf("Open reader data mismatch, expected %q, got %q", old, actual)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, old, actual, "open reader should still see the old content")
 }
 
 func TestAtomicCommitAndRollbackFile(t *testing.T) {
@@ -90,39 +67,24 @@ func TestAtomicCommitAndRollbackFile(t *testing.T) {
 	newData := "newdata"
 
 	check := func(n int, initData string, writeData string, expected string, explicit bool, commit bool) {
-		if err := os.WriteFile(path, []byte(initData), 0o644); err != nil {
-			t.Fatalf("Failed creating initial file: %v", err)
-		}
+		require.NoError(t, os.WriteFile(path, []byte(initData), 0o644), "(%d)", n)
 
 		opts := &AtomicFileWriterOptions{ExplicitCommit: explicit}
 		w, err := NewAtomicFileWriterWithOpts(filepath.Join(tmpDir, "foo"), 0o644, opts)
-		if err != nil {
-			t.Fatalf("(%d) Failed creating writer: %v", n, err)
-		}
+		require.NoError(t, err, "(%d)", n)
 
-		if _, err := w.Write([]byte(writeData)); err != nil {
-			t.Fatalf("(%d) Failed writing content: %v", n, err)
-		}
+		_, err = w.Write([]byte(writeData))
+		require.NoError(t, err, "(%d)", n)
 
 		if commit {
-			if err := w.Commit(); err != nil {
-				t.Fatalf("(%d) Failed committing writer: %v", n, err)
-			}
+			require.NoError(t, w.Commit(), "(%d)", n)
 		}
 
-		if err := w.Close(); err != nil {
-			t.Fatalf("(%d) Failed closing writer: %v", n, err)
-		}
+		require.NoError(t, w.Close(), "(%d)", n)
 
 		actual, err := os.ReadFile(filepath.Join(tmpDir, "foo"))
-		if err != nil {
-			t.Fatalf("(%d) Error reading from file: %v", n, err)
-		}
-
-		// Verify write never happened since no call to commit
-		if !bytes.Equal(actual, []byte(expected)) {
-			t.Fatalf("(%d) Data mismatch, expected %q, got %q", n, expected, actual)
-		}
+		require.NoError(t, err, "(%d)", n)
+		assert.Equal(t, expected, string(actual), "(%d)", n)
 	}
 
 	check(1, oldData, newData, oldData, true, false)
@@ -133,72 +95,39 @@ func TestAtomicCommitAndRollbackFile(t *testing.T) {
 
 func TestAtomicWriteSetCommit(t *testing.T) {
 	tmpDir := t.TempDir()
-
-	if err := os.Mkdir(filepath.Join(tmpDir, "tmp"), 0o700); err != nil {
-		t.Fatalf("Error creating tmp directory: %s", err)
-	}
+	require.NoError(t, os.Mkdir(filepath.Join(tmpDir, "tmp"), 0o700))
 
 	targetDir := filepath.Join(tmpDir, "target")
 	ws, err := NewAtomicWriteSet(filepath.Join(tmpDir, "tmp"))
-	if err != nil {
-		t.Fatalf("Error creating atomic write set: %s", err)
-	}
+	require.NoError(t, err)
 
 	expected := []byte("barbaz")
-	if err := ws.WriteFile("foo", expected, testMode); err != nil {
-		t.Fatalf("Error writing to file: %v", err)
-	}
+	require.NoError(t, ws.WriteFile("foo", expected, testMode))
 
-	if _, err := os.ReadFile(filepath.Join(targetDir, "foo")); err == nil {
-		t.Fatalf("Expected error reading file where should not exist")
-	}
+	_, err = os.ReadFile(filepath.Join(targetDir, "foo"))
+	require.Error(t, err, "file should not exist before commit")
 
-	if err := ws.Commit(targetDir); err != nil {
-		t.Fatalf("Error committing file: %s", err)
-	}
+	require.NoError(t, ws.Commit(targetDir))
 
 	actual, err := os.ReadFile(filepath.Join(targetDir, "foo"))
-	if err != nil {
-		t.Fatalf("Error reading from file: %v", err)
-	}
-
-	if !bytes.Equal(actual, expected) {
-		t.Fatalf("Data mismatch, expected %q, got %q", expected, actual)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, expected, actual)
 
 	st, err := os.Stat(filepath.Join(targetDir, "foo"))
-	if err != nil {
-		t.Fatalf("Error statting file: %v", err)
-	}
-	if expected := testMode; st.Mode() != expected {
-		t.Fatalf("Mode mismatched, expected %o, got %o", expected, st.Mode())
-	}
+	require.NoError(t, err)
+	assert.Equal(t, testMode, st.Mode())
 }
 
 func TestAtomicWriteSetCancel(t *testing.T) {
 	tmpDir := t.TempDir()
-
-	if err := os.Mkdir(filepath.Join(tmpDir, "tmp"), 0o700); err != nil {
-		t.Fatalf("Error creating tmp directory: %s", err)
-	}
+	require.NoError(t, os.Mkdir(filepath.Join(tmpDir, "tmp"), 0o700))
 
 	ws, err := NewAtomicWriteSet(filepath.Join(tmpDir, "tmp"))
-	if err != nil {
-		t.Fatalf("Error creating atomic write set: %s", err)
-	}
+	require.NoError(t, err)
 
-	expected := []byte("barbaz")
-	if err := ws.WriteFile("foo", expected, testMode); err != nil {
-		t.Fatalf("Error writing to file: %v", err)
-	}
+	require.NoError(t, ws.WriteFile("foo", []byte("barbaz"), testMode))
+	require.NoError(t, ws.Cancel())
 
-	if err := ws.Cancel(); err != nil {
-		t.Fatalf("Error committing file: %s", err)
-	}
-
-	if _, err := os.ReadFile(filepath.Join(tmpDir, "target", "foo")); err == nil {
-		t.Fatalf("Expected error reading file where should not exist")
-	} else if !os.IsNotExist(err) {
-		t.Fatalf("Unexpected error reading file: %s", err)
-	}
+	_, err = os.ReadFile(filepath.Join(tmpDir, "target", "foo"))
+	assert.ErrorIs(t, err, os.ErrNotExist)
 }
