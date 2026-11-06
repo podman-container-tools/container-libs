@@ -11,9 +11,12 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.podman.io/image/v5/internal/private"
 	_ "go.podman.io/image/v5/internal/testing/explicitfilepath-tmpdir"
 	"go.podman.io/image/v5/types"
 )
+
+var _ private.ImageReference = (*ociArchiveReference)(nil)
 
 func TestTransportName(t *testing.T) {
 	assert.Equal(t, "oci-archive", Transport.Name())
