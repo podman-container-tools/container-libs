@@ -69,6 +69,25 @@ var _ = Describe("Config", func() {
 			gomega.Expect(defaultConfig.Engine.RetryDelay).To(gomega.Equal(""))
 		})
 
+		It("should default no_new_privileges to false", func() {
+			configPath := filepath.Join(GinkgoT().TempDir(), "containers.conf")
+			gomega.Expect(os.WriteFile(configPath, nil, 0o644)).To(gomega.Succeed())
+
+			loadedConfig, err := newLocked(&Options{}, testConfigPath(configPath))
+			gomega.Expect(err).ToNot(gomega.HaveOccurred())
+			gomega.Expect(loadedConfig.Containers.NoNewPrivileges).To(gomega.BeFalse())
+		})
+
+		It("should load no_new_privileges from config", func() {
+			configPath := filepath.Join(GinkgoT().TempDir(), "containers.conf")
+			configContents := []byte("[containers]\nno_new_privileges = true\n")
+			gomega.Expect(os.WriteFile(configPath, configContents, 0o644)).To(gomega.Succeed())
+
+			loadedConfig, err := newLocked(&Options{}, testConfigPath(configPath))
+			gomega.Expect(err).ToNot(gomega.HaveOccurred())
+			gomega.Expect(loadedConfig.Containers.NoNewPrivileges).To(gomega.BeTrue())
+		})
+
 		It("should succeed with devices", func() {
 			defConf, err := defaultConfig()
 			gomega.Expect(err).ToNot(gomega.HaveOccurred())
