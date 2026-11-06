@@ -1582,6 +1582,9 @@ func (s *storageImageDestination) CommitWithOptions(ctx context.Context, options
 	if err != nil {
 		if !errors.Is(err, storage.ErrDuplicateID) {
 			logrus.Debugf("error creating image: %q", err)
+			if intendedID == "" {
+				return fmt.Errorf("creating image with matching digest %q: %w", matchingDigest, err)
+			}
 			return fmt.Errorf("creating image %q: %w", intendedID, err)
 		}
 		// An image with the same MatchingDigest, or with the requested ID,
@@ -1603,8 +1606,8 @@ func (s *storageImageDestination) CommitWithOptions(ctx context.Context, options
 			return fmt.Errorf("reading image %q: %w", intendedID, err)
 		}
 		if img.TopLayer != lastLayer {
-			logrus.Debugf("error creating image: image with ID %q exists, but uses different layers", intendedID)
-			return fmt.Errorf("image with ID %q already exists, but uses a different top layer: %w", intendedID, storage.ErrDuplicateID)
+			logrus.Debugf("error creating image: image with ID %q exists, but uses different layers", img.ID)
+			return fmt.Errorf("image with ID %q already exists, but uses a different top layer: %w", img.ID, storage.ErrDuplicateID)
 		}
 		logrus.Debugf("reusing image ID %q", img.ID)
 		oldNames = append(oldNames, img.Names...)
@@ -1659,9 +1662,12 @@ func (s *storageImageDestination) CommitWithOptions(ctx context.Context, options
 		// Right now (2024-11), ReportResolvedReference is only used in c/common/libimage, where the caller only extracts the image ID,
 		// so the name does not matter; to give us options, copy.Options.ReportResolvedReference is explicitly refusing to document
 		// whether the value contains a name.
-		resolved, err := newReference(s.imageRef.transport, nil, intendedID)
+		// Use img.ID, not intendedID: when the caller did not request a specific ID,
+		// intendedID is empty and img.ID is the (possibly randomly assigned, or
+		// reused) ID of the image we just created or found.
+		resolved, err := newReference(s.imageRef.transport, nil, img.ID)
 		if err != nil {
-			return fmt.Errorf("creating a resolved reference for (%s, %s): %w", s.imageRef.StringWithinTransport(), intendedID, err)
+			return fmt.Errorf("creating a resolved reference for (%s, %s): %w", s.imageRef.StringWithinTransport(), img.ID, err)
 		}
 		*options.ReportResolvedReference = resolved
 	}

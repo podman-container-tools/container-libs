@@ -571,26 +571,65 @@ func TestWriteRead(t *testing.T) {
 func TestDuplicateName(t *testing.T) {
 	ensureTestCanCreateImages(t)
 
-	newStore(t)
+	st := newStore(t)
 	cache := memory.New()
 
 	ref, err := Transport.ParseReference("test")
 	require.NoError(t, err)
 
-	createImage(t, ref, cache, []testBlob{makeLayer(t, archive.Uncompressed)}, nil)
+	// Committing content which is already present must reuse the existing image,
+	// even though its ID is not derived from the content any more.
+	layer := makeLayer(t, archive.Gzip)
+	config := configForLayers(t, []testBlob{layer})
+	createImage(t, ref, cache, []testBlob{layer}, &config)
+	images, err := st.Images()
+	require.NoError(t, err)
+	require.Len(t, images, 1)
+	firstID := images[0].ID
+	assert.Equal(t, config.uncompressedDigest, images[0].MatchingDigest)
+	assert.NotEqual(t, config.uncompressedDigest.Encoded(), firstID, "image ID should not be derived from the image contents")
+
+	createImage(t, ref, cache, []testBlob{layer}, &config)
+	images, err = st.Images()
+	require.NoError(t, err)
+	require.Len(t, images, 1)
+	assert.Equal(t, firstID, images[0].ID)
+
+	// Content which differs must still create a new image.
 	createImage(t, ref, cache, []testBlob{makeLayer(t, archive.Gzip)}, nil)
+	images, err = st.Images()
+	require.NoError(t, err)
+	assert.Len(t, images, 2)
 }
 
 func TestDuplicateID(t *testing.T) {
 	ensureTestCanCreateImages(t)
 
-	newStore(t)
+	st := newStore(t)
 	cache := memory.New()
 
-	ref, err := Transport.ParseReference("@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	const id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	ref, err := Transport.ParseReference("@" + id)
 	require.NoError(t, err)
 
-	createImage(t, ref, cache, []testBlob{makeLayer(t, archive.Gzip)}, nil)
+	layer := makeLayer(t, archive.Gzip)
+	config := configForLayers(t, []testBlob{layer})
+	createImage(t, ref, cache, []testBlob{layer}, &config)
+
+	// An explicitly requested ID is honored as-is, and disables content-based
+	// deduplication, so that "the same" content may be stored under several IDs.
+	images, err := st.Images()
+	require.NoError(t, err)
+	require.Len(t, images, 1)
+	assert.Equal(t, id, images[0].ID)
+	assert.Empty(t, images[0].MatchingDigest)
+
+	otherRef, err := Transport.ParseReference("@bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+	require.NoError(t, err)
+	createImage(t, otherRef, cache, []testBlob{layer}, &config)
+	images, err = st.Images()
+	require.NoError(t, err)
+	assert.Len(t, images, 2)
 
 	dest, unparsedToplevel := createUncommittedImageDest(t, ref, cache,
 		[]testBlob{makeLayer(t, archive.Gzip)}, nil)
