@@ -91,7 +91,7 @@ func TestNew(t *testing.T) {
 		noWriteBaseFile           bool
 		extraHosts                []string
 		containerIPs              HostEntries
-		hostContainersInternal    string
+		hostContainersInternal    []string
 		expectedTargetFileContent string
 		wantErrString             string
 	}{
@@ -217,34 +217,40 @@ func TestNew(t *testing.T) {
 		{
 			name:                      "with host.containers.internal ip",
 			baseFileContent:           baseFileContent1Spaces,
-			hostContainersInternal:    "10.0.0.1",
+			hostContainersInternal:    []string{"10.0.0.1"},
 			expectedTargetFileContent: targetFileContent1 + "10.0.0.1\thost.containers.internal host.docker.internal\n",
+		},
+		{
+			name:                      "with DUAL STACK host.containers.internal ips",
+			baseFileContent:           baseFileContent1Spaces,
+			hostContainersInternal:    []string{"10.0.0.1", "fd00::1"},
+			expectedTargetFileContent: targetFileContent1 + "10.0.0.1\thost.containers.internal host.docker.internal\nfd00::1\thost.containers.internal host.docker.internal\n",
 		},
 		{
 			name:                      "with host.containers.internal ip and host-gateway",
 			baseFileContent:           baseFileContent1Spaces,
 			extraHosts:                []string{"gatewayname:host-gateway"},
-			hostContainersInternal:    "10.0.0.1",
+			hostContainersInternal:    []string{"10.0.0.1"},
 			expectedTargetFileContent: "10.0.0.1\tgatewayname\n" + targetFileContent1 + "10.0.0.1\thost.containers.internal host.docker.internal\n",
 		},
 		{
 			name:                      "host.containers.internal not added when already present in extra hosts",
 			baseFileContent:           baseFileContent1Spaces,
 			extraHosts:                []string{"host.containers.internal:1.1.1.1"},
-			hostContainersInternal:    "10.0.0.1",
+			hostContainersInternal:    []string{"10.0.0.1"},
 			expectedTargetFileContent: "1.1.1.1\thost.containers.internal\n" + targetFileContent1 + "10.0.0.1\thost.docker.internal\n",
 		},
 		{
 			name:                      "host.containers.internal and host.docker.internal not added when already present in extra hosts",
 			baseFileContent:           baseFileContent1Spaces,
 			extraHosts:                []string{"host.containers.internal:1.1.1.1", "host.docker.internal:1.1.1.1"},
-			hostContainersInternal:    "10.0.0.1",
+			hostContainersInternal:    []string{"10.0.0.1"},
 			expectedTargetFileContent: "1.1.1.1\thost.containers.internal\n1.1.1.1\thost.docker.internal\n" + targetFileContent1,
 		},
 		{
 			name:                      "host.containers.internal not added when already present in base hosts",
 			baseFileContent:           baseFileContent6,
-			hostContainersInternal:    "10.0.0.1",
+			hostContainersInternal:    []string{"10.0.0.1"},
 			expectedTargetFileContent: targetFileContent6,
 		},
 		{
@@ -303,11 +309,11 @@ func TestNew(t *testing.T) {
 			targetFile := filepath.Join(t.TempDir(), "target")
 
 			params := &Params{
-				BaseFile:                 baseHostFile,
-				ExtraHosts:               tt.extraHosts,
-				ContainerIPs:             tt.containerIPs,
-				HostContainersInternalIP: tt.hostContainersInternal,
-				TargetFile:               targetFile,
+				BaseFile:                  baseHostFile,
+				ExtraHosts:                tt.extraHosts,
+				ContainerIPs:              tt.containerIPs,
+				HostContainersInternalIPs: tt.hostContainersInternal,
+				TargetFile:                targetFile,
 			}
 
 			err := New(params)
