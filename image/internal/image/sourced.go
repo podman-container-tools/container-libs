@@ -6,6 +6,9 @@ package image
 import (
 	"context"
 
+	"go.podman.io/image/v5/internal/digests"
+	"go.podman.io/image/v5/internal/imagesource"
+	"go.podman.io/image/v5/internal/private"
 	"go.podman.io/image/v5/types"
 )
 
@@ -18,7 +21,10 @@ import (
 // NOTE: If any kind of signature verification should happen, build an UnparsedImage from the value returned by NewImageSource,
 // verify that UnparsedImage, and convert it into a real Image via image.FromUnparsedImage instead of calling this function.
 func FromReference(ctx context.Context, sys *types.SystemContext, ref types.ImageReference) (types.ImageCloser, error) {
-	src, err := ref.NewImageSource(ctx, sys)
+	src, err := imagesource.NewImageSource(ctx, ref, private.NewImageSourceOptions{
+		Sys:     sys,
+		Digests: digests.CanonicalDefault(),
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -54,8 +60,8 @@ type imageCloser struct {
 //
 // Most callers can use either FromUnparsedImage or FromReference instead.
 //
-// This is publicly visible as c/image/image.FromSource.
-func FromSource(ctx context.Context, sys *types.SystemContext, src types.ImageSource) (types.ImageCloser, error) {
+// A public-interface variant of this is publicly visible as c/image/image.FromSource.
+func FromSource(ctx context.Context, sys *types.SystemContext, src private.ImageSource) (types.ImageCloser, error) {
 	img, err := FromUnparsedImage(ctx, sys, UnparsedInstance(src, nil))
 	if err != nil {
 		return nil, err
