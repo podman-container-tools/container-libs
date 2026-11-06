@@ -32,6 +32,51 @@ func testConfigPath(path string) *configfile.File {
 }
 
 var _ = Describe("Config", func() {
+	It("parses healthcheck event settings independently", func() {
+		tests := []struct {
+			name              string
+			contents          string
+			healthcheckEvents bool
+			eventsOnChange    bool
+		}{
+			{
+				name:              "both settings omitted",
+				healthcheckEvents: true, // Existing default remains true.
+				eventsOnChange:    false,
+			},
+			{
+				name:              "existing setting true",
+				contents:          "[engine]\nhealthcheck_events = true\n",
+				healthcheckEvents: true,
+				eventsOnChange:    false,
+			},
+			{
+				name:              "existing setting false",
+				contents:          "[engine]\nhealthcheck_events = false\n",
+				healthcheckEvents: false,
+				eventsOnChange:    false,
+			},
+			{
+				name:              "on-change enabled independently",
+				contents:          "[engine]\nhealthcheck_events = false\nhealthcheck_events_on_change = true\n",
+				healthcheckEvents: false,
+				eventsOnChange:    true,
+			},
+		}
+
+		for _, test := range tests {
+			By(test.name)
+			path := filepath.Join(GinkgoT().TempDir(), "containers.conf")
+			err := os.WriteFile(path, []byte(test.contents), 0o600)
+			gomega.Expect(err).ToNot(gomega.HaveOccurred())
+
+			config, err := newLocked(&Options{}, testConfigPath(path))
+			gomega.Expect(err).ToNot(gomega.HaveOccurred())
+			gomega.Expect(config.Engine.HealthcheckEvents).To(gomega.Equal(test.healthcheckEvents))
+			gomega.Expect(config.Engine.HealthcheckEventsOnChange).To(gomega.Equal(test.eventsOnChange))
+		}
+	})
+
 	Describe("ValidateConfig", func() {
 		It("should succeed with default config", func() {
 			// Given
