@@ -5,6 +5,7 @@ package overlay
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -366,4 +367,49 @@ func Test_parseOptions(t *testing.T) {
 			assert.Equal(t, tt.want, got)
 		})
 	}
+}
+
+func TestRunMountProgram(t *testing.T) {
+	tmpDir := t.TempDir()
+	outFile := filepath.Join(tmpDir, "out.txt")
+	scriptPath := filepath.Join(tmpDir, "fake-mount.sh")
+	script := "#!/bin/sh\npwd > " + outFile + "\necho \"$@\" >> " + outFile + "\ncat /proc/self/cgroup >> " + outFile + "\n"
+	require.NoError(t, os.WriteFile(scriptPath, []byte(script), 0o755))
+
+	targetDir := filepath.Join(tmpDir, "merged")
+	require.NoError(t, runMountProgram(scriptPath, tmpDir, "lowerdir=a", targetDir, ""))
+
+	data, err := os.ReadFile(outFile)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), tmpDir+"\n-o lowerdir=a "+targetDir+"\n")
+
+	// Non-existent cgroup path should return an error.
+	err = runMountProgram(scriptPath, tmpDir, "lowerdir=b", targetDir, filepath.Join(tmpDir, "nonexistent-cgroup"))
+	require.ErrorContains(t, err, "opening cgroup")
+
+	// Non-cgroup directory should fail when spawning with UseCgroupFD.
+	err = runMountProgram(scriptPath, tmpDir, "lowerdir=b", targetDir, tmpDir)
+	require.Error(t, err)
+
+	// If running on cgroup v2 and we have permission to create a sibling cgroup,
+	// verify the mount program starts directly inside the target cgroup.
+	if selfCgroupData, err := os.ReadFile("/proc/self/cgroup"); err == nil {
+		if _, relPath, ok := strings.Cut(strings.TrimSpace(string(selfCgroupData)), "0::"); ok && relPath != "" && relPath != "/" {
+			parentCgroup := filepath.Join("/sys/fs/cgroup", filepath.Dir(relPath))
+			if testCgroup, err := os.MkdirTemp(parentCgroup, "storage-mount-test-"); err == nil {
+				defer os.Remove(testCgroup)
+				require.NoError(t, runMountProgram(scriptPath, tmpDir, "lowerdir=c", targetDir, testCgroup))
+				data, err = os.ReadFile(outFile)
+				require.NoError(t, err)
+				assert.Contains(t, string(data), filepath.Base(testCgroup))
+			}
+		}
+	}
+
+	failScriptPath := filepath.Join(tmpDir, "fail-mount.sh")
+	failScript := "#!/bin/sh\necho \"custom mount error\" >&2\nexit 1\n"
+	require.NoError(t, os.WriteFile(failScriptPath, []byte(failScript), 0o755))
+
+	err = runMountProgram(failScriptPath, tmpDir, "lowerdir=a", targetDir, "")
+	require.ErrorContains(t, err, "using mount program "+failScriptPath+": custom mount error")
 }
