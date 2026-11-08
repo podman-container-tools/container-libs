@@ -346,6 +346,12 @@ over the container's `/etc/hosts` file by default; refer to the `--add-host`
 CLI option for details. To disable this, either set this config to `true`, or
 use the functionally identical `--no-hosts` CLI option.
 
+**no_new_privileges**=false
+
+Prevent processes in containers from gaining additional privileges, for example
+through setuid or setgid executables. This is equivalent to setting
+`--security-opt=no-new-privileges` for each container.
+
 **oom_score_adj**=0
 
 Tune the host's OOM preferences for containers (accepts values from -1000 to 1000).
