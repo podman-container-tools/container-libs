@@ -3,6 +3,7 @@ package manifest
 import (
 	"os"
 	"path/filepath"
+	"encoding/json"
 	"testing"
 
 	"github.com/opencontainers/go-digest"
@@ -287,4 +288,75 @@ func TestSchema2CanChangeLayerCompression(t *testing.T) {
 	assert.True(t, m.CanChangeLayerCompression(DockerV2Schema2LayerMediaType))
 	// Some projects like to use squashfs and other unspecified formats for layers; don’t touch those.
 	assert.False(t, m.CanChangeLayerCompression("a completely unknown and quite possibly invalid MIME type"))
+}
+
+func TestSchema2Healthcheck(t *testing.T) {
+	configHealthcheck := &Schema2HealthConfig{
+		Test: []string{"CMD", "true"},
+	}
+	legacyHealthcheck := &Schema2HealthConfig{
+		Test: []string{"CMD", "false"},
+	}
+
+	tests := []struct {
+		name    string
+		blob    string
+		want    *Schema2HealthConfig
+		wantErr bool
+	}{
+		{
+			name: "config healthcheck",
+			blob: `{"config":{"Healthcheck":{"Test":["CMD","true"]}}}`,
+			want: configHealthcheck,
+		},
+		{
+			name: "config takes precedence",
+			blob: `{"config":{"Healthcheck":{"Test":["CMD","true"]}},
+					"container_config":{"Healthcheck":{"Test":["CMD","false"]}}}`,
+			want: configHealthcheck,
+		},
+		{
+			name: "legacy fallback",
+			blob: `{"container_config":{"Healthcheck":{"Test":["CMD","false"]}}}`,
+			want: legacyHealthcheck,
+		},
+		{
+			name: "no fallback when config exists",
+			blob: `{"config":{},"container_config":{"Healthcheck":{"Test":["CMD","false"]}}}`,
+		},
+		{
+			name: "no healthcheck",
+			blob: `{"config":{},"container_config":{}}`,
+		},
+		{
+			name:    "invalid JSON",
+			blob:    `{`,
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := Schema2HealthcheckFromConfigBlob([]byte(tt.blob))
+			if tt.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			if !assert.NoError(t, err) {
+				return
+			}
+			assert.Equal(t, tt.want, got)
+
+			var image Schema2V1Image
+			if !assert.NoError(t, json.Unmarshal([]byte(tt.blob), &image)) {
+				return
+			}
+			assert.Equal(t, tt.want, image.Healthcheck())
+		})
+	}
+
+	t.Run("nil image", func(t *testing.T) {
+		var image *Schema2V1Image
+		assert.Nil(t, image.Healthcheck())
+	})
 }
