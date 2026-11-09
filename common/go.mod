@@ -34,7 +34,7 @@ require (
 	github.com/sirupsen/logrus v1.10.2
 	github.com/skeema/knownhosts v1.3.3
 	github.com/spf13/cobra v1.10.2
-	github.com/spf13/pflag v1.0.10
+	github.com/spf13/pflag v1.1.0
 	github.com/stretchr/testify v1.12.1
 	github.com/vishvananda/netlink v1.3.1
 	go.etcd.io/bbolt v1.5.0
