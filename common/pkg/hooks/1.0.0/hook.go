@@ -44,8 +44,19 @@ func (hook *Hook) Validate(extensionStages []string) (err error) {
 		return errors.New("missing required property: hook.path")
 	}
 
-	if err := fileutils.Exists(hook.Hook.Path); err != nil {
-		return err
+	// startContainer hook paths should be resolved in the container namespace.
+	requireRuntimePath := len(hook.Stages) == 0
+	for _, stage := range hook.Stages {
+		if stage != "startContainer" {
+			requireRuntimePath = true
+			break
+		}
+	}
+
+	if requireRuntimePath {
+		if err := fileutils.Exists(hook.Hook.Path); err != nil {
+			return err
+		}
 	}
 
 	for key, value := range hook.When.Annotations {
