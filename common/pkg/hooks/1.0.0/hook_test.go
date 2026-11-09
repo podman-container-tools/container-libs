@@ -103,6 +103,46 @@ func TestUnknownHookPath(t *testing.T) {
 	}
 }
 
+func TestStartContainerPathNeedNotExistInRuntimeNamespace(t *testing.T) {
+	hook := Hook{
+		Version: "1.0.0",
+		Hook: rspec.Hook{
+			Path: filepath.Join(t.TempDir(), "exists-only-in-container"),
+		},
+		Stages: []string{"startContainer"},
+	}
+	if err := hook.Validate([]string{}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestMixedStagePathMustExistInRuntimeNamespace(t *testing.T) {
+	hook := Hook{
+		Version: "1.0.0",
+		Hook: rspec.Hook{
+			Path: filepath.Join(t.TempDir(), "exists-only-in-container"),
+		},
+		Stages: []string{"startContainer", "poststart"},
+	}
+	err := hook.Validate([]string{})
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected a not-exist error, got %v", err)
+	}
+}
+
+func TestStartContainerExtensionPathNeedNotExistInRuntimeNamespace(t *testing.T) {
+	hook := Hook{
+		Version: "1.0.0",
+		Hook: rspec.Hook{
+			Path: filepath.Join(t.TempDir(), "exists-only-in-container"),
+		},
+		Stages: []string{"startContainer"},
+	}
+	if err := hook.Validate([]string{"startContainer"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestNoStages(t *testing.T) {
 	hook := Hook{
 		Version: "1.0.0",
