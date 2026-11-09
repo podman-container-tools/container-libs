@@ -11,7 +11,7 @@ require (
 	github.com/docker/go-units v0.5.0
 	github.com/google/go-intervals v0.0.2
 	github.com/json-iterator/go v1.1.12
-	github.com/klauspost/compress v1.20.3
+	github.com/klauspost/compress v1.20.4
 	github.com/klauspost/pgzip v1.3.0
 	github.com/mattn/go-shellwords v1.0.16
 	github.com/mistifyio/go-zfs/v4 v4.0.0

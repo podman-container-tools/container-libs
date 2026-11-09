@@ -85,7 +85,7 @@ require (
 	github.com/gorilla/mux v1.8.1 // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
-	github.com/klauspost/compress v1.20.3 // indirect
+	github.com/klauspost/compress v1.20.4 // indirect
 	github.com/klauspost/pgzip v1.3.0 // indirect
 	github.com/kr/fs v0.1.0 // indirect
 	github.com/manifoldco/promptui v0.9.0 // indirect
