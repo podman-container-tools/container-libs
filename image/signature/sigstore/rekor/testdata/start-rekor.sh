@@ -11,8 +11,8 @@ set -e
 SUFFIX=${1:-default}
 
 REKOR_IMAGE=ghcr.io/sigstore/rekor/rekor-server:v1.3.10
-TRILLIAN_SIGNER_IMAGE=ghcr.io/sigstore/rekor/trillian_log_signer:v1.3.4
-TRILLIAN_SERVER_IMAGE=ghcr.io/sigstore/rekor/trillian_log_server:v1.3.4
+TRILLIAN_SIGNER_IMAGE=ghcr.io/sigstore/scaffolding/trillian_log_signer:v1.8.0
+TRILLIAN_SERVER_IMAGE=ghcr.io/sigstore/scaffolding/trillian_log_server:v1.8.0
 MYSQL_IMAGE=gcr.io/trillian-opensource-ci/db_server:v1.7.2
 
 POD_NAME=rekor-pod-$SUFFIX
