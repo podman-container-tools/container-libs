@@ -110,7 +110,7 @@
             "alg": "ES256"
          },
          "signature": "2MN5k06i8xkJhD5ay4yxAFK7tsZk58UznAZONxDplvQ5lZwbRS162OeBDjCb0Hk0IDyrLXtAfBDlY2Gzf6jrpw",
-         "protected": "eyJmb3JtYXRMZW5ndGgiOjEwODk1LCJmb3JtYXRUYWlsIjoiQ24wIiwidGltZSI6IjIwMTYtMTAtMTRUMTY6MTI6MDlaIn0"
+         "protected": "eyJmb3JtYXRMZW5ndGgiOjEwOTAwLCJmb3JtYXRUYWlsIjoiQ24wIiwidGltZSI6IjIwMTYtMTAtMTRUMTY6MTI6MDlaIn0"
       }
    ]
 }

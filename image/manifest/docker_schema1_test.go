@@ -69,13 +69,17 @@ func TestSchema1FromManifest(t *testing.T) {
 		_, err := Schema1FromManifest(m)
 		return err
 	}
+	// A signed manifest whose JWS payload does not match the body is rejected
+	testManifestFixturesAreRejected(t, parser, []string{"v2s1-mismatched-payload.manifest.json"})
 	// Schema mismatch is rejected
 	testManifestFixturesAreRejected(t, parser, []string{
 		"v2s2.manifest.json", "v2list.manifest.json",
 		"ociv1.manifest.json", "ociv1.image.index.json",
 	})
 	// Extra fields are rejected
-	testValidManifestWithExtraFieldsIsRejected(t, parser, validManifest, []string{"config", "layers", "manifests"})
+	unsignedManifest, err := os.ReadFile(filepath.Join("fixtures", "v2s1-unsigned.manifest.json"))
+	require.NoError(t, err)
+	testValidManifestWithExtraFieldsIsRejected(t, parser, unsignedManifest, []string{"config", "layers", "manifests"})
 }
 
 func TestSchema1Clone(t *testing.T) {

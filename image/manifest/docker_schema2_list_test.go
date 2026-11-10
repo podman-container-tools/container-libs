@@ -24,5 +24,5 @@ func TestSchema2ListFromManifest(t *testing.T) {
 		// Not "ociv1.image.index.json" yet, without validating mediaType the two are too similar to tell the difference.
 	})
 	// Extra fields are rejected
-	testValidManifestWithExtraFieldsIsRejected(t, parser, validManifest, []string{"config", "fsLayers", "history", "layers"})
+	testValidManifestWithExtraFieldsIsRejected(t, parser, validManifest, []string{"config", "fsLayers", "history", "layers", "signatures"})
 }
