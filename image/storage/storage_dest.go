@@ -820,7 +820,7 @@ func (s *storageImageDestination) computeMatchingDigest(m manifest.Manifest) (di
 
 	// We want to use the same ID for “the same” images, but without risking unwanted sharing / malicious image corruption.
 	//
-	// Traditionally that means the same ~config digest, as computed by m.ImageID;
+	// Traditionally that means the same ~config digest;
 	// but if we identify a layer by TOC, we verify the layer against neither the (compressed) blob digest in the manifest,
 	// nor against the config’s RootFS.DiffIDs. We don’t really want to do either, to allow partial layer pulls where we never see
 	// most of the data.
@@ -832,22 +832,18 @@ func (s *storageImageDestination) computeMatchingDigest(m manifest.Manifest) (di
 	//
 	// Note that it’s not 100% guaranteed that an image pulled by TOC uses an OCI manifest; consider
 	// (skopeo copy --format v2s2 docker://…/zstd-chunked-image containers-storage:… ). So this is not happening only in the OCI case above.
-	ordinaryImageID, err := m.ImageID(diffIDs)
+	ordinaryDigest, err := s.matchingDigest(diffIDs)
 	if err != nil {
 		return "", err
 	}
-	// ImageID returns only the hexadecimal portion of a digest; recover the full digest
-	// (and its algorithm) so that callers get a usable digest.Digest.  For OCI/Schema2
-	// images the algorithm is that of the configuration digest; for Schema1 it is canonical.
-	ordinaryDigest := digest.NewDigestFromEncoded(digest.Canonical, ordinaryImageID)
-	if configDigest := m.ConfigInfo().Digest; configDigest != "" {
-		ordinaryDigest = digest.NewDigestFromEncoded(configDigest.Algorithm(), ordinaryImageID)
+	if ordinaryDigest == "" {
+		return "", nil // The manifest type provides no content identity; the caller should use a random ID.
 	}
 	var tocIDInput strings.Builder
-	// ordinaryImageID is a digest of a config, which is a JSON value.
+	// ordinaryDigest is a digest of a config, which is a JSON value.
 	// To avoid the risk of collisions, start the input with @ so that the input is not a valid JSON.
 	tocIDInput.WriteString("@With TOC:")
-	tocIDInput.WriteString(ordinaryImageID)
+	tocIDInput.WriteString(ordinaryDigest.Encoded())
 	tocIDInput.WriteByte('|') // "|" can not be present in a digest, so this is an unambiguous separator.
 	hasLayerPulledByTOC := false
 	for i, li := range layerInfos {
@@ -868,8 +864,19 @@ func (s *storageImageDestination) computeMatchingDigest(m manifest.Manifest) (di
 		return ordinaryDigest, nil
 	}
 	tocImageID := digest.FromString(tocIDInput.String())
-	logrus.Debugf("Ordinary matching digest %s; a layer was looked up by TOC, so using matching digest %s", ordinaryImageID, tocImageID.Encoded())
+	logrus.Debugf("Ordinary matching digest %s; a layer was looked up by TOC, so using matching digest %s", ordinaryDigest, tocImageID.Encoded())
 	return tocImageID, nil
+}
+
+// matchingDigest returns a content-based identifier for the image being committed, using
+// the internal manifest abstractions so that the result is a full digest, not just a hex string.
+func (s *storageImageDestination) matchingDigest(diffIDs []digest.Digest) (digest.Digest, error) {
+	ctx := context.Background() // All the data is already in memory; there is nothing to cancel.
+	sourced, err := image.FromUnparsedImage(ctx, nil, image.UnparsedInstance(newUncommittedImageSource(s), nil))
+	if err != nil {
+		return "", fmt.Errorf("parsing image to be committed: %w", err)
+	}
+	return sourced.MatchingDigest(diffIDs)
 }
 
 // getConfigBlob exists only to let us retrieve the configuration blob so that the manifest package can dig
