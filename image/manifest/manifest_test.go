@@ -67,6 +67,11 @@ func TestDigest(t *testing.T) {
 	_, err = Digest(manifest)
 	assert.Error(t, err)
 
+	manifest, err = os.ReadFile("fixtures/v2s1-mismatched-payload.manifest.json")
+	require.NoError(t, err)
+	_, err = Digest(manifest)
+	assert.Error(t, err)
+
 	actualDigest, err := Digest([]byte{})
 	require.NoError(t, err)
 	assert.Equal(t, digest.Digest(digestSha256EmptyTar), actualDigest)
