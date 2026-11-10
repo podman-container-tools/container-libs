@@ -243,7 +243,30 @@ func Image(ctx context.Context, policyContext *signature.PolicyContext, destRef,
 	// only to allow gradually building the feature set.
 	// After c/image/copy consistently implements it, provide a public digest options API of some kind.
 	optionsCopy := *options
-	optionsCopy.digestOptions = digests.CanonicalDefault()
+	if env := os.Getenv("INTERNAL_UNSTABLE_DIGEST_FORCE"); env != "" {
+		d, err := digests.MustUse(digest.Algorithm(env))
+		if err != nil {
+			return nil, err
+		}
+		optionsCopy.digestOptions = d
+	} else {
+		d := digests.CanonicalDefault()
+		if env := os.Getenv("INTERNAL_UNSTABLE_DIGEST_PREFER"); env != "" {
+			d2, err := d.WithPreferred(digest.Algorithm(env))
+			if err != nil {
+				return nil, err
+			}
+			d = d2
+		}
+		if env := os.Getenv("INTERNAL_UNSTABLE_DIGEST_DEFAULT"); env != "" {
+			d2, err := d.WithDefault(digest.Algorithm(env))
+			if err != nil {
+				return nil, err
+			}
+			d = d2
+		}
+		optionsCopy.digestOptions = d
+	}
 	options = &optionsCopy
 
 	if err := validateImageListSelection(options.ImageListSelection); err != nil {
