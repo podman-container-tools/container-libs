@@ -38,11 +38,12 @@ func TestValidateUnambiguousManifestFormat(t *testing.T) {
 	}
 
 	fields := map[AllowedManifestFields]string{
-		AllowedFieldConfig:    "config",
-		AllowedFieldFSLayers:  "fsLayers",
-		AllowedFieldHistory:   "history",
-		AllowedFieldLayers:    "layers",
-		AllowedFieldManifests: "manifests",
+		AllowedFieldConfig:     "config",
+		AllowedFieldFSLayers:   "fsLayers",
+		AllowedFieldHistory:    "history",
+		AllowedFieldLayers:     "layers",
+		AllowedFieldManifests:  "manifests",
+		AllowedFieldSignatures: "signatures",
 	}
 	// Ensure this test covers all defined AllowedManifestFields values
 	allFields := AllowedManifestFields(0)
