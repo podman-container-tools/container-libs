@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.podman.io/image/v5/internal/blobinfocache"
+	"go.podman.io/image/v5/internal/digests"
 	"go.podman.io/image/v5/internal/imagedestination"
 	"go.podman.io/image/v5/internal/private"
 	"go.podman.io/image/v5/pkg/blobinfocache/memory"
@@ -152,8 +153,10 @@ func TestDirImageDestinationPutBlobWithOptions(t *testing.T) {
 		}
 
 		uploaded, err := dest.PutBlobWithOptions(context.Background(), bytes.NewReader(contents), types.BlobInfo{Digest: inputDigest, Size: int64(len(contents))}, private.PutBlobOptions{
-			Cache:    cache,
-			IsConfig: false,
+			Cache:                    cache,
+			IsConfig:                 false,
+			Digests:                  digests.CanonicalDefault(),
+			CannotChangeDigestReason: "",
 		})
 		require.NoError(t, err)
 		require.Equal(t, int64(len(contents)), uploaded.Size)
