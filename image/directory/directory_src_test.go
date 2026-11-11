@@ -35,10 +35,13 @@ func TestDirImageSourceGetBlob(t *testing.T) {
 	cache := memory.New()
 
 	blobs := []struct {
-		blob   []byte
-		digest digest.Digest
+		algorithm digest.Algorithm
+		blob      []byte
+		digest    digest.Digest
 	}{
-		{[]byte("canonical"), ""},
+		{digest.Canonical, []byte("canonical"), ""},
+		{digest.SHA256, []byte("sha256"), ""},
+		{digest.SHA512, []byte("sha512"), ""},
 	}
 
 	dest, err := ref.NewImageDestination(context.Background(), nil)
@@ -46,7 +49,7 @@ func TestDirImageSourceGetBlob(t *testing.T) {
 	defer dest.Close()
 	for i := range blobs {
 		blob := &blobs[i]
-		blobs[i].digest = digest.Canonical.FromBytes(blob.blob)
+		blobs[i].digest = blob.algorithm.FromBytes(blob.blob)
 
 		uploaded, err := dest.PutBlob(context.Background(), bytes.NewReader(blob.blob), types.BlobInfo{Digest: blob.digest, Size: int64(len(blob.blob))}, cache, false)
 		require.NoError(t, err)
