@@ -872,7 +872,7 @@ func (s *storageImageDestination) computeMatchingDigest(m manifest.Manifest) (di
 // the internal manifest abstractions so that the result is a full digest, not just a hex string.
 func (s *storageImageDestination) matchingDigest(diffIDs []digest.Digest) (digest.Digest, error) {
 	ctx := context.Background() // All the data is already in memory; there is nothing to cancel.
-	sourced, err := image.FromUnparsedImage(ctx, nil, image.UnparsedInstance(newUncommittedImageSource(s), nil))
+	sourced, err := image.FromUnparsedImage(ctx, nil, image.UnparsedInstance(newUncommittedImageSource(s), &s.manifestDigest))
 	if err != nil {
 		return "", fmt.Errorf("parsing image to be committed: %w", err)
 	}
