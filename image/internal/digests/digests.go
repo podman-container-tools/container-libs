@@ -52,6 +52,8 @@ func MustUse(algo digest.Algorithm) (Options, error) {
 
 // WithPreferred returns a copy of o with a “preferred” algorithm set to algo.
 // The preferred algorithm is used whenever possible (but if there is a strict requirement to use something else, it will be overridden).
+// FIXME: It doesn’t make sense to combine this with WithDefault; WithPreferred will always win;
+// so, the API can be simplified.
 func (o Options) WithPreferred(algo digest.Algorithm) (Options, error) {
 	if err := o.ensureInitialized(); err != nil {
 		return Options{}, err
@@ -69,6 +71,8 @@ func (o Options) WithPreferred(algo digest.Algorithm) (Options, error) {
 
 // WithDefault returns a copy of o with a “default” algorithm set to algo.
 // The default algorithm is used if there is no reason to use anything else (e.g. when there is no pre-existing digest).
+// FIXME: It doesn’t make sense to combine this with WithPreferred; WithPreferred will always win;
+// so, the API can be simplified.
 func (o Options) WithDefault(algo digest.Algorithm) (Options, error) {
 	if err := o.ensureInitialized(); err != nil {
 		return Options{}, err
