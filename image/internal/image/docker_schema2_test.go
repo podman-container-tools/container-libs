@@ -316,18 +316,18 @@ func TestManifestSchema2Inspect(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestManifestSchema2UpdatedImageNeedsLayerDiffIDs(t *testing.T) {
+func TestManifestSchema2EditedImageNeedsLayerDiffIDs(t *testing.T) {
 	for _, m := range []genericManifest{
 		manifestSchema2FromFixture(t, mocks.ForbiddenImageSource{}, "schema2.json", false),
 		manifestSchema2FromComponentsLikeFixture(nil),
 	} {
-		assert.False(t, m.UpdatedImageNeedsLayerDiffIDs(types.ManifestUpdateOptions{
+		assert.False(t, m.EditedImageNeedsLayerDiffIDs(types.ManifestUpdateOptions{
 			ManifestMIMEType: manifest.DockerV2Schema1SignedMediaType,
 		}))
 	}
 }
 
-// schema2ImageSource is plausible enough for schema conversions in manifestSchema2.UpdatedImage() to work.
+// schema2ImageSource is plausible enough for schema conversions in manifestSchema2.editedImage() to work.
 type schema2ImageSource struct {
 	configBlobImageSource
 	ref reference.Named
@@ -456,18 +456,18 @@ func modifiedLayerInfos(t *testing.T, input []types.BlobInfo) ([]types.BlobInfo,
 	return modified, copy
 }
 
-func TestManifestSchema2UpdatedImage(t *testing.T) {
+func TestManifestSchema2EditedImage(t *testing.T) {
 	originalSrc := newSchema2ImageSource(t, "httpd:latest")
 	original := manifestSchema2FromFixture(t, originalSrc, "schema2.json", false)
 
 	// LayerInfos:
 	layerInfos := append(slices.Clone(original.LayerInfos()[1:]), original.LayerInfos()[0])
-	res, err := original.UpdatedImage(context.Background(), types.ManifestUpdateOptions{
+	res, err := original.editedImage(context.Background(), types.ManifestUpdateOptions{
 		LayerInfos: layerInfos,
 	})
 	require.NoError(t, err)
 	assert.Equal(t, layerInfos, res.LayerInfos())
-	_, err = original.UpdatedImage(context.Background(), types.ManifestUpdateOptions{
+	_, err = original.editedImage(context.Background(), types.ManifestUpdateOptions{
 		LayerInfos: append(layerInfos, layerInfos[0]),
 	})
 	assert.Error(t, err)
@@ -476,7 +476,7 @@ func TestManifestSchema2UpdatedImage(t *testing.T) {
 	// … is ignored
 	embeddedRef, err := reference.ParseNormalizedNamed("busybox")
 	require.NoError(t, err)
-	res, err = original.UpdatedImage(context.Background(), types.ManifestUpdateOptions{
+	res, err = original.editedImage(context.Background(), types.ManifestUpdateOptions{
 		EmbeddedDockerReference: embeddedRef,
 	})
 	require.NoError(t, err)
@@ -491,7 +491,7 @@ func TestManifestSchema2UpdatedImage(t *testing.T) {
 		manifest.DockerV2Schema1MediaType,
 		manifest.DockerV2Schema1SignedMediaType,
 	} {
-		_, err = original.UpdatedImage(context.Background(), types.ManifestUpdateOptions{
+		_, err = original.editedImage(context.Background(), types.ManifestUpdateOptions{
 			ManifestMIMEType: mime,
 			InformationOnly: types.ManifestUpdateInformation{
 				Destination: &memoryImageDest{ref: originalSrc.ref},
@@ -503,7 +503,7 @@ func TestManifestSchema2UpdatedImage(t *testing.T) {
 		manifest.DockerV2Schema2MediaType, // This indicates a confused caller, not a no-op
 		"this is invalid",
 	} {
-		_, err = original.UpdatedImage(context.Background(), types.ManifestUpdateOptions{
+		_, err = original.editedImage(context.Background(), types.ManifestUpdateOptions{
 			ManifestMIMEType: mime,
 		})
 		assert.Error(t, err, mime)
@@ -521,7 +521,7 @@ func TestManifestSchema2UpdatedImage(t *testing.T) {
 func TestConvertToManifestOCI(t *testing.T) {
 	originalSrc := newSchema2ImageSource(t, "httpd-copy:latest")
 	original := manifestSchema2FromFixture(t, originalSrc, "schema2.json", false)
-	res, err := original.UpdatedImage(context.Background(), types.ManifestUpdateOptions{
+	res, err := original.editedImage(context.Background(), types.ManifestUpdateOptions{
 		ManifestMIMEType: imgspecv1.MediaTypeImageManifest,
 	})
 	require.NoError(t, err)
@@ -536,7 +536,7 @@ func TestConvertToManifestOCI(t *testing.T) {
 	assertJSONEqualsFixture(t, convertedConfig, "schema2-to-oci1-config.json")
 
 	// Conversion to OCI with encryption is possible.
-	res, err = original.UpdatedImage(context.Background(), types.ManifestUpdateOptions{
+	res, err = original.editedImage(context.Background(), types.ManifestUpdateOptions{
 		LayerInfos:       layerInfosWithCryptoOperation(original.LayerInfos(), types.Encrypt),
 		ManifestMIMEType: imgspecv1.MediaTypeImageManifest,
 	})
@@ -579,7 +579,7 @@ func TestConvertToManifestOCI(t *testing.T) {
 func TestConvertToManifestOCIAllMediaTypes(t *testing.T) {
 	originalSrc := newSchema2ImageSource(t, "httpd-copy:latest")
 	original := manifestSchema2FromFixture(t, originalSrc, "schema2-all-media-types.json", false)
-	res, err := original.UpdatedImage(context.Background(), types.ManifestUpdateOptions{
+	res, err := original.editedImage(context.Background(), types.ManifestUpdateOptions{
 		ManifestMIMEType: imgspecv1.MediaTypeImageManifest,
 	})
 	require.NoError(t, err)
@@ -605,7 +605,7 @@ func TestConvertToManifestSchema1(t *testing.T) {
 	memoryDestInfo := types.ManifestUpdateInformation{
 		Destination: memoryDest,
 	}
-	res, err := original.UpdatedImage(context.Background(), types.ManifestUpdateOptions{
+	res, err := original.editedImage(context.Background(), types.ManifestUpdateOptions{
 		ManifestMIMEType: manifest.DockerV2Schema1SignedMediaType,
 		InformationOnly:  memoryDestInfo,
 	})
@@ -625,7 +625,7 @@ func TestConvertToManifestSchema1(t *testing.T) {
 	// Conversion to schema1 together with changing LayerInfos works as expected (which requires
 	// handling schema1 empty layers):
 	updatedLayers, updatedLayersCopy := modifiedLayerInfos(t, original.LayerInfos())
-	res, err = original.UpdatedImage(context.Background(), types.ManifestUpdateOptions{
+	res, err = original.editedImage(context.Background(), types.ManifestUpdateOptions{
 		LayerInfos:       updatedLayers,
 		ManifestMIMEType: manifest.DockerV2Schema1SignedMediaType,
 		InformationOnly:  memoryDestInfo,
@@ -657,7 +657,7 @@ func TestConvertToManifestSchema1(t *testing.T) {
 	}, s1Manifest.LayerInfos())
 
 	// Conversion to schema1 with encryption fails
-	_, err = original.UpdatedImage(context.Background(), types.ManifestUpdateOptions{
+	_, err = original.editedImage(context.Background(), types.ManifestUpdateOptions{
 		LayerInfos:       layerInfosWithCryptoOperation(original.LayerInfos(), types.Encrypt),
 		ManifestMIMEType: manifest.DockerV2Schema1SignedMediaType,
 		InformationOnly:  memoryDestInfo,
@@ -670,7 +670,7 @@ func TestConvertToManifestSchema1(t *testing.T) {
 func TestConvertSchema2ToManifestOCIWithAnnotations(t *testing.T) {
 	// Test when converting an image from schema 2 (which doesn't support certain fields like
 	// URLs, annotations, etc.) to an OCI image (which supports those fields),
-	// that UpdatedImage propagates the features to the converted manifest.
+	// that editedImage propagates the features to the converted manifest.
 	originalSrc := newSchema2ImageSource(t, "httpd-copy:latest")
 	original := manifestSchema2FromFixture(t, originalSrc, "schema2.json", false)
 	layerInfoOverwrites := []types.BlobInfo{
@@ -706,7 +706,7 @@ func TestConvertSchema2ToManifestOCIWithAnnotations(t *testing.T) {
 			MediaType: imgspecv1.MediaTypeImageLayerGzip,
 		},
 	}
-	res, err := original.UpdatedImage(context.Background(), types.ManifestUpdateOptions{
+	res, err := original.editedImage(context.Background(), types.ManifestUpdateOptions{
 		ManifestMIMEType: imgspecv1.MediaTypeImageManifest,
 		LayerInfos:       layerInfoOverwrites,
 	})
@@ -716,7 +716,7 @@ func TestConvertSchema2ToManifestOCIWithAnnotations(t *testing.T) {
 	// Doing this with schema2 should fail
 	originalSrc = newSchema2ImageSource(t, "httpd-copy:latest")
 	original = manifestSchema2FromFixture(t, originalSrc, "schema2.json", false)
-	res, err = original.UpdatedImage(context.Background(), types.ManifestUpdateOptions{
+	res, err = original.editedImage(context.Background(), types.ManifestUpdateOptions{
 		ManifestMIMEType: "",
 		LayerInfos:       layerInfoOverwrites,
 	})

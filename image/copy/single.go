@@ -204,14 +204,14 @@ func (c *copier) copySingleImage(ctx context.Context, unparsedImage *image.Unpar
 	}
 	// We set up this part of ic.manifestUpdates quite early, not just around the
 	// code that calls copyUpdatedConfigAndManifest, so that other parts of the copy code
-	// (e.g. the UpdatedImageNeedsLayerDiffIDs check just below) can make decisions based
+	// (e.g. the EditedImageNeedsLayerDiffIDs check just below) can make decisions based
 	// on the expected destination format.
 	if ic.manifestConversionPlan.preferredMIMETypeNeedsConversion {
 		ic.manifestUpdates.ManifestMIMEType = ic.manifestConversionPlan.preferredMIMEType
 	}
 
-	// If src.UpdatedImageNeedsLayerDiffIDs(ic.manifestUpdates) will be true, it needs to be true by the time we get here.
-	ic.diffIDsAreNeeded = src.UpdatedImageNeedsLayerDiffIDs(*ic.manifestUpdates)
+	// If src.EditedImageNeedsLayerDiffIDs(ic.manifestUpdates) will be true, it needs to be true by the time we get here.
+	ic.diffIDsAreNeeded = src.EditedImageNeedsLayerDiffIDs(*ic.manifestUpdates)
 
 	// If enabled, fetch and compare the destination's manifest. And as an optimization skip updating the destination iff equal
 	if c.options.OptimizeDestinationImageAlreadyExists {
@@ -566,25 +566,27 @@ func layerDigestsDiffer(a, b []types.BlobInfo) bool {
 // stores the resulting config and manifest to the destination, and returns the stored manifest
 // and its digest.
 func (ic *imageCopier) copyUpdatedConfigAndManifest(ctx context.Context, instanceDigest *digest.Digest) ([]byte, digest.Digest, error) {
-	var pendingImage types.Image = ic.src
+	var pendingImage types.Image
 	if !ic.noPendingManifestUpdates() {
 		if ic.cannotModifyManifestReason != "" {
 			return nil, "", fmt.Errorf("Internal error: copy needs an updated manifest but that was known to be forbidden: %q", ic.cannotModifyManifestReason)
 		}
-		if !ic.diffIDsAreNeeded && ic.src.UpdatedImageNeedsLayerDiffIDs(*ic.manifestUpdates) {
+		if !ic.diffIDsAreNeeded && ic.src.EditedImageNeedsLayerDiffIDs(*ic.manifestUpdates) {
 			// We have set ic.diffIDsAreNeeded based on the preferred MIME type returned by determineManifestConversion.
 			// So, this can only happen if we are trying to upload using one of the other MIME type candidates.
-			// Because UpdatedImageNeedsLayerDiffIDs is true only when converting from s1 to s2, this case should only arise
+			// Because EditedImageNeedsLayerDiffIDs is true only when converting from s1 to s2, this case should only arise
 			// when ic.c.dest.SupportedManifestMIMETypes() includes both s1 and s2, the upload using s1 failed, and we are now trying s2.
 			// Supposedly s2-only registries do not exist or are extremely rare, so failing with this error message is good enough for now.
 			// If handling such registries turns out to be necessary, we could compute ic.diffIDsAreNeeded based on the full list of manifest MIME type candidates.
 			return nil, "", fmt.Errorf("Can not convert image to %s, preparing DiffIDs for this case is not supported", ic.manifestUpdates.ManifestMIMEType)
 		}
-		pi, err := ic.src.UpdatedImage(ctx, *ic.manifestUpdates)
+		pi, err := image.EditedImage(ctx, ic.src, *ic.manifestUpdates)
 		if err != nil {
 			return nil, "", fmt.Errorf("creating an updated image manifest: %w", err)
 		}
 		pendingImage = pi
+	} else {
+		pendingImage = ic.src
 	}
 	man, _, err := pendingImage.Manifest(ctx)
 	if err != nil {
@@ -666,7 +668,7 @@ type diffIDResult struct {
 // for types.BlobInfo.
 func compressionEditsFromBlobInfo(srcInfo types.BlobInfo) (types.LayerCompression, *compressiontypes.Algorithm, error) {
 	// This MIME type → compression mapping belongs in manifest-specific code in our manifest
-	// package (but we should preferably replace/change UpdatedImage instead of productizing
+	// package (but we should preferably replace/change image.EditedImage instead of productizing
 	// this workaround).
 	switch srcInfo.MediaType {
 	case manifest.DockerV2Schema2LayerMediaType, imgspecv1.MediaTypeImageLayerGzip:
@@ -694,10 +696,11 @@ func (ic *imageCopier) copyLayer(ctx context.Context, srcInfo types.BlobInfo, to
 	// If the srcInfo doesn't contain compression information, try to compute it from the
 	// MediaType, which was either read from a manifest by way of LayerInfos() or constructed
 	// by LayerInfosForCopy(), if it was supplied at all.  If we succeed in copying the blob,
-	// the BlobInfo we return will be passed to UpdatedImage() and then to UpdateLayerInfos(),
+	// the BlobInfo we return will be passed to image.EditedImage() and then to UpdateLayerInfos(),
 	// which uses the compression information to compute the updated MediaType values.
-	// (Sadly UpdatedImage() is documented to not update MediaTypes from
-	//  ManifestUpdateOptions.LayerInfos[].MediaType, so we are doing it indirectly.)
+	// (Sadly the public UpdatedImage() is documented to not update MediaTypes from
+	// ManifestUpdateOptions.LayerInfos[].MediaType, and image.EditedImage() currently matches that,
+	// so we are doing it indirectly.)
 	if srcInfo.CompressionOperation == types.PreserveOriginal && srcInfo.CompressionAlgorithm == nil {
 		op, algo, err := compressionEditsFromBlobInfo(srcInfo)
 		if err != nil {

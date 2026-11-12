@@ -36,13 +36,6 @@ type genericManifest interface {
 	EmbeddedDockerReferenceConflicts(ref reference.Named) bool
 	// Inspect returns various information for (skopeo inspect) parsed from the manifest and configuration.
 	Inspect(context.Context) (*types.ImageInspectInfo, error)
-	// UpdatedImageNeedsLayerDiffIDs returns true iff UpdatedImage(options) needs InformationOnly.LayerDiffIDs.
-	// This is a horribly specific interface, but computing InformationOnly.LayerDiffIDs can be very expensive to compute
-	// (most importantly it forces us to download the full layers even if they are already present at the destination).
-	UpdatedImageNeedsLayerDiffIDs(options types.ManifestUpdateOptions) bool
-	// UpdatedImage returns a types.Image modified according to options.
-	// This does not change the state of the original Image object.
-	UpdatedImage(ctx context.Context, options types.ManifestUpdateOptions) (types.Image, error)
 	// SupportsEncryption returns if encryption is supported for the manifest type
 	//
 	// Deprecated: Initially used to determine if a manifest can be copied from a source manifest type since
@@ -56,9 +49,29 @@ type genericManifest interface {
 	// CanChangeLayerCompression returns true if we can compress/decompress layers with mimeType in the current image
 	// (and the code can handle that).
 	// NOTE: Even if this returns true, the relevant format might not accept all compression algorithms; the set of accepted
-	// algorithms depends not on the current format, but possibly on the target of a conversion (if UpdatedImage converts
+	// algorithms depends not on the current format, but possibly on the target of a conversion (if EditedImage converts
 	// to a different manifest format).
 	CanChangeLayerCompression(mimeType string) bool
+	// EditedImageNeedsLayerDiffIDs returns true iff EditedImage(options) needs InformationOnly.LayerDiffIDs.
+	// This is a horribly specific interface, but computing InformationOnly.LayerDiffIDs can be very expensive to compute
+	// (most importantly it forces us to download the full layers even if they are already present at the destination).
+	EditedImageNeedsLayerDiffIDs(options types.ManifestUpdateOptions) bool
+	// editedImage FIXME
+	editedImage(ctx context.Context, options types.ManifestUpdateOptions) (types.Image, error)
+}
+
+// EditedImage FIXME
+func EditedImage(ctx context.Context, image genericManifest, options types.ManifestUpdateOptions) (types.Image, error) {
+	// FIXME: Is this structure with an external function necessary?!
+	// This returns genericManifest because we have two kinds of callers:
+	// editedImage returns genericManifest because we have two kinds of callers:
+	// - Internally, copy.Image only needs the narrow interface of EditableImage,
+	//   but it needs SourcedImage to conform to EditableImage as well.
+	// - External callers of UpdatedImage expect a full types.Image
+	// We could define an internal superset of types.Image that satisfies both, but nothing
+	// really needs that, and ultimately the outcome of an image edit is always a memoryImage;
+	// so we can factor the creation of the memoryImage out of the schema-specific implementations.
+	return image.editedImage(ctx, options)
 }
 
 // manifestInstanceFromBlob returns a genericManifest implementation for (manblob, mt) in src.
@@ -117,5 +130,5 @@ func convertManifestIfRequiredWithUpdate(ctx context.Context, options types.Mani
 	convertedImage := memoryImageFromManifest(convertedManifest)
 
 	optionsCopy.ManifestMIMEType = ""
-	return convertedImage.UpdatedImage(ctx, optionsCopy)
+	return convertedImage.editedImage(ctx, optionsCopy)
 }
