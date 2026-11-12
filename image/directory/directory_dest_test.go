@@ -3,6 +3,9 @@ package directory
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -10,9 +13,14 @@ import (
 	"github.com/opencontainers/go-digest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.podman.io/image/v5/internal/blobinfocache"
+	"go.podman.io/image/v5/internal/imagedestination"
+	"go.podman.io/image/v5/internal/private"
 	"go.podman.io/image/v5/pkg/blobinfocache/memory"
 	"go.podman.io/image/v5/types"
 )
+
+var _ private.ImageDestination = (*dirImageDestination)(nil)
 
 func TestVersionAssignment(t *testing.T) {
 	for _, contentType := range []struct {
@@ -96,4 +104,120 @@ func TestVersionAssignment(t *testing.T) {
 			})
 		}
 	}
+}
+
+func TestDirImageDestinationReference(t *testing.T) {
+	ref, tmpDir := refToTempDir(t)
+
+	dest, err := ref.NewImageDestination(context.Background(), nil)
+	require.NoError(t, err)
+	defer dest.Close()
+	ref2 := dest.Reference()
+	assert.Equal(t, tmpDir, ref2.StringWithinTransport())
+}
+
+// readerFromFunc allows implementing Reader by any function, e.g. a closure.
+type readerFromFunc func([]byte) (int, error)
+
+func (fn readerFromFunc) Read(p []byte) (int, error) {
+	return fn(p)
+}
+
+func TestDirImageDestinationPutBlobWithOptions(t *testing.T) {
+	ref, _ := refToTempDir(t)
+	cache := blobinfocache.FromBlobInfoCache(memory.New())
+
+	blobContents := func(i int) []byte {
+		return fmt.Appendf(nil, "blob-content-%d", i)
+	}
+	blobs := []struct {
+		inputDigestAlgorithm digest.Algorithm // "" if no input digest
+	}{
+		{digest.SHA256}, // caller-provided digest
+		{""},            // unknown digest
+	}
+
+	dest_, err := ref.NewImageDestination(context.Background(), nil)
+	require.NoError(t, err)
+	defer dest_.Close()
+	dest := imagedestination.FromPublic(dest_)
+	assert.Equal(t, types.PreserveOriginal, dest.DesiredLayerCompression())
+
+	blobDigests := make([]digest.Digest, len(blobs))
+	for i, blob := range blobs {
+		contents := blobContents(i)
+		inputDigest := digest.Digest("")
+		if blob.inputDigestAlgorithm != "" {
+			inputDigest = blob.inputDigestAlgorithm.FromBytes(contents)
+		}
+
+		uploaded, err := dest.PutBlobWithOptions(context.Background(), bytes.NewReader(contents), types.BlobInfo{Digest: inputDigest, Size: int64(len(contents))}, private.PutBlobOptions{
+			Cache:    cache,
+			IsConfig: false,
+		})
+		require.NoError(t, err)
+		require.Equal(t, int64(len(contents)), uploaded.Size)
+		if inputDigest != "" {
+			assert.Equal(t, inputDigest, uploaded.Digest)
+		}
+		blobDigests[i] = uploaded.Digest
+	}
+	err = dest.Commit(context.Background(), nil) // nil unparsedToplevel is invalid, we don’t currently use the value
+	require.NoError(t, err)
+
+	src, err := ref.NewImageSource(context.Background(), nil)
+	require.NoError(t, err)
+	defer src.Close()
+	for i := range blobs {
+		contents := blobContents(i)
+
+		rc, size, err := src.GetBlob(context.Background(), types.BlobInfo{Digest: blobDigests[i], Size: int64(len(contents))}, cache)
+		require.NoError(t, err)
+		defer rc.Close()
+		b, err := io.ReadAll(rc)
+		require.NoError(t, err)
+		assert.Equal(t, contents, b)
+		assert.Equal(t, int64(len(contents)), size)
+	}
+
+	t.Run("digest verification failure", func(t *testing.T) {
+		const digestErrorString = "Simulated digest error"
+		const blobDigest = digest.Digest("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+
+		ref, _ := refToTempDir(t)
+		dirRef, ok := ref.(dirReference)
+		require.True(t, ok)
+		blobPath, err := dirRef.layerPath(blobDigest) // The file at blobPath must never be created until we validate the digest.
+		require.NoError(t, err)
+		cache := memory.New()
+
+		firstRead := true
+		reader := readerFromFunc(func(p []byte) (int, error) {
+			_, err := os.Lstat(blobPath)
+			require.Error(t, err)
+			require.True(t, os.IsNotExist(err))
+			if firstRead {
+				if len(p) > 0 {
+					firstRead = false
+				}
+				for i := range p {
+					p[i] = 0xAA
+				}
+				return len(p), nil
+			}
+			return 0, errors.New(digestErrorString)
+		})
+
+		dest, err := ref.NewImageDestination(context.Background(), nil)
+		require.NoError(t, err)
+		defer dest.Close()
+		_, err = dest.PutBlob(context.Background(), reader, types.BlobInfo{Digest: blobDigest, Size: -1}, cache, false)
+		assert.ErrorContains(t, err, digestErrorString)
+		err = dest.Commit(context.Background(), nil) // nil unparsedToplevel is invalid, we don’t currently use the value
+		assert.NoError(t, err)
+
+		_, err = os.Lstat(blobPath)
+		require.Error(t, err)
+		require.True(t, os.IsNotExist(err))
+	})
 }
