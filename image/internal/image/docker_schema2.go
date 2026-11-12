@@ -156,11 +156,20 @@ func (m *manifestSchema2) UpdatedImageNeedsLayerDiffIDs(options types.ManifestUp
 }
 
 // UpdatedImage returns a types.Image modified according to options.
+// Everything in options.InformationOnly should be provided, other fields should be set only if a modification is desired.
 // This does not change the state of the original Image object.
-// The returned error will be a manifest.ManifestLayerCompressionIncompatibilityError
-// if the CompressionOperation and CompressionAlgorithm specified in one or more
-// options.LayerInfos items is anything other than gzip.
+// The returned error will be a manifest.ManifestLayerCompressionIncompatibilityError if
+// manifests of type options.ManifestMIMEType can not include layers that are compressed
+// in accordance with the CompressionOperation and CompressionAlgorithm specified in one
+// or more options.LayerInfos items, though retrying with a different
+// options.ManifestMIMEType or with different CompressionOperation+CompressionAlgorithm
+// values might succeed.
 func (m *manifestSchema2) UpdatedImage(ctx context.Context, options types.ManifestUpdateOptions) (types.Image, error) {
+	return m.UpdatedImageInternal(ctx, options)
+}
+
+// UpdatedImageInternal FIXME
+func (m *manifestSchema2) UpdatedImageInternal(ctx context.Context, options types.ManifestUpdateOptions) (types.Image, error) {
 	copy := manifestSchema2{ // NOTE: This is not a deep copy, it still shares slices etc.
 		src:        m.src,
 		configBlob: m.configBlob,

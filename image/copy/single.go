@@ -577,7 +577,7 @@ func (ic *imageCopier) copyUpdatedConfigAndManifest(ctx context.Context, instanc
 			// If handling such registries turns out to be necessary, we could compute ic.diffIDsAreNeeded based on the full list of manifest MIME type candidates.
 			return nil, "", fmt.Errorf("Can not convert image to %s, preparing DiffIDs for this case is not supported", ic.manifestUpdates.ManifestMIMEType)
 		}
-		pi, err := ic.src.UpdatedImage(ctx, *ic.manifestUpdates)
+		pi, err := ic.src.UpdatedImageInternal(ctx, *ic.manifestUpdates)
 		if err != nil {
 			return nil, "", fmt.Errorf("creating an updated image manifest: %w", err)
 		}

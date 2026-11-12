@@ -59,6 +59,8 @@ type genericManifest interface {
 	// algorithms depends not on the current format, but possibly on the target of a conversion (if UpdatedImage converts
 	// to a different manifest format).
 	CanChangeLayerCompression(mimeType string) bool
+	// UpdatedImageInternal FIXME
+	UpdatedImageInternal(ctx context.Context, options types.ManifestUpdateOptions) (types.Image, error)
 }
 
 // manifestInstanceFromBlob returns a genericManifest implementation for (manblob, mt) in src.
@@ -117,5 +119,5 @@ func convertManifestIfRequiredWithUpdate(ctx context.Context, options types.Mani
 	convertedImage := memoryImageFromManifest(convertedManifest)
 
 	optionsCopy.ManifestMIMEType = ""
-	return convertedImage.UpdatedImage(ctx, optionsCopy)
+	return convertedImage.UpdatedImageInternal(ctx, optionsCopy)
 }

@@ -18,7 +18,7 @@ type memoryImage struct {
 	serializedManifest []byte // A private cache for Manifest()
 }
 
-func memoryImageFromManifest(m genericManifest) types.Image {
+func memoryImageFromManifest(m genericManifest) *memoryImage {
 	return &memoryImage{
 		genericManifest:    m,
 		serializedManifest: nil,
