@@ -74,16 +74,12 @@ func NewArtifactStore(storePath string, sc *types.SystemContext) (*ArtifactStore
 		return nil, err
 	}
 	artifactStore.lock = lock
-	// if the index file is not present we need to create an empty one
-	// Do so after the lock to try and prevent races around store creation.
-	if err := fileutils.Exists(artifactStore.indexPath()); err != nil && errors.Is(err, os.ErrNotExist) {
-		if createErr := artifactStore.createEmptyManifest(); createErr != nil {
-			return nil, createErr
-		}
-	}
-
 	artifactStore.lock.Lock()
 	defer artifactStore.lock.Unlock()
+
+	if err := artifactStore.ensureEmptyIndex(); err != nil {
+		return nil, err
+	}
 	if err := artifactStore.removeUnnamedArtifacts(context.Background()); err != nil {
 		return nil, err
 	}
@@ -1055,9 +1051,15 @@ func copyTrustedImageBlobToTarStream(ctx context.Context, imgSrc types.ImageSour
 	return nil
 }
 
-func (as *ArtifactStore) createEmptyManifest() error {
-	as.lock.Lock()
-	defer as.lock.Unlock()
+// ensureEmptyIndex creates index.json when it is missing.
+// Note: must be called while holding the store lock.
+func (as *ArtifactStore) ensureEmptyIndex() error {
+	if err := fileutils.Exists(as.indexPath()); err == nil {
+		return nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+
 	index := specV1.Index{
 		MediaType: specV1.MediaTypeImageIndex,
 		Versioned: specs.Versioned{SchemaVersion: ManifestSchemaVersion},
