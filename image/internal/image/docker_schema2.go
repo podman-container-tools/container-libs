@@ -149,19 +149,15 @@ func (m *manifestSchema2) Inspect(ctx context.Context) (*types.ImageInspectInfo,
 	return m.m.Inspect(getter)
 }
 
-// UpdatedImageNeedsLayerDiffIDs returns true iff UpdatedImage(options) needs InformationOnly.LayerDiffIDs.
+// EditedImageNeedsLayerDiffIDs returns true iff EditedImage(options) needs InformationOnly.LayerDiffIDs.
 // This is a horribly specific interface, but computing InformationOnly.LayerDiffIDs can be very expensive to compute
 // (most importantly it forces us to download the full layers even if they are already present at the destination).
-func (m *manifestSchema2) UpdatedImageNeedsLayerDiffIDs(options types.ManifestUpdateOptions) bool {
+func (m *manifestSchema2) EditedImageNeedsLayerDiffIDs(options types.ManifestUpdateOptions) bool {
 	return false
 }
 
-// UpdatedImage returns a types.Image modified according to options.
-// This does not change the state of the original Image object.
-// The returned error will be a manifest.ManifestLayerCompressionIncompatibilityError
-// if the CompressionOperation and CompressionAlgorithm specified in one or more
-// options.LayerInfos items is anything other than gzip.
-func (m *manifestSchema2) UpdatedImage(ctx context.Context, options types.ManifestUpdateOptions) (types.Image, error) {
+// editedImage FIXME
+func (m *manifestSchema2) editedImage(ctx context.Context, options types.ManifestUpdateOptions) (types.Image, error) {
 	copy := manifestSchema2{ // NOTE: This is not a deep copy, it still shares slices etc.
 		src:        m.src,
 		configBlob: m.configBlob,
@@ -408,7 +404,7 @@ func (m *manifestSchema2) SupportsEncryption(context.Context) bool {
 // CanChangeLayerCompression returns true if we can compress/decompress layers with mimeType in the current image
 // (and the code can handle that).
 // NOTE: Even if this returns true, the relevant format might not accept all compression algorithms; the set of accepted
-// algorithms depends not on the current format, but possibly on the target of a conversion (if UpdatedImage converts
+// algorithms depends not on the current format, but possibly on the target of a conversion (if EditedImage converts
 // to a different manifest format).
 func (m *manifestSchema2) CanChangeLayerCompression(mimeType string) bool {
 	return m.m.CanChangeLayerCompression(mimeType)

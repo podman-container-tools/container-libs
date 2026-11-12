@@ -289,11 +289,11 @@ func (ic *imageCopier) bpcPreserveOriginal(_ *sourceStream, detected bpDetectCom
 	logrus.Debugf("Using original blob without modification")
 	// Remember if the original blob was compressed, and if so how, so that if
 	// LayerInfosForCopy() returned something that differs from what was in the
-	// source's manifest, and UpdatedImage() needs to call UpdateLayerInfos(),
+	// source's manifest, and image.EditedImage() needs to call UpdateLayerInfos(),
 	// it will be able to correctly derive the MediaType for the copied blob.
 	//
 	// But don’t touch blobs in objects where we can’t change compression,
-	// so that src.UpdatedImage() doesn’t fail; assume that for such blobs
+	// so that image.EditedImage() doesn’t fail; assume that for such blobs
 	// LayerInfosForCopy() should not be making any changes in the first place.
 	var bpcOp bpcOperation
 	var uploadedOp types.LayerCompression
