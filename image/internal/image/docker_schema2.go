@@ -50,8 +50,8 @@ func manifestSchema2FromManifest(src types.ImageSource, manifestBlob []byte) (ge
 		return nil, err
 	}
 	return &manifestSchema2{
-		src: src,
 		m:   m,
+		src: src,
 	}, nil
 }
 
@@ -157,8 +157,8 @@ func (m *manifestSchema2) EditedImageNeedsLayerDiffIDs(edits EditedImageEdits) b
 	return false
 }
 
-// EditedImage FIXME
-func (m *manifestSchema2) EditedImage(ctx context.Context, edits EditedImageEdits, info EditedImageInfo) (types.Image, error) {
+// editedImage FIXME
+func (m *manifestSchema2) editedImage(ctx context.Context, edits EditedImageEdits, info EditedImageInfo) (genericManifest, error) {
 	copy := manifestSchema2{ // NOTE: This is not a deep copy, it still shares slices etc.
 		src:        m.src,
 		configBlob: m.configBlob,
@@ -186,7 +186,7 @@ func (m *manifestSchema2) EditedImage(ctx context.Context, edits EditedImageEdit
 	}
 	// Ignore edits.EmbeddedDockerReference: it may be set when converting from schema1 to schema2, but we really don't care.
 
-	return memoryImageFromManifest(&copy), nil
+	return &copy, nil
 }
 
 func oci1DescriptorFromSchema2Descriptor(d manifest.Schema2Descriptor) imgspecv1.Descriptor {

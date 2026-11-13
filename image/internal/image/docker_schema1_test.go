@@ -378,12 +378,12 @@ func TestManifestSchema1EditedImage(t *testing.T) {
 
 	// LayerInfos:
 	layerInfos := append(slices.Clone(original.LayerInfos()[1:]), original.LayerInfos()[0])
-	res, err := original.EditedImage(context.Background(), EditedImageEdits{
+	res, err := original.editedImage(context.Background(), EditedImageEdits{
 		LayerInfos: layerInfos,
 	}, EditedImageInfo{})
 	require.NoError(t, err)
 	assert.Equal(t, layerInfos, res.LayerInfos())
-	_, err = original.EditedImage(context.Background(), EditedImageEdits{
+	_, err = original.editedImage(context.Background(), EditedImageEdits{
 		LayerInfos: append(layerInfos, layerInfos[0]),
 	}, EditedImageInfo{})
 	assert.Error(t, err)
@@ -396,7 +396,7 @@ func TestManifestSchema1EditedImage(t *testing.T) {
 	} {
 		embeddedRef, err := reference.ParseNormalizedNamed(refName)
 		require.NoError(t, err)
-		res, err = original.EditedImage(context.Background(), EditedImageEdits{
+		res, err = original.editedImage(context.Background(), EditedImageEdits{
 			EmbeddedDockerReference: embeddedRef,
 		}, EditedImageInfo{})
 		require.NoError(t, err)
@@ -413,7 +413,7 @@ func TestManifestSchema1EditedImage(t *testing.T) {
 		manifest.DockerV2Schema2MediaType,
 		imgspecv1.MediaTypeImageManifest,
 	} {
-		_, err = original.EditedImage(context.Background(), EditedImageEdits{
+		_, err = original.editedImage(context.Background(), EditedImageEdits{
 			ManifestMIMEType: mime,
 		}, EditedImageInfo{
 			LayerInfos:   schema1FixtureLayerInfos,
@@ -424,7 +424,7 @@ func TestManifestSchema1EditedImage(t *testing.T) {
 	for _, mime := range []string{
 		"this is invalid",
 	} {
-		_, err = original.EditedImage(context.Background(), EditedImageEdits{
+		_, err = original.editedImage(context.Background(), EditedImageEdits{
 			ManifestMIMEType: mime,
 		}, EditedImageInfo{})
 		assert.Error(t, err, mime)
@@ -441,13 +441,14 @@ func TestManifestSchema1EditedImage(t *testing.T) {
 
 func TestManifestSchema1ConvertToSchema2(t *testing.T) {
 	original := manifestSchema1FromFixture(t, "schema1.json")
-	res, err := original.EditedImage(context.Background(), EditedImageEdits{
+	gm, err := original.editedImage(context.Background(), EditedImageEdits{
 		ManifestMIMEType: manifest.DockerV2Schema2MediaType,
 	}, EditedImageInfo{
 		LayerInfos:   schema1FixtureLayerInfos,
 		LayerDiffIDs: schema1FixtureLayerDiffIDs,
 	})
 	require.NoError(t, err)
+	res := memoryImageFromManifest(gm)
 
 	convertedJSON, mt, err := res.Manifest(context.Background())
 	require.NoError(t, err)
@@ -465,7 +466,7 @@ func TestManifestSchema1ConvertToSchema2(t *testing.T) {
 	// (unlike schem1.json) contains throwaway layers.
 	original = manifestSchema1FromFixture(t, "schema2-to-schema1-by-docker.json")
 	updatedLayers, updatedLayersCopy := modifiedLayerInfos(t, schema1WithThrowawaysFixtureLayerInfos)
-	res, err = original.EditedImage(context.Background(), EditedImageEdits{
+	gm, err = original.editedImage(context.Background(), EditedImageEdits{
 		LayerInfos:       updatedLayers,
 		ManifestMIMEType: manifest.DockerV2Schema2MediaType,
 	}, EditedImageInfo{
@@ -474,6 +475,7 @@ func TestManifestSchema1ConvertToSchema2(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.Equal(t, updatedLayersCopy, updatedLayers) // updatedLayers have not been modified in place
+	res = memoryImageFromManifest(gm)
 	convertedJSON, mt, err = res.Manifest(context.Background())
 	require.NoError(t, err)
 	assert.Equal(t, manifest.DockerV2Schema2MediaType, mt)
@@ -511,7 +513,7 @@ func TestManifestSchema1ConvertToSchema2(t *testing.T) {
 
 	// Conversion to schema2 with encryption fails
 	encryptedLayers := layerInfosWithCryptoOperation(original.LayerInfos(), types.Encrypt)
-	_, err = original.EditedImage(context.Background(), EditedImageEdits{
+	_, err = original.editedImage(context.Background(), EditedImageEdits{
 		LayerInfos:       encryptedLayers,
 		ManifestMIMEType: manifest.DockerV2Schema2MediaType,
 	}, EditedImageInfo{
@@ -525,13 +527,14 @@ func TestManifestSchema1ConvertToSchema2(t *testing.T) {
 
 func TestManifestSchema1ConvertToManifestOCI1(t *testing.T) {
 	original := manifestSchema1FromFixture(t, "schema1.json")
-	res, err := original.EditedImage(context.Background(), EditedImageEdits{
+	gm, err := original.editedImage(context.Background(), EditedImageEdits{
 		ManifestMIMEType: imgspecv1.MediaTypeImageManifest,
 	}, EditedImageInfo{
 		LayerInfos:   schema1FixtureLayerInfos,
 		LayerDiffIDs: schema1FixtureLayerDiffIDs,
 	})
 	require.NoError(t, err)
+	res := memoryImageFromManifest(gm)
 
 	convertedJSON, mt, err := res.Manifest(context.Background())
 	require.NoError(t, err)
@@ -549,15 +552,16 @@ func TestManifestSchema1ConvertToManifestOCI1(t *testing.T) {
 	// (unlike schem1.json) contains throwaway layers.
 	original = manifestSchema1FromFixture(t, "schema2-to-schema1-by-docker.json")
 	updatedLayers, updatedLayersCopy := modifiedLayerInfos(t, schema1WithThrowawaysFixtureLayerInfos)
-	res, err = original.EditedImage(context.Background(), EditedImageEdits{
+	gm, err = original.editedImage(context.Background(), EditedImageEdits{
 		LayerInfos:       updatedLayers,
 		ManifestMIMEType: imgspecv1.MediaTypeImageManifest,
 	}, EditedImageInfo{
 		LayerInfos:   updatedLayers,
 		LayerDiffIDs: schema1WithThrowawaysFixtureLayerDiffIDs,
 	})
-	require.NoError(t, err)
 	assert.Equal(t, updatedLayersCopy, updatedLayers) // updatedLayers have not been modified in place
+	require.NoError(t, err)
+	res = memoryImageFromManifest(gm)
 	convertedJSON, mt, err = res.Manifest(context.Background())
 	require.NoError(t, err)
 	assert.Equal(t, imgspecv1.MediaTypeImageManifest, mt)
@@ -595,7 +599,7 @@ func TestManifestSchema1ConvertToManifestOCI1(t *testing.T) {
 
 	// Conversion to OCI with encryption is possible.
 	encryptedLayers := layerInfosWithCryptoOperation(schema1WithThrowawaysFixtureLayerInfos, types.Encrypt)
-	res, err = original.EditedImage(context.Background(), EditedImageEdits{
+	gm, err = original.editedImage(context.Background(), EditedImageEdits{
 		LayerInfos:       encryptedLayers,
 		ManifestMIMEType: imgspecv1.MediaTypeImageManifest,
 	}, EditedImageInfo{
@@ -603,6 +607,7 @@ func TestManifestSchema1ConvertToManifestOCI1(t *testing.T) {
 		LayerDiffIDs: schema1WithThrowawaysFixtureLayerDiffIDs,
 	})
 	require.NoError(t, err)
+	res = memoryImageFromManifest(gm)
 	convertedJSON, mt, err = res.Manifest(context.Background())
 	require.NoError(t, err)
 	assert.Equal(t, imgspecv1.MediaTypeImageManifest, mt)
@@ -684,7 +689,7 @@ func TestConvertSchema1ToManifestOCIWithAnnotations(t *testing.T) {
 			MediaType: imgspecv1.MediaTypeImageLayerGzip,
 		},
 	}
-	res, err := original.EditedImage(context.Background(), EditedImageEdits{
+	res, err := original.editedImage(context.Background(), EditedImageEdits{
 		ManifestMIMEType: imgspecv1.MediaTypeImageManifest,
 		LayerInfos:       layerInfoOverwrites,
 	}, EditedImageInfo{
@@ -696,7 +701,7 @@ func TestConvertSchema1ToManifestOCIWithAnnotations(t *testing.T) {
 
 	// Doing this with schema2 should fail
 	original = manifestSchema1FromFixture(t, "schema1.json")
-	res, err = original.EditedImage(context.Background(), EditedImageEdits{
+	res, err = original.editedImage(context.Background(), EditedImageEdits{
 		ManifestMIMEType: manifest.DockerV2Schema2MediaType,
 		LayerInfos:       layerInfoOverwrites,
 	}, EditedImageInfo{

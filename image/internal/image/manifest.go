@@ -18,14 +18,10 @@ import (
 // The public methods are related to types.Image so that embedding a genericManifest implements most of it,
 // but there are also public methods that are only visible by packages that can import c/image/internal/image.
 type genericManifest interface {
+	genericEditableImage
+
 	serialize() ([]byte, error)
 	manifestMIMEType() string
-	// ConfigInfo returns a complete BlobInfo for the separate config object, or a BlobInfo{Digest:""} if there isn't a separate object.
-	// Note that the config object may not exist in the underlying storage in the return value of UpdatedImage! Use ConfigBlob() below.
-	ConfigInfo() types.BlobInfo
-	// ConfigBlob returns the blob described by ConfigInfo, iff ConfigInfo().Digest != ""; nil otherwise.
-	// The result is cached; it is OK to call this however often you need.
-	ConfigBlob(context.Context) ([]byte, error)
 	// OCIConfig returns the image configuration as per OCI v1 image-spec. Information about
 	// layers in the resulting configuration isn't guaranteed to be returned to due how
 	// old image manifests work (docker v2s1 especially).
@@ -60,8 +56,48 @@ type genericManifest interface {
 	// This is a horribly specific interface, but computing EditedImageInfo.LayerDiffIDs can be very expensive to compute
 	// (most importantly it forces us to download the full layers even if they are already present at the destination).
 	EditedImageNeedsLayerDiffIDs(edits EditedImageEdits) bool
-	// EditedImage FIXME
-	EditedImage(ctx context.Context, edits EditedImageEdits, info EditedImageInfo) (types.Image, error)
+}
+
+// genericEditableImage is the subset of EditableImage which a genericManifest needs to implement
+type genericEditableImage interface {
+	// ConfigInfo returns a complete BlobInfo for the separate config object, or a BlobInfo{Digest:""} if there isn't a separate object.
+	// Note that the config object may not exist in the underlying storage in the return value of UpdatedImage! Use ConfigBlob() below.
+	ConfigInfo() types.BlobInfo
+	// ConfigBlob returns the blob described by ConfigInfo, iff ConfigInfo().Digest != ""; nil otherwise.
+	// The result is cached; it is OK to call this however often you need.
+	ConfigBlob(context.Context) ([]byte, error)
+
+	// The following methods are not a part of types.Image:
+	// ===
+
+	// editedImage FIXME
+	editedImage(ctx context.Context, edits EditedImageEdits, info EditedImageInfo) (genericManifest, error)
+}
+
+// EditableImage is either a SourcedImage, or an outcome of EditedImage(),
+// which allows either consuming the outcome of the edits, or calling EditedImage() again.
+type EditableImage interface {
+	genericEditableImage // FIXME?! do we really need 3 interfaces here?
+
+	// Manifest is like ImageSource.GetManifest, but the result is cached; it is OK to call this however often you need.
+	Manifest(ctx3 context.Context) ([]byte, string, error)
+}
+
+func EditedImage(ctx context.Context, image EditableImage, edits EditedImageEdits, info EditedImageInfo) (EditableImage, error) {
+	// FIXME: Is this structure with an external function necessary?!
+	// This returns genericManifest because we have two kinds of callers:
+	// editedImage returns genericManifest because we have two kinds of callers:
+	// - Internally, copy.Image only needs the narrow interface of EditableImage,
+	//   but it needs SourcedImage to conform to EditableImage as well.
+	// - External callers of UpdatedImage expect a full types.Image
+	// We could define an internal superset of types.Image that satisfies both, but nothing
+	// really needs that, and ultimately the outcome of an image edit is always a memoryImage;
+	// so we can factor the creation of the memoryImage out of the schema-specific implementations.
+	m, err := image.editedImage(ctx, edits, info)
+	if err != nil {
+		return nil, err
+	}
+	return memoryImageFromManifest(m), nil
 }
 
 // EditedImageEdits collects requested edits in genericManifest.EditedImage as named optional arguments.
@@ -120,7 +156,7 @@ type manifestConvertFn func(ctx context.Context, edits *EditedImageEdits, info E
 // It returns (nil, nil) if no conversion was requested.
 func convertManifestIfRequiredWithUpdate(ctx context.Context, edits EditedImageEdits, info EditedImageInfo,
 	converters map[string]manifestConvertFn,
-) (types.Image, error) {
+) (genericManifest, error) {
 	if edits.ManifestMIMEType == "" {
 		return nil, nil
 	}
@@ -138,5 +174,5 @@ func convertManifestIfRequiredWithUpdate(ctx context.Context, edits EditedImageE
 	convertedImage := memoryImageFromManifest(convertedManifest)
 
 	editsCopy.ManifestMIMEType = ""
-	return convertedImage.EditedImage(ctx, editsCopy, info)
+	return convertedImage.editedImage(ctx, editsCopy, info)
 }

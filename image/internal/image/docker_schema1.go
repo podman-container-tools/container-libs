@@ -104,8 +104,8 @@ func (m *manifestSchema1) EditedImageNeedsLayerDiffIDs(edits EditedImageEdits) b
 	return (edits.ManifestMIMEType == manifest.DockerV2Schema2MediaType || edits.ManifestMIMEType == imgspecv1.MediaTypeImageManifest)
 }
 
-// EditedImage FIXME
-func (m *manifestSchema1) EditedImage(ctx context.Context, edits EditedImageEdits, info EditedImageInfo) (types.Image, error) {
+// editedImage FIXME
+func (m *manifestSchema1) editedImage(ctx context.Context, edits EditedImageEdits, info EditedImageInfo) (genericManifest, error) {
 	copy := manifestSchema1{m: manifest.Schema1Clone(m.m)}
 
 	// We have 2 MIME types for schema 1, which are basically equivalent (even the un-"Signed" MIME type will be rejected if there isn’t a signature; so,
@@ -139,7 +139,7 @@ func (m *manifestSchema1) EditedImage(ctx context.Context, edits EditedImageEdit
 		}
 	}
 
-	return memoryImageFromManifest(&copy), nil
+	return &copy, nil
 }
 
 // convertToManifestSchema2Generic returns a genericManifest implementation converted to manifest.DockerV2Schema2MediaType.

@@ -48,7 +48,7 @@ func (m *compat) UpdatedImageNeedsLayerDiffIDs(options types.ManifestUpdateOptio
 // options.ManifestMIMEType or with different CompressionOperation+CompressionAlgorithm
 // values might succeed.
 func (m *compat) UpdatedImage(ctx context.Context, options types.ManifestUpdateOptions) (types.Image, error) {
-	return m.manifest.EditedImage(ctx,
+	gm, err := m.manifest.editedImage(ctx,
 		editedImageEditsFromManifestUpdateOptions(&options),
 		EditedImageInfo{
 			Destination: imagedestination.FromPublic(options.InformationOnly.Destination),
@@ -58,6 +58,10 @@ func (m *compat) UpdatedImage(ctx context.Context, options types.ManifestUpdateO
 			LayerInfos:   options.InformationOnly.LayerInfos,
 			LayerDiffIDs: options.InformationOnly.LayerDiffIDs,
 		})
+	if err != nil {
+		return nil, err
+	}
+	return memoryImageFromManifest(gm), nil
 }
 
 // editedImageEditsFromManifestUpdateOptions returns EditedImageEdits corresponding to types.ManifestUpdateOptions.

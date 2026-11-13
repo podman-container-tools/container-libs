@@ -388,7 +388,7 @@ func TestManifestOCI1EditedImageNeedsLayerDiffIDs(t *testing.T) {
 	}
 }
 
-// oci1ImageSource is plausible enough for schema conversions in manifestOCI1.EditedImage() to work.
+// oci1ImageSource is plausible enough for schema conversions in manifestOCI1.editedImage() to work.
 type oci1ImageSource struct {
 	configBlobImageSource
 	ref reference.Named
@@ -422,12 +422,12 @@ func TestManifestOCI1EditedImage(t *testing.T) {
 
 	// LayerInfos:
 	layerInfos := append(slices.Clone(original.LayerInfos()[1:]), original.LayerInfos()[0])
-	res, err := original.EditedImage(context.Background(), EditedImageEdits{
+	res, err := original.editedImage(context.Background(), EditedImageEdits{
 		LayerInfos: layerInfos,
 	}, EditedImageInfo{})
 	require.NoError(t, err)
 	assert.Equal(t, layerInfos, res.LayerInfos())
-	_, err = original.EditedImage(context.Background(), EditedImageEdits{
+	_, err = original.editedImage(context.Background(), EditedImageEdits{
 		LayerInfos: append(layerInfos, layerInfos[0]),
 	}, EditedImageInfo{})
 	assert.Error(t, err)
@@ -436,7 +436,7 @@ func TestManifestOCI1EditedImage(t *testing.T) {
 	// … is ignored
 	embeddedRef, err := reference.ParseNormalizedNamed("busybox")
 	require.NoError(t, err)
-	res, err = original.EditedImage(context.Background(), EditedImageEdits{
+	res, err = original.editedImage(context.Background(), EditedImageEdits{
 		EmbeddedDockerReference: embeddedRef,
 	}, EditedImageInfo{})
 	require.NoError(t, err)
@@ -450,7 +450,7 @@ func TestManifestOCI1EditedImage(t *testing.T) {
 	for _, mime := range []string{
 		manifest.DockerV2Schema2MediaType,
 	} {
-		_, err = original.EditedImage(context.Background(), EditedImageEdits{
+		_, err = original.editedImage(context.Background(), EditedImageEdits{
 			ManifestMIMEType: mime,
 		}, EditedImageInfo{
 			Destination: newMemoryImageDest(originalSrc.ref),
@@ -463,7 +463,7 @@ func TestManifestOCI1EditedImage(t *testing.T) {
 		imgspecv1.MediaTypeImageManifest, // This indicates a confused caller, not a no-op.
 		"this is invalid",
 	} {
-		_, err = original.EditedImage(context.Background(), EditedImageEdits{
+		_, err = original.editedImage(context.Background(), EditedImageEdits{
 			ManifestMIMEType: mime,
 		}, EditedImageInfo{})
 		assert.Error(t, err, mime)
@@ -483,7 +483,7 @@ func TestManifestOCI1EditedImage(t *testing.T) {
 func successfulOCI1Conversion(t *testing.T, original genericManifest, originalClone genericManifest,
 	edits EditedImageEdits, info EditedImageInfo,
 ) types.Image {
-	res, err := original.EditedImage(context.Background(), edits, info)
+	res, err := original.editedImage(context.Background(), edits, info)
 	require.NoError(t, err)
 
 	// original = the source Image implementation hasn’t been changed by the edits
@@ -493,7 +493,7 @@ func successfulOCI1Conversion(t *testing.T, original genericManifest, originalCl
 	require.True(t, ok)
 	assert.Equal(t, *typedOriginalClone, *typedOriginal)
 
-	return res
+	return memoryImageFromManifest(res)
 }
 
 func TestManifestOCI1ConvertToManifestSchema1(t *testing.T) {
@@ -551,7 +551,7 @@ func TestManifestOCI1ConvertToManifestSchema1(t *testing.T) {
 
 	// This can share originalSrc because the config digest is the same between oci1-artifact.json and oci1.json
 	artifact := manifestOCI1FromFixture(t, originalSrc, "oci1-artifact.json")
-	_, err = artifact.EditedImage(context.Background(), EditedImageEdits{
+	_, err = artifact.editedImage(context.Background(), EditedImageEdits{
 		ManifestMIMEType: manifest.DockerV2Schema1SignedMediaType,
 	}, memoryDestInfo)
 	var expected manifest.NonImageArtifactError
@@ -560,13 +560,13 @@ func TestManifestOCI1ConvertToManifestSchema1(t *testing.T) {
 	// Conversion of an encrypted image fails
 	encrypted := manifestOCI1FromFixture(t, originalSrc, "oci1.encrypted.json")
 	encrypted2 := manifestOCI1FromFixture(t, originalSrc, "oci1.encrypted.json")
-	_, err = encrypted.EditedImage(context.Background(), EditedImageEdits{
+	_, err = encrypted.editedImage(context.Background(), EditedImageEdits{
 		ManifestMIMEType: manifest.DockerV2Schema1SignedMediaType,
 	}, memoryDestInfo)
 	assert.Error(t, err)
 
 	// Conversion to schema1 with encryption fails
-	_, err = original.EditedImage(context.Background(), EditedImageEdits{
+	_, err = original.editedImage(context.Background(), EditedImageEdits{
 		LayerInfos:       layerInfosWithCryptoOperation(original.LayerInfos(), types.Encrypt),
 		ManifestMIMEType: manifest.DockerV2Schema1SignedMediaType,
 	}, memoryDestInfo)
@@ -608,7 +608,7 @@ func TestManifestOCI1ConvertToManifestSchema1(t *testing.T) {
 	mixedSrc := newOCI1ImageSource(t, "oci1-all-media-types-config.json", "httpd-copy:latest")
 	mixedImage := manifestOCI1FromFixture(t, mixedSrc, "oci1-all-media-types.json")
 	mixedImage2 := manifestOCI1FromFixture(t, mixedSrc, "oci1-all-media-types.json")
-	_, err = mixedImage.EditedImage(context.Background(), EditedImageEdits{
+	_, err = mixedImage.editedImage(context.Background(), EditedImageEdits{
 		ManifestMIMEType: manifest.DockerV2Schema1SignedMediaType,
 	}, memoryDestInfo)
 	assert.Error(t, err) // zstd compression is not supported for docker images
@@ -676,7 +676,7 @@ func TestConvertToManifestSchema2(t *testing.T) {
 
 	// This can share originalSrc because the config digest is the same between oci1-artifact.json and oci1.json
 	artifact := manifestOCI1FromFixture(t, originalSrc, "oci1-artifact.json")
-	_, err = artifact.EditedImage(context.Background(), EditedImageEdits{
+	_, err = artifact.editedImage(context.Background(), EditedImageEdits{
 		ManifestMIMEType: manifest.DockerV2Schema2MediaType,
 	}, EditedImageInfo{})
 	var expected manifest.NonImageArtifactError
@@ -685,13 +685,13 @@ func TestConvertToManifestSchema2(t *testing.T) {
 	// Conversion of an encrypted image fails
 	encrypted := manifestOCI1FromFixture(t, originalSrc, "oci1.encrypted.json")
 	encrypted2 := manifestOCI1FromFixture(t, originalSrc, "oci1.encrypted.json")
-	_, err = encrypted.EditedImage(context.Background(), EditedImageEdits{
+	_, err = encrypted.editedImage(context.Background(), EditedImageEdits{
 		ManifestMIMEType: manifest.DockerV2Schema2MediaType,
 	}, EditedImageInfo{})
 	assert.Error(t, err)
 
 	// Conversion to schema2 with encryption fails
-	_, err = original.EditedImage(context.Background(), EditedImageEdits{
+	_, err = original.editedImage(context.Background(), EditedImageEdits{
 		LayerInfos:       layerInfosWithCryptoOperation(original.LayerInfos(), types.Encrypt),
 		ManifestMIMEType: manifest.DockerV2Schema2MediaType,
 	}, EditedImageInfo{})
@@ -746,7 +746,7 @@ func TestConvertToManifestSchema2(t *testing.T) {
 	mixedSrc := newOCI1ImageSource(t, "oci1-all-media-types-config.json", "httpd-copy:latest")
 	mixedImage := manifestOCI1FromFixture(t, mixedSrc, "oci1-all-media-types.json")
 	mixedImage2 := manifestOCI1FromFixture(t, mixedSrc, "oci1-all-media-types.json")
-	_, err = mixedImage.EditedImage(context.Background(), EditedImageEdits{
+	_, err = mixedImage.editedImage(context.Background(), EditedImageEdits{
 		ManifestMIMEType: manifest.DockerV2Schema2MediaType,
 	}, EditedImageInfo{})
 	assert.Error(t, err) // zstd compression is not supported for docker images
