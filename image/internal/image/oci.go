@@ -138,7 +138,7 @@ func (m *manifestOCI1) EditedImageNeedsLayerDiffIDs(edits EditedImageEdits) bool
 }
 
 // EditedImage FIXME
-func (m *manifestOCI1) EditedImage(ctx context.Context, edits EditedImageEdits, info types.ManifestUpdateInformation) (types.Image, error) {
+func (m *manifestOCI1) EditedImage(ctx context.Context, edits EditedImageEdits, info EditedImageInfo) (types.Image, error) {
 	copy := manifestOCI1{ // NOTE: This is not a deep copy, it still shares slices etc.
 		src:        m.src,
 		configBlob: m.configBlob,
@@ -181,7 +181,7 @@ func schema2DescriptorFromOCI1Descriptor(d imgspecv1.Descriptor) manifest.Schema
 // convertToManifestSchema2Generic returns a genericManifest implementation converted to manifest.DockerV2Schema2MediaType.
 // It may use info and also adjust *edits to be appropriate for editing the returned value.
 // This does not change the state of the original manifestOCI1 object.
-func (m *manifestOCI1) convertToManifestSchema2Generic(ctx context.Context, edits *EditedImageEdits, _ types.ManifestUpdateInformation) (genericManifest, error) {
+func (m *manifestOCI1) convertToManifestSchema2Generic(ctx context.Context, edits *EditedImageEdits, _ EditedImageInfo) (genericManifest, error) {
 	return m.convertToManifestSchema2(edits)
 }
 
@@ -294,7 +294,7 @@ func (m *manifestOCI1) convertToManifestSchema2(edits *EditedImageEdits) (*manif
 // convertToManifestSchema1 returns a genericManifest implementation converted to manifest.DockerV2Schema1{Signed,}MediaType.
 // It may use info and also adjust *edits to be appropriate for editing the returned value.
 // This does not change the state of the original manifestOCI1 object.
-func (m *manifestOCI1) convertToManifestSchema1(ctx context.Context, edits *EditedImageEdits, info types.ManifestUpdateInformation) (genericManifest, error) {
+func (m *manifestOCI1) convertToManifestSchema1(ctx context.Context, edits *EditedImageEdits, info EditedImageInfo) (genericManifest, error) {
 	if m.m.Config.MediaType != imgspecv1.MediaTypeImageConfig {
 		return nil, internalManifest.NewNonImageArtifactError(&m.m.Manifest)
 	}

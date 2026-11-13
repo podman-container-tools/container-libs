@@ -57,7 +57,7 @@ func (m *manifestSchema1) ConfigBlob(context.Context) ([]byte, error) {
 // layers in the resulting configuration isn't guaranteed to be returned to due how
 // old image manifests work (docker v2s1 especially).
 func (m *manifestSchema1) OCIConfig(ctx context.Context) (*imgspecv1.Image, error) {
-	v2s2, err := m.convertToManifestSchema2(&EditedImageEdits{}, types.ManifestUpdateInformation{})
+	v2s2, err := m.convertToManifestSchema2(&EditedImageEdits{}, EditedImageInfo{})
 	if err != nil {
 		return nil, err
 	}
@@ -97,15 +97,15 @@ func (m *manifestSchema1) Inspect(context.Context) (*types.ImageInspectInfo, err
 	return m.m.Inspect(nil)
 }
 
-// EditedImageNeedsLayerDiffIDs returns true iff EditedImage(options) needs ManifestUpdateInformation.LayerDiffIDs.
-// This is a horribly specific interface, but computing ManifestUpdateInformation.LayerDiffIDs can be very expensive to compute
+// EditedImageNeedsLayerDiffIDs returns true iff EditedImage(options) needs EditedImageInfo.LayerDiffIDs.
+// This is a horribly specific interface, but computing EditedImageInfo.LayerDiffIDs can be very expensive to compute
 // (most importantly it forces us to download the full layers even if they are already present at the destination).
 func (m *manifestSchema1) EditedImageNeedsLayerDiffIDs(edits EditedImageEdits) bool {
 	return (edits.ManifestMIMEType == manifest.DockerV2Schema2MediaType || edits.ManifestMIMEType == imgspecv1.MediaTypeImageManifest)
 }
 
 // EditedImage FIXME
-func (m *manifestSchema1) EditedImage(ctx context.Context, edits EditedImageEdits, info types.ManifestUpdateInformation) (types.Image, error) {
+func (m *manifestSchema1) EditedImage(ctx context.Context, edits EditedImageEdits, info EditedImageInfo) (types.Image, error) {
 	copy := manifestSchema1{m: manifest.Schema1Clone(m.m)}
 
 	// We have 2 MIME types for schema 1, which are basically equivalent (even the un-"Signed" MIME type will be rejected if there isn’t a signature; so,
@@ -145,7 +145,7 @@ func (m *manifestSchema1) EditedImage(ctx context.Context, edits EditedImageEdit
 // convertToManifestSchema2Generic returns a genericManifest implementation converted to manifest.DockerV2Schema2MediaType.
 // It may use info and also adjust *edits to be appropriate for editing the returned value.
 // This does not change the state of the original manifestSchema1 object.
-func (m *manifestSchema1) convertToManifestSchema2Generic(ctx context.Context, edits *EditedImageEdits, info types.ManifestUpdateInformation) (genericManifest, error) {
+func (m *manifestSchema1) convertToManifestSchema2Generic(ctx context.Context, edits *EditedImageEdits, info EditedImageInfo) (genericManifest, error) {
 	return m.convertToManifestSchema2(edits, info)
 }
 
@@ -154,7 +154,7 @@ func (m *manifestSchema1) convertToManifestSchema2Generic(ctx context.Context, e
 // This does not change the state of the original manifestSchema1 object.
 //
 // Based on github.com/docker/docker/distribution/pull_v2.go
-func (m *manifestSchema1) convertToManifestSchema2(edits *EditedImageEdits, info types.ManifestUpdateInformation) (*manifestSchema2, error) {
+func (m *manifestSchema1) convertToManifestSchema2(edits *EditedImageEdits, info EditedImageInfo) (*manifestSchema2, error) {
 	if len(m.m.ExtractedV1Compatibility) == 0 {
 		// What would this even mean?! Anyhow, the rest of the code depends on FSLayers[0] and ExtractedV1Compatibility[0] existing.
 		return nil, fmt.Errorf("Cannot convert an image with 0 history entries to %s", manifest.DockerV2Schema2MediaType)
@@ -223,7 +223,7 @@ func (m *manifestSchema1) convertToManifestSchema2(edits *EditedImageEdits, info
 // convertToManifestOCI1 returns a genericManifest implementation converted to imgspecv1.MediaTypeImageManifest.
 // It may use info and also adjust *edits to be appropriate for editing the returned value.
 // This does not change the state of the original manifestSchema1 object.
-func (m *manifestSchema1) convertToManifestOCI1(ctx context.Context, edits *EditedImageEdits, info types.ManifestUpdateInformation) (genericManifest, error) {
+func (m *manifestSchema1) convertToManifestOCI1(ctx context.Context, edits *EditedImageEdits, info EditedImageInfo) (genericManifest, error) {
 	// We can't directly convert to OCI, but we can transitively convert via a Docker V2.2 Distribution manifest
 	m2, err := m.convertToManifestSchema2(edits, info)
 	if err != nil {

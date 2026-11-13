@@ -148,15 +148,15 @@ func (m *manifestSchema2) Inspect(ctx context.Context) (*types.ImageInspectInfo,
 	return m.m.Inspect(getter)
 }
 
-// EditedImageNeedsLayerDiffIDs returns true iff EditedImage(options) needs ManifestUpdateInformation.LayerDiffIDs.
-// This is a horribly specific interface, but computing ManifestUpdateInformation.LayerDiffIDs can be very expensive to compute
+// EditedImageNeedsLayerDiffIDs returns true iff EditedImage(options) needs EditedImageInfo.LayerDiffIDs.
+// This is a horribly specific interface, but computing EditedImageInfo.LayerDiffIDs can be very expensive to compute
 // (most importantly it forces us to download the full layers even if they are already present at the destination).
 func (m *manifestSchema2) EditedImageNeedsLayerDiffIDs(edits EditedImageEdits) bool {
 	return false
 }
 
 // EditedImage FIXME
-func (m *manifestSchema2) EditedImage(ctx context.Context, edits EditedImageEdits, info types.ManifestUpdateInformation) (types.Image, error) {
+func (m *manifestSchema2) EditedImage(ctx context.Context, edits EditedImageEdits, info EditedImageInfo) (types.Image, error) {
 	copy := manifestSchema2{ // NOTE: This is not a deep copy, it still shares slices etc.
 		src:        m.src,
 		configBlob: m.configBlob,
@@ -199,7 +199,7 @@ func oci1DescriptorFromSchema2Descriptor(d manifest.Schema2Descriptor) imgspecv1
 // convertToManifestOCI1 returns a genericManifest implementation converted to imgspecv1.MediaTypeImageManifest.
 // It may use info and also adjust *edits to be appropriate for editing the returned value.
 // This does not change the state of the original manifestSchema2 object.
-func (m *manifestSchema2) convertToManifestOCI1(ctx context.Context, _ *EditedImageEdits, _ types.ManifestUpdateInformation) (genericManifest, error) {
+func (m *manifestSchema2) convertToManifestOCI1(ctx context.Context, _ *EditedImageEdits, _ EditedImageInfo) (genericManifest, error) {
 	configOCI, err := m.OCIConfig(ctx)
 	if err != nil {
 		return nil, err
@@ -242,7 +242,7 @@ func (m *manifestSchema2) convertToManifestOCI1(ctx context.Context, _ *EditedIm
 // This does not change the state of the original manifestSchema2 object.
 //
 // Based on docker/distribution/manifest/schema1/config_builder.go
-func (m *manifestSchema2) convertToManifestSchema1(ctx context.Context, edits *EditedImageEdits, info types.ManifestUpdateInformation) (genericManifest, error) {
+func (m *manifestSchema2) convertToManifestSchema1(ctx context.Context, edits *EditedImageEdits, info EditedImageInfo) (genericManifest, error) {
 	var convertedLayerUpdates []types.BlobInfo // Only used if edits.LayerInfos != nil
 	if edits.LayerInfos != nil {
 		if len(edits.LayerInfos) != len(m.m.LayersDescriptors) {

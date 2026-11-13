@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/opencontainers/go-digest"
 	imgspecv1 "github.com/opencontainers/image-spec/specs-go/v1"
 	"go.podman.io/image/v5/docker/reference"
 	"go.podman.io/image/v5/manifest"
@@ -52,12 +53,12 @@ type genericManifest interface {
 	// algorithms depends not on the current format, but possibly on the target of a conversion (if UpdatedImage converts
 	// to a different manifest format).
 	CanChangeLayerCompression(mimeType string) bool
-	// EditedImageNeedsLayerDiffIDs returns true iff EditedImage(options) needs ManifestUpdateInformation.LayerDiffIDs.
-	// This is a horribly specific interface, but computing ManifestUpdateInformation.LayerDiffIDs can be very expensive to compute
+	// EditedImageNeedsLayerDiffIDs returns true iff EditedImage(options) needs EditedImageInfo.LayerDiffIDs.
+	// This is a horribly specific interface, but computing EditedImageInfo.LayerDiffIDs can be very expensive to compute
 	// (most importantly it forces us to download the full layers even if they are already present at the destination).
 	EditedImageNeedsLayerDiffIDs(edits EditedImageEdits) bool
 	// EditedImage FIXME
-	EditedImage(ctx context.Context, edits EditedImageEdits, info types.ManifestUpdateInformation) (types.Image, error)
+	EditedImage(ctx context.Context, edits EditedImageEdits, info EditedImageInfo) (types.Image, error)
 }
 
 // EditedImageEdits collects requested edits in genericManifest.EditedImage as named optional arguments.
@@ -65,6 +66,13 @@ type EditedImageEdits struct {
 	LayerInfos              []types.BlobInfo // Complete BlobInfos (size+digest+urls+annotations) which should replace the originals, in order (the root layer first, and then successive layered layers). BlobInfos' MediaType fields are ignored.
 	EmbeddedDockerReference reference.Named
 	ManifestMIMEType        string
+}
+
+// EditedImageInfo provides optional context which may or may not be used.
+type EditedImageInfo struct {
+	Destination  types.ImageDestination // and yes, UpdatedImage may write to Destination (see the schema2 → schema1 conversion logic in image/docker_schema2.go)
+	LayerInfos   []types.BlobInfo       // Complete BlobInfos (size+digest) which have been uploaded, in order (the root layer first, and then successive layered layers)
+	LayerDiffIDs []digest.Digest        // Digest values for the _uncompressed_ contents of the blobs which have been uploaded, in the same order.
 }
 
 // manifestInstanceFromBlob returns a genericManifest implementation for (manblob, mt) in src.
@@ -99,13 +107,12 @@ func manifestLayerInfosToBlobInfos(layers []manifest.LayerInfo) []types.BlobInfo
 // converted to a specific manifest MIME type.
 // It may use info and also adjust *edits to be appropriate for editing the returned value.
 // This does not change the state of the original genericManifest object.
-type manifestConvertFn func(ctx context.Context, edits *EditedImageEdits,
-	info types.ManifestUpdateInformation) (genericManifest, error)
+type manifestConvertFn func(ctx context.Context, edits *EditedImageEdits, info EditedImageInfo) (genericManifest, error)
 
 // convertManifestIfRequiredWithUpdate will run conversion functions of a manifest if
 // required and re-apply the edits to the converted type.
 // It returns (nil, nil) if no conversion was requested.
-func convertManifestIfRequiredWithUpdate(ctx context.Context, edits EditedImageEdits, info types.ManifestUpdateInformation,
+func convertManifestIfRequiredWithUpdate(ctx context.Context, edits EditedImageEdits, info EditedImageInfo,
 	converters map[string]manifestConvertFn,
 ) (types.Image, error) {
 	if edits.ManifestMIMEType == "" {

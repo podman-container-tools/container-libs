@@ -32,9 +32,11 @@ import (
 
 // imageCopier tracks state specific to a single image (possibly an item of a manifest list)
 type imageCopier struct {
-	c                             *copier
+	c *copier
+	// WARNING: If you are adding new reasons to change ic.manifestEdits, also update the
+	// OptimizeDestinationImageAlreadyExists short-circuit conditions.
 	manifestEdits                 image.EditedImageEdits
-	manifestEditInfo              types.ManifestUpdateInformation
+	manifestEditInfo              image.EditedImageInfo
 	src                           *image.SourcedImage
 	manifestConversionPlan        manifestConversionPlan
 	diffIDsAreNeeded              bool
@@ -138,7 +140,7 @@ func (c *copier) copySingleImage(ctx context.Context, unparsedImage *image.Unpar
 
 	ic := imageCopier{
 		c:                c,
-		manifestEditInfo: types.ManifestUpdateInformation{Destination: c.dest},
+		manifestEditInfo: image.EditedImageInfo{Destination: c.dest},
 		src:              src,
 		// manifestConversionPlan and diffIDsAreNeeded are computed later
 		cannotModifyManifestReason:    cannotModifyManifestReason,
