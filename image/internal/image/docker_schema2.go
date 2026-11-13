@@ -35,6 +35,7 @@ var GzippedEmptyLayer = []byte{
 // GzippedEmptyLayerDigest is a digest of GzippedEmptyLayer
 //
 // This is publicly visible as c/image/image.GzippedEmptyLayerDigest.
+// FIXME: This uses digest.SHA256, users should be flexible both in uploads and in matching.
 const GzippedEmptyLayerDigest = digest.Digest("sha256:a3ed95caeb02ffe68cdd9fd84406680ae93d633cb16422d00e8a7c22955b46d4")
 
 type manifestSchema2 struct {
