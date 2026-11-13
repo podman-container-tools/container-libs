@@ -222,6 +222,7 @@ func (c *copier) copySingleImage(ctx context.Context, unparsedImage *image.Unpar
 	if c.options.OptimizeDestinationImageAlreadyExists {
 		shouldUpdateSigs := len(sigs) > 0 || len(c.signers) != 0 // TODO: Consider allowing signatures updates only and skipping the image's layers/manifest copy if possible
 		noPendingManifestUpdates := ic.noPendingManifestUpdates()
+		// FIXME: handle digests.Options here
 
 		logrus.Debugf("Checking if we can skip copying: has signatures=%t, OCI encryption=%t, no manifest updates=%t, compression match required for reusing blobs=%t", shouldUpdateSigs, destRequiresOciEncryption, noPendingManifestUpdates, opts.requireCompressionFormatMatch)
 		if !shouldUpdateSigs && !destRequiresOciEncryption && noPendingManifestUpdates && !ic.requireCompressionFormatMatch {
@@ -590,13 +591,13 @@ func (ic *imageCopier) copyUpdatedConfigAndManifest(ctx context.Context, instanc
 		}
 		pendingImage = pi
 	}
+	if err := ic.copyConfig(ctx, pendingImage); err != nil {
+		return nil, "", err
+	}
+
 	man, _, err := pendingImage.Manifest(ctx)
 	if err != nil {
 		return nil, "", fmt.Errorf("reading manifest: %w", err)
-	}
-
-	if err := ic.copyConfig(ctx, pendingImage); err != nil {
-		return nil, "", err
 	}
 
 	ic.c.Printf("Writing manifest to image destination\n")
@@ -614,13 +615,15 @@ func (ic *imageCopier) copyUpdatedConfigAndManifest(ctx context.Context, instanc
 	return man, manifestDigest, nil
 }
 
-// copyConfig copies config.json, if any, from src to dest.
-func (ic *imageCopier) copyConfig(ctx context.Context, src image.EditableImage) error {
+// copyConfig copies config.json, if any, from src to dest,
+// and returns a config digest _if_ the manifest needs modifying.
+func (ic *imageCopier) copyConfig(ctx context.Context, src image.EditableImage) (digest.Digest, error) {
 	srcInfo := src.ConfigInfo()
+	updatedConfigDigest := digest.Digest("")
 	if srcInfo.Digest != "" {
 		if err := ic.c.concurrentBlobCopiesSemaphore.Acquire(ctx, 1); err != nil {
 			// This can only fail with ctx.Err(), so no need to blame acquiring the semaphore.
-			return fmt.Errorf("copying config: %w", err)
+			return "", fmt.Errorf("copying config: %w", err)
 		}
 		defer ic.c.concurrentBlobCopiesSemaphore.Release(1)
 
@@ -650,13 +653,15 @@ func (ic *imageCopier) copyConfig(ctx context.Context, src image.EditableImage) 
 			return destInfo, nil
 		}()
 		if err != nil {
-			return err
+			return "", err
 		}
 		if destInfo.Digest != srcInfo.Digest {
-			return fmt.Errorf("Internal error: copying uncompressed config blob %s changed digest to %s", srcInfo.Digest, destInfo.Digest)
+			// FIXME: this isn’t right, we need to also e.g. clean URLs;
+			// so we need the whole updatedBlobInfoFromUpload to edit the config.
+			updatedConfigDigest = destInfo.Digest
 		}
 	}
-	return nil
+	return updatedConfigDigest, nil
 }
 
 // diffIDResult contains both a digest value and an error from diffIDComputationGoroutine.

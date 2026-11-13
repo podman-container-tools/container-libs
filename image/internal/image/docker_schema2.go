@@ -179,6 +179,10 @@ func (m *manifestSchema2) editedImage(ctx context.Context, edits EditedImageEdit
 	}
 
 	// No conversion required, update manifest
+	if edits.ConfigDigest != "" {
+		copy.m.ConfigDescriptor.Digest = edits.ConfigDigest
+	}
+
 	if edits.LayerInfos != nil {
 		if err := copy.m.UpdateLayerInfos(edits.LayerInfos); err != nil {
 			return nil, err
