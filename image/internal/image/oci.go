@@ -130,27 +130,22 @@ func (m *manifestOCI1) Inspect(ctx context.Context) (*types.ImageInspectInfo, er
 	return m.m.Inspect(getter)
 }
 
-// UpdatedImageNeedsLayerDiffIDs returns true iff UpdatedImage(options) needs InformationOnly.LayerDiffIDs.
-// This is a horribly specific interface, but computing InformationOnly.LayerDiffIDs can be very expensive to compute
+// EditedImageNeedsLayerDiffIDs returns true iff EditedImage(options) needs EditedImageInfo.LayerDiffIDs.
+// This is a horribly specific interface, but computing EditedImageInfo.LayerDiffIDs can be very expensive to compute
 // (most importantly it forces us to download the full layers even if they are already present at the destination).
-func (m *manifestOCI1) UpdatedImageNeedsLayerDiffIDs(options types.ManifestUpdateOptions) bool {
+func (m *manifestOCI1) EditedImageNeedsLayerDiffIDs(edits EditedImageEdits) bool {
 	return false
 }
 
-// UpdatedImage returns a types.Image modified according to options.
-// This does not change the state of the original Image object.
-// The returned error will be a manifest.ManifestLayerCompressionIncompatibilityError
-// if the combination of CompressionOperation and CompressionAlgorithm specified
-// in one or more options.LayerInfos items indicates that a layer is compressed using
-// an algorithm that is not allowed in OCI.
-func (m *manifestOCI1) UpdatedImage(ctx context.Context, options types.ManifestUpdateOptions) (types.Image, error) {
+// editedImage FIXME
+func (m *manifestOCI1) editedImage(ctx context.Context, edits EditedImageEdits, info EditedImageInfo) (genericManifest, error) {
 	copy := manifestOCI1{ // NOTE: This is not a deep copy, it still shares slices etc.
 		src:        m.src,
 		configBlob: m.configBlob,
 		m:          manifest.OCI1Clone(m.m),
 	}
 
-	converted, err := convertManifestIfRequiredWithUpdate(ctx, options, map[string]manifestConvertFn{
+	converted, err := convertManifestIfRequiredWithUpdate(ctx, edits, info, map[string]manifestConvertFn{
 		manifest.DockerV2Schema2MediaType:       copy.convertToManifestSchema2Generic,
 		manifest.DockerV2Schema1MediaType:       copy.convertToManifestSchema1,
 		manifest.DockerV2Schema1SignedMediaType: copy.convertToManifestSchema1,
@@ -164,14 +159,18 @@ func (m *manifestOCI1) UpdatedImage(ctx context.Context, options types.ManifestU
 	}
 
 	// No conversion required, update manifest
-	if options.LayerInfos != nil {
-		if err := copy.m.UpdateLayerInfos(options.LayerInfos); err != nil {
+	if edits.ConfigDigest != "" {
+		copy.m.Config.Digest = edits.ConfigDigest
+	}
+
+	if edits.LayerInfos != nil {
+		if err := copy.m.UpdateLayerInfos(edits.LayerInfos); err != nil {
 			return nil, err
 		}
 	}
-	// Ignore options.EmbeddedDockerReference: it may be set when converting from schema1, but we really don't care.
+	// Ignore edits.EmbeddedDockerReference: it may be set when converting from schema1, but we really don't care.
 
-	return memoryImageFromManifest(&copy), nil
+	return &copy, nil
 }
 
 func schema2DescriptorFromOCI1Descriptor(d imgspecv1.Descriptor) manifest.Schema2Descriptor {
@@ -184,34 +183,30 @@ func schema2DescriptorFromOCI1Descriptor(d imgspecv1.Descriptor) manifest.Schema
 }
 
 // convertToManifestSchema2Generic returns a genericManifest implementation converted to manifest.DockerV2Schema2MediaType.
-// It may use options.InformationOnly and also adjust *options to be appropriate for editing the returned
-// value.
-// This does not change the state of the original manifestSchema1 object.
-//
-// We need this function just because a function returning an implementation of the genericManifest
-// interface is not automatically assignable to a function type returning the genericManifest interface
-func (m *manifestOCI1) convertToManifestSchema2Generic(ctx context.Context, options *types.ManifestUpdateOptions) (genericManifest, error) {
-	return m.convertToManifestSchema2(ctx, options)
+// It may use info and also adjust *edits to be appropriate for editing the returned value.
+// This does not change the state of the original manifestOCI1 object.
+func (m *manifestOCI1) convertToManifestSchema2Generic(ctx context.Context, edits *EditedImageEdits, _ EditedImageInfo) (genericManifest, error) {
+	return m.convertToManifestSchema2(edits)
 }
 
-// layerEditsOfOCIOnlyFeatures checks if options requires some layer edits to be done before converting to a Docker format.
+// layerEditsOfOCIOnlyFeatures checks if edits requires some layer edits to be done before converting to a Docker format.
 // If not, it returns (nil, nil).
 // If decryption is required, it returns a set of edits to provide to OCI1.UpdateLayerInfos,
-// and edits *options to not try decryption again.
-func (m *manifestOCI1) layerEditsOfOCIOnlyFeatures(options *types.ManifestUpdateOptions) ([]types.BlobInfo, error) {
-	if options == nil || options.LayerInfos == nil {
+// and edits *edits to not try decryption again.
+func (m *manifestOCI1) layerEditsOfOCIOnlyFeatures(edits *EditedImageEdits) ([]types.BlobInfo, error) {
+	if edits.LayerInfos == nil {
 		return nil, nil
 	}
 
 	originalInfos := m.LayerInfos()
-	if len(originalInfos) != len(options.LayerInfos) {
-		return nil, fmt.Errorf("preparing to decrypt before conversion: %d layers vs. %d layer edits", len(originalInfos), len(options.LayerInfos))
+	if len(originalInfos) != len(edits.LayerInfos) {
+		return nil, fmt.Errorf("preparing to decrypt before conversion: %d layers vs. %d layer edits", len(originalInfos), len(edits.LayerInfos))
 	}
 
 	ociOnlyEdits := slices.Clone(originalInfos) // Start with a full copy so that we don't forget to copy anything: use the current data in full unless we intentionally deviate.
-	laterEdits := slices.Clone(options.LayerInfos)
+	laterEdits := slices.Clone(edits.LayerInfos)
 	needsOCIOnlyEdits := false
-	for i, edit := range options.LayerInfos {
+	for i, edit := range edits.LayerInfos {
 		// Unless determined otherwise, don't do any compression-related MIME type conversions. m.LayerInfos() should not set these edit instructions, but be explicit.
 		ociOnlyEdits[i].CompressionOperation = types.PreserveOriginal
 		ociOnlyEdits[i].CompressionAlgorithm = nil
@@ -235,15 +230,14 @@ func (m *manifestOCI1) layerEditsOfOCIOnlyFeatures(options *types.ManifestUpdate
 		return nil, nil
 	}
 
-	options.LayerInfos = laterEdits
+	edits.LayerInfos = laterEdits
 	return ociOnlyEdits, nil
 }
 
 // convertToManifestSchema2 returns a genericManifest implementation converted to manifest.DockerV2Schema2MediaType.
-// It may use options.InformationOnly and also adjust *options to be appropriate for editing the returned
-// value.
+// It may use info and also adjust *edits to be appropriate for editing the returned value.
 // This does not change the state of the original manifestOCI1 object.
-func (m *manifestOCI1) convertToManifestSchema2(_ context.Context, options *types.ManifestUpdateOptions) (*manifestSchema2, error) {
+func (m *manifestOCI1) convertToManifestSchema2(edits *EditedImageEdits) (*manifestSchema2, error) {
 	if m.m.Config.MediaType != imgspecv1.MediaTypeImageConfig {
 		return nil, internalManifest.NewNonImageArtifactError(&m.m.Manifest)
 	}
@@ -252,7 +246,7 @@ func (m *manifestOCI1) convertToManifestSchema2(_ context.Context, options *type
 	// which remove OCI-specific features, because trying to convert those layers would fail.
 	// So, do the layer updates for decryption, and for conversions from Zstd.
 	ociManifest := m.m
-	ociOnlyEdits, err := m.layerEditsOfOCIOnlyFeatures(options)
+	ociOnlyEdits, err := m.layerEditsOfOCIOnlyFeatures(edits)
 	if err != nil {
 		return nil, err
 	}
@@ -302,21 +296,20 @@ func (m *manifestOCI1) convertToManifestSchema2(_ context.Context, options *type
 }
 
 // convertToManifestSchema1 returns a genericManifest implementation converted to manifest.DockerV2Schema1{Signed,}MediaType.
-// It may use options.InformationOnly and also adjust *options to be appropriate for editing the returned
-// value.
+// It may use info and also adjust *edits to be appropriate for editing the returned value.
 // This does not change the state of the original manifestOCI1 object.
-func (m *manifestOCI1) convertToManifestSchema1(ctx context.Context, options *types.ManifestUpdateOptions) (genericManifest, error) {
+func (m *manifestOCI1) convertToManifestSchema1(ctx context.Context, edits *EditedImageEdits, info EditedImageInfo) (genericManifest, error) {
 	if m.m.Config.MediaType != imgspecv1.MediaTypeImageConfig {
 		return nil, internalManifest.NewNonImageArtifactError(&m.m.Manifest)
 	}
 
 	// We can't directly convert images to V1, but we can transitively convert via a V2 image
-	m2, err := m.convertToManifestSchema2(ctx, options)
+	m2, err := m.convertToManifestSchema2(edits)
 	if err != nil {
 		return nil, err
 	}
 
-	return m2.convertToManifestSchema1(ctx, options)
+	return m2.convertToManifestSchema1(ctx, edits, info)
 }
 
 // SupportsEncryption returns if encryption is supported for the manifest type

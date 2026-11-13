@@ -15,6 +15,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"go.podman.io/image/v5/docker/reference"
 	"go.podman.io/image/v5/internal/iolimits"
+	"go.podman.io/image/v5/internal/private"
 	"go.podman.io/image/v5/manifest"
 	"go.podman.io/image/v5/pkg/blobinfocache/none"
 	"go.podman.io/image/v5/types"
@@ -34,6 +35,7 @@ var GzippedEmptyLayer = []byte{
 // GzippedEmptyLayerDigest is a digest of GzippedEmptyLayer
 //
 // This is publicly visible as c/image/image.GzippedEmptyLayerDigest.
+// FIXME: This uses digest.SHA256, users should be flexible both in uploads and in matching.
 const GzippedEmptyLayerDigest = digest.Digest("sha256:a3ed95caeb02ffe68cdd9fd84406680ae93d633cb16422d00e8a7c22955b46d4")
 
 type manifestSchema2 struct {
@@ -48,8 +50,8 @@ func manifestSchema2FromManifest(src types.ImageSource, manifestBlob []byte) (ge
 		return nil, err
 	}
 	return &manifestSchema2{
-		src: src,
 		m:   m,
+		src: src,
 	}, nil
 }
 
@@ -148,26 +150,22 @@ func (m *manifestSchema2) Inspect(ctx context.Context) (*types.ImageInspectInfo,
 	return m.m.Inspect(getter)
 }
 
-// UpdatedImageNeedsLayerDiffIDs returns true iff UpdatedImage(options) needs InformationOnly.LayerDiffIDs.
-// This is a horribly specific interface, but computing InformationOnly.LayerDiffIDs can be very expensive to compute
+// EditedImageNeedsLayerDiffIDs returns true iff EditedImage(options) needs EditedImageInfo.LayerDiffIDs.
+// This is a horribly specific interface, but computing EditedImageInfo.LayerDiffIDs can be very expensive to compute
 // (most importantly it forces us to download the full layers even if they are already present at the destination).
-func (m *manifestSchema2) UpdatedImageNeedsLayerDiffIDs(options types.ManifestUpdateOptions) bool {
+func (m *manifestSchema2) EditedImageNeedsLayerDiffIDs(edits EditedImageEdits) bool {
 	return false
 }
 
-// UpdatedImage returns a types.Image modified according to options.
-// This does not change the state of the original Image object.
-// The returned error will be a manifest.ManifestLayerCompressionIncompatibilityError
-// if the CompressionOperation and CompressionAlgorithm specified in one or more
-// options.LayerInfos items is anything other than gzip.
-func (m *manifestSchema2) UpdatedImage(ctx context.Context, options types.ManifestUpdateOptions) (types.Image, error) {
+// editedImage FIXME
+func (m *manifestSchema2) editedImage(ctx context.Context, edits EditedImageEdits, info EditedImageInfo) (genericManifest, error) {
 	copy := manifestSchema2{ // NOTE: This is not a deep copy, it still shares slices etc.
 		src:        m.src,
 		configBlob: m.configBlob,
 		m:          manifest.Schema2Clone(m.m),
 	}
 
-	converted, err := convertManifestIfRequiredWithUpdate(ctx, options, map[string]manifestConvertFn{
+	converted, err := convertManifestIfRequiredWithUpdate(ctx, edits, info, map[string]manifestConvertFn{
 		manifest.DockerV2Schema1MediaType:       copy.convertToManifestSchema1,
 		manifest.DockerV2Schema1SignedMediaType: copy.convertToManifestSchema1,
 		imgspecv1.MediaTypeImageManifest:        copy.convertToManifestOCI1,
@@ -181,14 +179,18 @@ func (m *manifestSchema2) UpdatedImage(ctx context.Context, options types.Manife
 	}
 
 	// No conversion required, update manifest
-	if options.LayerInfos != nil {
-		if err := copy.m.UpdateLayerInfos(options.LayerInfos); err != nil {
+	if edits.ConfigDigest != "" {
+		copy.m.ConfigDescriptor.Digest = edits.ConfigDigest
+	}
+
+	if edits.LayerInfos != nil {
+		if err := copy.m.UpdateLayerInfos(edits.LayerInfos); err != nil {
 			return nil, err
 		}
 	}
-	// Ignore options.EmbeddedDockerReference: it may be set when converting from schema1 to schema2, but we really don't care.
+	// Ignore edits.EmbeddedDockerReference: it may be set when converting from schema1 to schema2, but we really don't care.
 
-	return memoryImageFromManifest(&copy), nil
+	return &copy, nil
 }
 
 func oci1DescriptorFromSchema2Descriptor(d manifest.Schema2Descriptor) imgspecv1.Descriptor {
@@ -201,10 +203,9 @@ func oci1DescriptorFromSchema2Descriptor(d manifest.Schema2Descriptor) imgspecv1
 }
 
 // convertToManifestOCI1 returns a genericManifest implementation converted to imgspecv1.MediaTypeImageManifest.
-// It may use options.InformationOnly and also adjust *options to be appropriate for editing the returned
-// value.
+// It may use info and also adjust *edits to be appropriate for editing the returned value.
 // This does not change the state of the original manifestSchema2 object.
-func (m *manifestSchema2) convertToManifestOCI1(ctx context.Context, _ *types.ManifestUpdateOptions) (genericManifest, error) {
+func (m *manifestSchema2) convertToManifestOCI1(ctx context.Context, _ *EditedImageEdits, _ EditedImageInfo) (genericManifest, error) {
 	configOCI, err := m.OCIConfig(ctx)
 	if err != nil {
 		return nil, err
@@ -243,19 +244,16 @@ func (m *manifestSchema2) convertToManifestOCI1(ctx context.Context, _ *types.Ma
 }
 
 // convertToManifestSchema1 returns a genericManifest implementation converted to manifest.DockerV2Schema1{Signed,}MediaType.
-// It may use options.InformationOnly and also adjust *options to be appropriate for editing the returned
-// value.
+// It may use info and also adjust *edits to be appropriate for editing the returned value.
 // This does not change the state of the original manifestSchema2 object.
 //
 // Based on docker/distribution/manifest/schema1/config_builder.go
-func (m *manifestSchema2) convertToManifestSchema1(ctx context.Context, options *types.ManifestUpdateOptions) (genericManifest, error) {
-	dest := options.InformationOnly.Destination
-
-	var convertedLayerUpdates []types.BlobInfo // Only used if options.LayerInfos != nil
-	if options.LayerInfos != nil {
-		if len(options.LayerInfos) != len(m.m.LayersDescriptors) {
+func (m *manifestSchema2) convertToManifestSchema1(ctx context.Context, edits *EditedImageEdits, info EditedImageInfo) (genericManifest, error) {
+	var convertedLayerUpdates []types.BlobInfo // Only used if edits.LayerInfos != nil
+	if edits.LayerInfos != nil {
+		if len(edits.LayerInfos) != len(m.m.LayersDescriptors) {
 			return nil, fmt.Errorf("Error converting image: layer edits for %d layers vs %d existing layers",
-				len(options.LayerInfos), len(m.m.LayersDescriptors))
+				len(edits.LayerInfos), len(m.m.LayersDescriptors))
 		}
 		convertedLayerUpdates = []types.BlobInfo{}
 	}
@@ -276,6 +274,7 @@ func (m *manifestSchema2) convertToManifestSchema1(ctx context.Context, options 
 	var parentV1ID string // Set in the loop
 	v1ID := ""
 	haveGzippedEmptyLayer := false
+	var gzippedEmptyLayerBlobInfo types.BlobInfo // Valid if haveGzippedEmptyLayer.
 	if len(imageConfig.History) == 0 {
 		// What would this even mean?! Anyhow, the rest of the code depends on fsLayers[0] and history[0] existing.
 		return nil, fmt.Errorf("Cannot convert an image with 0 history entries to %s", manifest.DockerV2Schema1SignedMediaType)
@@ -286,31 +285,37 @@ func (m *manifestSchema2) convertToManifestSchema1(ctx context.Context, options 
 
 		var blobDigest digest.Digest
 		if historyEntry.EmptyLayer {
-			emptyLayerBlobInfo := types.BlobInfo{Digest: GzippedEmptyLayerDigest, Size: int64(len(GzippedEmptyLayer))}
-
+			// We assume that the effect of info.Digests on PutBlobWithOptions is consistent,
+			// i.e. that we only need to upload the empty layer once.
 			if !haveGzippedEmptyLayer {
 				logrus.Debugf("Uploading empty layer during conversion to schema 1")
-				// Ideally we should update the relevant BlobInfoCache about this layer, but that would require passing it down here,
-				// and anyway this blob is so small that it’s easier to just copy it than to worry about figuring out another location where to get it.
-				info, err := dest.PutBlob(ctx, bytes.NewReader(GzippedEmptyLayer), emptyLayerBlobInfo, none.NoCache, false)
+				info, err := info.Destination.PutBlobWithOptions(ctx, bytes.NewReader(GzippedEmptyLayer),
+					// We don’t set Digest: GzippedEmptyLayerDigest to give the destination the most possible
+					// flexibility in choosing an algorithm.
+					types.BlobInfo{Digest: "", Size: int64(len(GzippedEmptyLayer))},
+					private.PutBlobOptions{
+						Cache:      info.Cache,
+						IsConfig:   false,
+						Digests:    info.Digests,
+						EmptyLayer: true,
+						LayerIndex: &v2Index,
+					})
 				if err != nil {
 					return nil, fmt.Errorf("uploading empty layer: %w", err)
 				}
-				if info.Digest != emptyLayerBlobInfo.Digest {
-					return nil, fmt.Errorf("Internal error: Uploaded empty layer has digest %#v instead of %s", info.Digest, emptyLayerBlobInfo.Digest)
-				}
+				gzippedEmptyLayerBlobInfo = types.BlobInfo{Digest: info.Digest, Size: info.Size}
 				haveGzippedEmptyLayer = true
 			}
-			if options.LayerInfos != nil {
-				convertedLayerUpdates = append(convertedLayerUpdates, emptyLayerBlobInfo)
+			if edits.LayerInfos != nil {
+				convertedLayerUpdates = append(convertedLayerUpdates, gzippedEmptyLayerBlobInfo)
 			}
-			blobDigest = emptyLayerBlobInfo.Digest
+			blobDigest = gzippedEmptyLayerBlobInfo.Digest
 		} else {
 			if nonemptyLayerIndex >= len(m.m.LayersDescriptors) {
 				return nil, fmt.Errorf("Invalid image configuration, needs more than the %d distributed layers", len(m.m.LayersDescriptors))
 			}
-			if options.LayerInfos != nil {
-				convertedLayerUpdates = append(convertedLayerUpdates, options.LayerInfos[nonemptyLayerIndex])
+			if edits.LayerInfos != nil {
+				convertedLayerUpdates = append(convertedLayerUpdates, edits.LayerInfos[nonemptyLayerIndex])
 			}
 			blobDigest = m.m.LayersDescriptors[nonemptyLayerIndex].Digest
 			nonemptyLayerIndex++
@@ -353,10 +358,10 @@ func (m *manifestSchema2) convertToManifestSchema1(ctx context.Context, options 
 	}
 	history[0].V1Compatibility = string(v1Config)
 
-	if options.LayerInfos != nil {
-		options.LayerInfos = convertedLayerUpdates
+	if edits.LayerInfos != nil {
+		edits.LayerInfos = convertedLayerUpdates
 	}
-	m1, err := manifestSchema1FromComponents(dest.Reference().DockerReference(), fsLayers, history, imageConfig.Architecture)
+	m1, err := manifestSchema1FromComponents(info.Destination.Reference().DockerReference(), fsLayers, history, imageConfig.Architecture)
 	if err != nil {
 		return nil, err // This should never happen, we should have created all the components correctly.
 	}

@@ -4,8 +4,12 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/opencontainers/go-digest"
 	imgspecv1 "github.com/opencontainers/image-spec/specs-go/v1"
 	"go.podman.io/image/v5/docker/reference"
+	"go.podman.io/image/v5/internal/blobinfocache"
+	"go.podman.io/image/v5/internal/digests"
+	"go.podman.io/image/v5/internal/private"
 	"go.podman.io/image/v5/manifest"
 	"go.podman.io/image/v5/types"
 )
@@ -14,14 +18,10 @@ import (
 // The public methods are related to types.Image so that embedding a genericManifest implements most of it,
 // but there are also public methods that are only visible by packages that can import c/image/internal/image.
 type genericManifest interface {
+	genericEditableImage
+
 	serialize() ([]byte, error)
 	manifestMIMEType() string
-	// ConfigInfo returns a complete BlobInfo for the separate config object, or a BlobInfo{Digest:""} if there isn't a separate object.
-	// Note that the config object may not exist in the underlying storage in the return value of UpdatedImage! Use ConfigBlob() below.
-	ConfigInfo() types.BlobInfo
-	// ConfigBlob returns the blob described by ConfigInfo, iff ConfigInfo().Digest != ""; nil otherwise.
-	// The result is cached; it is OK to call this however often you need.
-	ConfigBlob(context.Context) ([]byte, error)
 	// OCIConfig returns the image configuration as per OCI v1 image-spec. Information about
 	// layers in the resulting configuration isn't guaranteed to be returned to due how
 	// old image manifests work (docker v2s1 especially).
@@ -36,13 +36,6 @@ type genericManifest interface {
 	EmbeddedDockerReferenceConflicts(ref reference.Named) bool
 	// Inspect returns various information for (skopeo inspect) parsed from the manifest and configuration.
 	Inspect(context.Context) (*types.ImageInspectInfo, error)
-	// UpdatedImageNeedsLayerDiffIDs returns true iff UpdatedImage(options) needs InformationOnly.LayerDiffIDs.
-	// This is a horribly specific interface, but computing InformationOnly.LayerDiffIDs can be very expensive to compute
-	// (most importantly it forces us to download the full layers even if they are already present at the destination).
-	UpdatedImageNeedsLayerDiffIDs(options types.ManifestUpdateOptions) bool
-	// UpdatedImage returns a types.Image modified according to options.
-	// This does not change the state of the original Image object.
-	UpdatedImage(ctx context.Context, options types.ManifestUpdateOptions) (types.Image, error)
 	// SupportsEncryption returns if encryption is supported for the manifest type
 	//
 	// Deprecated: Initially used to determine if a manifest can be copied from a source manifest type since
@@ -59,6 +52,70 @@ type genericManifest interface {
 	// algorithms depends not on the current format, but possibly on the target of a conversion (if UpdatedImage converts
 	// to a different manifest format).
 	CanChangeLayerCompression(mimeType string) bool
+	// EditedImageNeedsLayerDiffIDs returns true iff EditedImage(options) needs EditedImageInfo.LayerDiffIDs.
+	// This is a horribly specific interface, but computing EditedImageInfo.LayerDiffIDs can be very expensive to compute
+	// (most importantly it forces us to download the full layers even if they are already present at the destination).
+	EditedImageNeedsLayerDiffIDs(edits EditedImageEdits) bool
+}
+
+// genericEditableImage is the subset of EditableImage which a genericManifest needs to implement
+type genericEditableImage interface {
+	// ConfigInfo returns a complete BlobInfo for the separate config object, or a BlobInfo{Digest:""} if there isn't a separate object.
+	// Note that the config object may not exist in the underlying storage in the return value of UpdatedImage! Use ConfigBlob() below.
+	ConfigInfo() types.BlobInfo
+	// ConfigBlob returns the blob described by ConfigInfo, iff ConfigInfo().Digest != ""; nil otherwise.
+	// The result is cached; it is OK to call this however often you need.
+	ConfigBlob(context.Context) ([]byte, error)
+
+	// The following methods are not a part of types.Image:
+	// ===
+
+	// editedImage FIXME
+	editedImage(ctx context.Context, edits EditedImageEdits, info EditedImageInfo) (genericManifest, error)
+}
+
+// EditableImage is either a SourcedImage, or an outcome of EditedImage(),
+// which allows either consuming the outcome of the edits, or calling EditedImage() again.
+type EditableImage interface {
+	genericEditableImage // FIXME?! do we really need 3 interfaces here?
+
+	// Manifest is like ImageSource.GetManifest, but the result is cached; it is OK to call this however often you need.
+	Manifest(ctx3 context.Context) ([]byte, string, error)
+}
+
+func EditedImage(ctx context.Context, image EditableImage, edits EditedImageEdits, info EditedImageInfo) (EditableImage, error) {
+	// FIXME: Is this structure with an external function necessary?!
+	// This returns genericManifest because we have two kinds of callers:
+	// editedImage returns genericManifest because we have two kinds of callers:
+	// - Internally, copy.Image only needs the narrow interface of EditableImage,
+	//   but it needs SourcedImage to conform to EditableImage as well.
+	// - External callers of UpdatedImage expect a full types.Image
+	// We could define an internal superset of types.Image that satisfies both, but nothing
+	// really needs that, and ultimately the outcome of an image edit is always a memoryImage;
+	// so we can factor the creation of the memoryImage out of the schema-specific implementations.
+	m, err := image.editedImage(ctx, edits, info)
+	if err != nil {
+		return nil, err
+	}
+	return memoryImageFromManifest(m), nil
+}
+
+// EditedImageEdits collects requested edits in genericManifest.EditedImage as named optional arguments.
+type EditedImageEdits struct {
+	ConfigDigest            digest.Digest    // Or ""
+	LayerInfos              []types.BlobInfo // Complete BlobInfos (size+digest+urls+annotations) which should replace the originals, in order (the root layer first, and then successive layered layers). BlobInfos' MediaType fields are ignored.
+	EmbeddedDockerReference reference.Named
+	ManifestMIMEType        string
+}
+
+// EditedImageInfo provides optional context which may or may not be used.
+type EditedImageInfo struct {
+	Destination private.ImageDestination     // and yes, UpdatedImage may write to Destination (see the schema2 → schema1 conversion logic in image/docker_schema2.go)
+	Cache       blobinfocache.BlobInfoCache2 // Cache to optionally update with the uploaded blob or look up blob infos.
+	Digests     digests.Options
+
+	LayerInfos   []types.BlobInfo // Complete BlobInfos (size+digest) which have been uploaded, in order (the root layer first, and then successive layered layers)
+	LayerDiffIDs []digest.Digest  // Digest values for the _uncompressed_ contents of the blobs which have been uploaded, in the same order.
 }
 
 // manifestInstanceFromBlob returns a genericManifest implementation for (manblob, mt) in src.
@@ -91,31 +148,32 @@ func manifestLayerInfosToBlobInfos(layers []manifest.LayerInfo) []types.BlobInfo
 
 // manifestConvertFn (a method of genericManifest object) returns a genericManifest implementation
 // converted to a specific manifest MIME type.
-// It may use options.InformationOnly and also adjust *options to be appropriate for editing the returned
-// value.
+// It may use info and also adjust *edits to be appropriate for editing the returned value.
 // This does not change the state of the original genericManifest object.
-type manifestConvertFn func(ctx context.Context, options *types.ManifestUpdateOptions) (genericManifest, error)
+type manifestConvertFn func(ctx context.Context, edits *EditedImageEdits, info EditedImageInfo) (genericManifest, error)
 
 // convertManifestIfRequiredWithUpdate will run conversion functions of a manifest if
-// required and re-apply the options to the converted type.
+// required and re-apply the edits to the converted type.
 // It returns (nil, nil) if no conversion was requested.
-func convertManifestIfRequiredWithUpdate(ctx context.Context, options types.ManifestUpdateOptions, converters map[string]manifestConvertFn) (types.Image, error) {
-	if options.ManifestMIMEType == "" {
+func convertManifestIfRequiredWithUpdate(ctx context.Context, edits EditedImageEdits, info EditedImageInfo,
+	converters map[string]manifestConvertFn,
+) (genericManifest, error) {
+	if edits.ManifestMIMEType == "" {
 		return nil, nil
 	}
 
-	converter, ok := converters[options.ManifestMIMEType]
+	converter, ok := converters[edits.ManifestMIMEType]
 	if !ok {
-		return nil, fmt.Errorf("Unsupported conversion type: %v", options.ManifestMIMEType)
+		return nil, fmt.Errorf("Unsupported conversion type: %v", edits.ManifestMIMEType)
 	}
 
-	optionsCopy := options
-	convertedManifest, err := converter(ctx, &optionsCopy)
+	editsCopy := edits
+	convertedManifest, err := converter(ctx, &editsCopy, info)
 	if err != nil {
 		return nil, err
 	}
 	convertedImage := memoryImageFromManifest(convertedManifest)
 
-	optionsCopy.ManifestMIMEType = ""
-	return convertedImage.UpdatedImage(ctx, optionsCopy)
+	editsCopy.ManifestMIMEType = ""
+	return convertedImage.editedImage(ctx, editsCopy, info)
 }
