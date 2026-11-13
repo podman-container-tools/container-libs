@@ -36,7 +36,7 @@ type imageCopier struct {
 	// WARNING: If you are adding new reasons to change manifestEdits, also update the
 	// OptimizeDestinationImageAlreadyExists short-circuit conditions.
 	manifestEdits                 image.EditedImageEdits
-	manifestEditInfo              types.ManifestUpdateInformation
+	manifestEditInfo              image.EditedImageInfo
 	src                           *image.SourcedImage
 	manifestConversionPlan        manifestConversionPlan
 	diffIDsAreNeeded              bool
@@ -140,7 +140,7 @@ func (c *copier) copySingleImage(ctx context.Context, unparsedImage *image.Unpar
 
 	ic := imageCopier{
 		c: c,
-		manifestEditInfo: types.ManifestUpdateInformation{
+		manifestEditInfo: image.EditedImageInfo{
 			Destination: c.dest,
 		},
 		src: src,
