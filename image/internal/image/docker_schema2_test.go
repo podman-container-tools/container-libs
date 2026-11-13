@@ -464,12 +464,12 @@ func TestManifestSchema2EditedImage(t *testing.T) {
 	layerInfos := append(slices.Clone(original.LayerInfos()[1:]), original.LayerInfos()[0])
 	res, err := original.editedImage(context.Background(), EditedImageEdits{
 		LayerInfos: layerInfos,
-	}, types.ManifestUpdateInformation{})
+	}, EditedImageInfo{})
 	require.NoError(t, err)
 	assert.Equal(t, layerInfos, res.LayerInfos())
 	_, err = original.editedImage(context.Background(), EditedImageEdits{
 		LayerInfos: append(layerInfos, layerInfos[0]),
-	}, types.ManifestUpdateInformation{})
+	}, EditedImageInfo{})
 	assert.Error(t, err)
 
 	// EmbeddedDockerReference:
@@ -478,7 +478,7 @@ func TestManifestSchema2EditedImage(t *testing.T) {
 	require.NoError(t, err)
 	res, err = original.editedImage(context.Background(), EditedImageEdits{
 		EmbeddedDockerReference: embeddedRef,
-	}, types.ManifestUpdateInformation{})
+	}, EditedImageInfo{})
 	require.NoError(t, err)
 	nonEmbeddedRef, err := reference.ParseNormalizedNamed("notbusybox:notlatest")
 	require.NoError(t, err)
@@ -493,7 +493,7 @@ func TestManifestSchema2EditedImage(t *testing.T) {
 	} {
 		_, err = original.editedImage(context.Background(), EditedImageEdits{
 			ManifestMIMEType: mime,
-		}, types.ManifestUpdateInformation{
+		}, EditedImageInfo{
 			Destination: &memoryImageDest{ref: originalSrc.ref},
 		})
 		assert.NoError(t, err, mime)
@@ -504,7 +504,7 @@ func TestManifestSchema2EditedImage(t *testing.T) {
 	} {
 		_, err = original.editedImage(context.Background(), EditedImageEdits{
 			ManifestMIMEType: mime,
-		}, types.ManifestUpdateInformation{})
+		}, EditedImageInfo{})
 		assert.Error(t, err, mime)
 	}
 
@@ -522,7 +522,7 @@ func TestConvertToManifestOCI(t *testing.T) {
 	original := manifestSchema2FromFixture(t, originalSrc, "schema2.json", false)
 	res, err := original.editedImage(context.Background(), EditedImageEdits{
 		ManifestMIMEType: imgspecv1.MediaTypeImageManifest,
-	}, types.ManifestUpdateInformation{})
+	}, EditedImageInfo{})
 	require.NoError(t, err)
 
 	convertedJSON, mt, err := res.Manifest(context.Background())
@@ -538,7 +538,7 @@ func TestConvertToManifestOCI(t *testing.T) {
 	res, err = original.editedImage(context.Background(), EditedImageEdits{
 		LayerInfos:       layerInfosWithCryptoOperation(original.LayerInfos(), types.Encrypt),
 		ManifestMIMEType: imgspecv1.MediaTypeImageManifest,
-	}, types.ManifestUpdateInformation{})
+	}, EditedImageInfo{})
 	require.NoError(t, err)
 	convertedJSON, mt, err = res.Manifest(context.Background())
 	require.NoError(t, err)
@@ -580,7 +580,7 @@ func TestConvertToManifestOCIAllMediaTypes(t *testing.T) {
 	original := manifestSchema2FromFixture(t, originalSrc, "schema2-all-media-types.json", false)
 	res, err := original.editedImage(context.Background(), EditedImageEdits{
 		ManifestMIMEType: imgspecv1.MediaTypeImageManifest,
-	}, types.ManifestUpdateInformation{})
+	}, EditedImageInfo{})
 	require.NoError(t, err)
 	convertedJSON, mt, err := res.Manifest(context.Background())
 	require.NoError(t, err)
@@ -601,7 +601,7 @@ func TestConvertToManifestSchema1(t *testing.T) {
 	originalSrc := newSchema2ImageSource(t, "httpd-copy:latest")
 	original := manifestSchema2FromFixture(t, originalSrc, "schema2.json", false)
 	memoryDest := &memoryImageDest{ref: originalSrc.ref}
-	memoryDestInfo := types.ManifestUpdateInformation{
+	memoryDestInfo := EditedImageInfo{
 		Destination: memoryDest,
 	}
 	res, err := original.editedImage(context.Background(), EditedImageEdits{
@@ -705,7 +705,7 @@ func TestConvertSchema2ToManifestOCIWithAnnotations(t *testing.T) {
 	res, err := original.editedImage(context.Background(), EditedImageEdits{
 		ManifestMIMEType: imgspecv1.MediaTypeImageManifest,
 		LayerInfos:       layerInfoOverwrites,
-	}, types.ManifestUpdateInformation{})
+	}, EditedImageInfo{})
 	require.NoError(t, err)
 	assert.Equal(t, res.LayerInfos(), layerInfoOverwrites)
 
@@ -715,7 +715,7 @@ func TestConvertSchema2ToManifestOCIWithAnnotations(t *testing.T) {
 	res, err = original.editedImage(context.Background(), EditedImageEdits{
 		ManifestMIMEType: "",
 		LayerInfos:       layerInfoOverwrites,
-	}, types.ManifestUpdateInformation{})
+	}, EditedImageInfo{})
 	require.NoError(t, err)
 	assert.NotEqual(t, res.LayerInfos(), layerInfoOverwrites)
 }

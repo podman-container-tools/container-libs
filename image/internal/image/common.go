@@ -31,7 +31,12 @@ func (i *commonImage) UpdatedImageNeedsLayerDiffIDs(options types.ManifestUpdate
 func (i *commonImage) UpdatedImage(ctx context.Context, options types.ManifestUpdateOptions) (types.Image, error) {
 	return i.genericManifest.editedImage(ctx,
 		editedImageEditsFromManifestUpdateOptions(&options),
-		options.InformationOnly)
+		EditedImageInfo{
+			Destination: options.InformationOnly.Destination,
+
+			LayerInfos:   options.InformationOnly.LayerInfos,
+			LayerDiffIDs: options.InformationOnly.LayerDiffIDs,
+		})
 }
 
 // editedImageEditsFromManifestUpdateOptions returns EditedImageEdits corresponding to types.ManifestUpdateOptions.

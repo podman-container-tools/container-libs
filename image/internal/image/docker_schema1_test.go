@@ -59,7 +59,7 @@ var schema1FixtureLayerDiffIDs = []digest.Digest{
 	"sha256:9bd63850e406167b4751f5050f6dc0ebd789bb5ef5e5c6c31ed062bda8c063e8",
 }
 
-var schema1FixtureInfo = types.ManifestUpdateInformation{
+var schema1FixtureInfo = EditedImageInfo{
 	LayerInfos:   schema1FixtureLayerInfos,
 	LayerDiffIDs: schema1FixtureLayerDiffIDs,
 }
@@ -385,12 +385,12 @@ func TestManifestSchema1EditedImage(t *testing.T) {
 	layerInfos := append(slices.Clone(original.LayerInfos()[1:]), original.LayerInfos()[0])
 	res, err := original.editedImage(context.Background(), EditedImageEdits{
 		LayerInfos: layerInfos,
-	}, types.ManifestUpdateInformation{})
+	}, EditedImageInfo{})
 	require.NoError(t, err)
 	assert.Equal(t, layerInfos, res.LayerInfos())
 	_, err = original.editedImage(context.Background(), EditedImageEdits{
 		LayerInfos: append(layerInfos, layerInfos[0]),
-	}, types.ManifestUpdateInformation{})
+	}, EditedImageInfo{})
 	assert.Error(t, err)
 
 	// EmbeddedDockerReference:
@@ -403,7 +403,7 @@ func TestManifestSchema1EditedImage(t *testing.T) {
 		require.NoError(t, err)
 		res, err = original.editedImage(context.Background(), EditedImageEdits{
 			EmbeddedDockerReference: embeddedRef,
-		}, types.ManifestUpdateInformation{})
+		}, EditedImageInfo{})
 		require.NoError(t, err)
 		// The previous embedded docker reference now does not match.
 		nonEmbeddedRef, err := reference.ParseNormalizedNamed("rhosp12/openstack-nova-api:latest")
@@ -428,7 +428,7 @@ func TestManifestSchema1EditedImage(t *testing.T) {
 	} {
 		_, err = original.editedImage(context.Background(), EditedImageEdits{
 			ManifestMIMEType: mime,
-		}, types.ManifestUpdateInformation{})
+		}, EditedImageInfo{})
 		assert.Error(t, err, mime)
 	}
 
@@ -467,7 +467,7 @@ func TestManifestSchema1ConvertToSchema2(t *testing.T) {
 	res, err = original.editedImage(context.Background(), EditedImageEdits{
 		LayerInfos:       updatedLayers,
 		ManifestMIMEType: manifest.DockerV2Schema2MediaType,
-	}, types.ManifestUpdateInformation{
+	}, EditedImageInfo{
 		LayerInfos:   updatedLayers,
 		LayerDiffIDs: schema1WithThrowawaysFixtureLayerDiffIDs,
 	})
@@ -513,7 +513,7 @@ func TestManifestSchema1ConvertToSchema2(t *testing.T) {
 	_, err = original.editedImage(context.Background(), EditedImageEdits{
 		LayerInfos:       encryptedLayers,
 		ManifestMIMEType: manifest.DockerV2Schema2MediaType,
-	}, types.ManifestUpdateInformation{
+	}, EditedImageInfo{
 		LayerInfos:   updatedLayers,
 		LayerDiffIDs: schema1WithThrowawaysFixtureLayerDiffIDs,
 	})
@@ -548,7 +548,7 @@ func TestManifestSchema1ConvertToManifestOCI1(t *testing.T) {
 	res, err = original.editedImage(context.Background(), EditedImageEdits{
 		LayerInfos:       updatedLayers,
 		ManifestMIMEType: imgspecv1.MediaTypeImageManifest,
-	}, types.ManifestUpdateInformation{
+	}, EditedImageInfo{
 		LayerInfos:   updatedLayers,
 		LayerDiffIDs: schema1WithThrowawaysFixtureLayerDiffIDs,
 	})
@@ -594,7 +594,7 @@ func TestManifestSchema1ConvertToManifestOCI1(t *testing.T) {
 	res, err = original.editedImage(context.Background(), EditedImageEdits{
 		LayerInfos:       encryptedLayers,
 		ManifestMIMEType: imgspecv1.MediaTypeImageManifest,
-	}, types.ManifestUpdateInformation{
+	}, EditedImageInfo{
 		LayerInfos:   encryptedLayers,
 		LayerDiffIDs: schema1WithThrowawaysFixtureLayerDiffIDs,
 	})
