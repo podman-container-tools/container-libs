@@ -33,9 +33,6 @@ var ErrNoSuchSecret = define.ErrNoSuchSecret
 // errSecretNameInUse indicates that the secret name is already in use.
 var errSecretNameInUse = errors.New("secret name in use")
 
-// errInvalidSecretName indicates that the secret name is invalid.
-var errInvalidSecretName = errors.New("invalid secret name")
-
 // errInvalidDriver indicates that the driver type is invalid.
 var errInvalidDriver = errors.New("invalid driver")
 
@@ -164,11 +161,11 @@ func (s *SecretsManager) Store(name string, data []byte, driverType string, opti
 	}
 
 	if len(data) == 0 || len(data) >= maxSecretSize {
-		return "", errDataSize
+		return "", fmt.Errorf("%w%.0w", errDataSize, define.ErrInvalidArg)
 	}
 
 	if options.IgnoreIfExists && options.Replace {
-		return "", errIgnoreIfExistsAndReplace
+		return "", fmt.Errorf("%w%.0w", errIgnoreIfExistsAndReplace, define.ErrInvalidArg)
 	}
 
 	var secr *Secret
@@ -182,7 +179,7 @@ func (s *SecretsManager) Store(name string, data []byte, driverType string, opti
 
 	if exist {
 		if !options.Replace && !options.IgnoreIfExists {
-			return "", fmt.Errorf("%s: %w", name, errSecretNameInUse)
+			return "", fmt.Errorf("%s: %w%.0w", name, errSecretNameInUse, define.ErrSecretExists)
 		}
 		secr, err = s.lookupSecret(name)
 		if err != nil {
@@ -323,7 +320,7 @@ func (s *SecretsManager) LookupSecretData(nameOrID string) (*Secret, []byte, err
 // validateSecretName checks if the secret name is valid.
 func validateSecretName(name string) error {
 	if len(name) == 0 || len(name) > 253 || strings.ContainsAny(name, ",/=\000") {
-		return fmt.Errorf("secret name %q can not include '=', '/', ',', or the '\\0' (NULL) and be between 1 and 253 characters: %w", name, errInvalidSecretName)
+		return fmt.Errorf("secret name %q can not include '=', '/', ',', or the '\\0' (NULL) and be between 1 and 253 characters%.0w", name, define.ErrInvalidArg)
 	}
 	return nil
 }
@@ -335,11 +332,11 @@ func getDriver(name string, opts map[string]string) (SecretsDriver, error) {
 		if path, ok := opts["path"]; ok {
 			return filedriver.NewDriver(path)
 		}
-		return nil, fmt.Errorf("need path for filedriver: %w", errInvalidDriverOpt)
+		return nil, fmt.Errorf("need path for filedriver: %w%.0w", errInvalidDriverOpt, define.ErrInvalidArg)
 	case "pass":
 		return passdriver.NewDriver(opts)
 	case "shell":
 		return shelldriver.NewDriver(opts)
 	}
-	return nil, errInvalidDriver
+	return nil, fmt.Errorf("%w%.0w", errInvalidDriver, define.ErrInvalidArg)
 }

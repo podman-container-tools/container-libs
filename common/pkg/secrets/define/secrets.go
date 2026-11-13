@@ -13,4 +13,10 @@ var (
 
 	// ErrInvalidKey indicates that something about your key is wrong.
 	ErrInvalidKey = errors.New("invalid key")
+
+	// ErrInvalidArg indicates that at least one of given arguments is invalid.
+	ErrInvalidArg = errors.New("invalid arguments")
+
+	// ErrSecretExists indicates that the secret was already created.
+	ErrSecretExists = errors.New("secret already exists")
 )
