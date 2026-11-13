@@ -279,6 +279,8 @@ func (m *manifestSchema2) convertToManifestSchema1(ctx context.Context, edits *E
 
 		var blobDigest digest.Digest
 		if historyEntry.EmptyLayer {
+			// We assume that the effect of info.Digests on PutBlobWithOptions is consistent,
+			// i.e. that we only need to upload the empty layer once.
 			emptyLayerBlobInfo := types.BlobInfo{Digest: GzippedEmptyLayerDigest, Size: int64(len(GzippedEmptyLayer))}
 
 			if !haveGzippedEmptyLayer {
@@ -293,9 +295,7 @@ func (m *manifestSchema2) convertToManifestSchema1(ctx context.Context, edits *E
 				if err != nil {
 					return nil, fmt.Errorf("uploading empty layer: %w", err)
 				}
-				if info.Digest != emptyLayerBlobInfo.Digest {
-					return nil, fmt.Errorf("Internal error: Uploaded empty layer has digest %#v instead of %s", info.Digest, emptyLayerBlobInfo.Digest)
-				}
+				emptyLayerBlobInfo.Digest = info.Digest
 				haveGzippedEmptyLayer = true
 			}
 			if edits.LayerInfos != nil {
