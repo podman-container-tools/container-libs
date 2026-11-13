@@ -7,6 +7,9 @@ import (
 	"github.com/opencontainers/go-digest"
 	imgspecv1 "github.com/opencontainers/image-spec/specs-go/v1"
 	"go.podman.io/image/v5/docker/reference"
+	"go.podman.io/image/v5/internal/blobinfocache"
+	"go.podman.io/image/v5/internal/digests"
+	"go.podman.io/image/v5/internal/private"
 	"go.podman.io/image/v5/manifest"
 	"go.podman.io/image/v5/types"
 )
@@ -70,9 +73,12 @@ type EditedImageEdits struct {
 
 // EditedImageInfo provides optional context which may or may not be used.
 type EditedImageInfo struct {
-	Destination  types.ImageDestination // and yes, UpdatedImage may write to Destination (see the schema2 → schema1 conversion logic in image/docker_schema2.go)
-	LayerInfos   []types.BlobInfo       // Complete BlobInfos (size+digest) which have been uploaded, in order (the root layer first, and then successive layered layers)
-	LayerDiffIDs []digest.Digest        // Digest values for the _uncompressed_ contents of the blobs which have been uploaded, in the same order.
+	Destination private.ImageDestination     // and yes, UpdatedImage may write to Destination (see the schema2 → schema1 conversion logic in image/docker_schema2.go)
+	Cache       blobinfocache.BlobInfoCache2 // Cache to optionally update with the uploaded blob or look up blob infos.
+	Digests     digests.Options
+
+	LayerInfos   []types.BlobInfo // Complete BlobInfos (size+digest) which have been uploaded, in order (the root layer first, and then successive layered layers)
+	LayerDiffIDs []digest.Digest  // Digest values for the _uncompressed_ contents of the blobs which have been uploaded, in the same order.
 }
 
 // manifestInstanceFromBlob returns a genericManifest implementation for (manblob, mt) in src.

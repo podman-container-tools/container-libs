@@ -17,8 +17,14 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.podman.io/image/v5/docker/reference"
+	"go.podman.io/image/v5/internal/digests"
+	"go.podman.io/image/v5/internal/imagedestination/impl"
+	"go.podman.io/image/v5/internal/imagedestination/stubs"
+	"go.podman.io/image/v5/internal/private"
+	"go.podman.io/image/v5/internal/signature"
 	"go.podman.io/image/v5/internal/testing/mocks"
 	"go.podman.io/image/v5/manifest"
+	"go.podman.io/image/v5/pkg/blobinfocache/none"
 	"go.podman.io/image/v5/types"
 )
 
@@ -366,8 +372,19 @@ func newSchema2ImageSource(t *testing.T, dockerRef string) *schema2ImageSource {
 }
 
 type memoryImageDest struct {
+	impl.Compat
+	stubs.NoPutBlobPartialInitialize
 	ref         reference.Named
 	storedBlobs map[digest.Digest][]byte
+}
+
+func newMemoryImageDest(ref reference.Named) *memoryImageDest {
+	dest := &memoryImageDest{
+		ref:         ref,
+		storedBlobs: make(map[digest.Digest][]byte),
+	}
+	dest.Compat = impl.AddCompat(dest)
+	return dest
 }
 
 func (d *memoryImageDest) Reference() types.ImageReference {
@@ -406,7 +423,7 @@ func (d *memoryImageDest) HasThreadSafePutBlob() bool {
 	panic("Unexpected call to a mock function")
 }
 
-func (d *memoryImageDest) PutBlob(ctx context.Context, stream io.Reader, inputInfo types.BlobInfo, cache types.BlobInfoCache, isConfig bool) (types.BlobInfo, error) {
+func (d *memoryImageDest) PutBlobWithOptions(ctx context.Context, stream io.Reader, inputInfo types.BlobInfo, _ private.PutBlobOptions) (private.UploadedBlob, error) {
 	if d.storedBlobs == nil {
 		d.storedBlobs = make(map[digest.Digest][]byte)
 	}
@@ -415,13 +432,13 @@ func (d *memoryImageDest) PutBlob(ctx context.Context, stream io.Reader, inputIn
 	}
 	contents, err := io.ReadAll(stream)
 	if err != nil {
-		return types.BlobInfo{}, err
+		return private.UploadedBlob{}, err
 	}
 	d.storedBlobs[inputInfo.Digest] = contents
-	return types.BlobInfo{Digest: inputInfo.Digest, Size: int64(len(contents))}, nil
+	return private.UploadedBlob{Digest: inputInfo.Digest, Size: int64(len(contents))}, nil
 }
 
-func (d *memoryImageDest) TryReusingBlob(context.Context, types.BlobInfo, types.BlobInfoCache, bool) (bool, types.BlobInfo, error) {
+func (d *memoryImageDest) TryReusingBlobWithOptions(context.Context, types.BlobInfo, private.TryReusingBlobOptions) (bool, private.ReusedBlob, error) {
 	panic("Unexpected call to a mock function")
 }
 
@@ -429,11 +446,15 @@ func (d *memoryImageDest) PutManifest(context.Context, []byte, *digest.Digest) e
 	panic("Unexpected call to a mock function")
 }
 
-func (d *memoryImageDest) PutSignatures(ctx context.Context, signatures [][]byte, instanceDigest *digest.Digest) error {
+func (d *memoryImageDest) PutSignaturesWithFormat(context.Context, []signature.Signature, *digest.Digest) error {
 	panic("Unexpected call to a mock function")
 }
 
-func (d *memoryImageDest) Commit(context.Context, types.UnparsedImage) error {
+func (d *memoryImageDest) CommitWithOptions(context.Context, private.CommitOptions) error {
+	panic("Unexpected call to a mock function")
+}
+
+func (d *memoryImageDest) NoteOriginalOCIConfig(ociConfig *imgspecv1.Image, configErr error) error {
 	panic("Unexpected call to a mock function")
 }
 
@@ -494,7 +515,9 @@ func TestManifestSchema2EditedImage(t *testing.T) {
 		_, err = original.EditedImage(context.Background(), EditedImageEdits{
 			ManifestMIMEType: mime,
 		}, EditedImageInfo{
-			Destination: &memoryImageDest{ref: originalSrc.ref},
+			Destination: newMemoryImageDest(originalSrc.ref),
+			Cache:       none.NoCache,
+			Digests:     digests.CanonicalDefault(),
 		})
 		assert.NoError(t, err, mime)
 	}
@@ -600,12 +623,15 @@ func TestConvertToOCIWithInvalidMIMEType(t *testing.T) {
 func TestConvertToManifestSchema1(t *testing.T) {
 	originalSrc := newSchema2ImageSource(t, "httpd-copy:latest")
 	original := manifestSchema2FromFixture(t, originalSrc, "schema2.json", false)
-	memoryDest := &memoryImageDest{ref: originalSrc.ref}
+	memoryDest := newMemoryImageDest(originalSrc.ref)
+	memoryDestInfo := EditedImageInfo{
+		Destination: memoryDest,
+		Cache:       none.NoCache,
+		Digests:     digests.CanonicalDefault(),
+	}
 	res, err := original.EditedImage(context.Background(), EditedImageEdits{
 		ManifestMIMEType: manifest.DockerV2Schema1SignedMediaType,
-	}, EditedImageInfo{
-		Destination: memoryDest,
-	})
+	}, memoryDestInfo)
 	require.NoError(t, err)
 
 	convertedJSON, mt, err := res.Manifest(context.Background())
@@ -625,9 +651,7 @@ func TestConvertToManifestSchema1(t *testing.T) {
 	res, err = original.EditedImage(context.Background(), EditedImageEdits{
 		LayerInfos:       updatedLayers,
 		ManifestMIMEType: manifest.DockerV2Schema1SignedMediaType,
-	}, EditedImageInfo{
-		Destination: memoryDest,
-	})
+	}, memoryDestInfo)
 	require.NoError(t, err)
 	assert.Equal(t, updatedLayersCopy, updatedLayers) // updatedLayers have not been modified in place
 	convertedJSON, mt, err = res.Manifest(context.Background())
@@ -658,9 +682,7 @@ func TestConvertToManifestSchema1(t *testing.T) {
 	_, err = original.EditedImage(context.Background(), EditedImageEdits{
 		LayerInfos:       layerInfosWithCryptoOperation(original.LayerInfos(), types.Encrypt),
 		ManifestMIMEType: manifest.DockerV2Schema1SignedMediaType,
-	}, EditedImageInfo{
-		Destination: memoryDest,
-	})
+	}, memoryDestInfo)
 	assert.Error(t, err)
 
 	// FIXME? Test also the various failure cases, if only to see that we don't crash?

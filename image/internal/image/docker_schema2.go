@@ -15,6 +15,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"go.podman.io/image/v5/docker/reference"
 	"go.podman.io/image/v5/internal/iolimits"
+	"go.podman.io/image/v5/internal/private"
 	"go.podman.io/image/v5/manifest"
 	"go.podman.io/image/v5/pkg/blobinfocache/none"
 	"go.podman.io/image/v5/types"
@@ -282,9 +283,13 @@ func (m *manifestSchema2) convertToManifestSchema1(ctx context.Context, edits *E
 
 			if !haveGzippedEmptyLayer {
 				logrus.Debugf("Uploading empty layer during conversion to schema 1")
-				// Ideally we should update the relevant BlobInfoCache about this layer, but that would require passing it down here,
-				// and anyway this blob is so small that it’s easier to just copy it than to worry about figuring out another location where to get it.
-				info, err := info.Destination.PutBlob(ctx, bytes.NewReader(GzippedEmptyLayer), emptyLayerBlobInfo, none.NoCache, false)
+				info, err := info.Destination.PutBlobWithOptions(ctx, bytes.NewReader(GzippedEmptyLayer), emptyLayerBlobInfo, private.PutBlobOptions{
+					Cache:      info.Cache,
+					IsConfig:   false,
+					Digests:    info.Digests,
+					EmptyLayer: true,
+					LayerIndex: &v2Index,
+				})
 				if err != nil {
 					return nil, fmt.Errorf("uploading empty layer: %w", err)
 				}

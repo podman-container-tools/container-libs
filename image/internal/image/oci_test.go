@@ -17,8 +17,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.podman.io/image/v5/docker/reference"
+	"go.podman.io/image/v5/internal/digests"
 	"go.podman.io/image/v5/internal/testing/mocks"
 	"go.podman.io/image/v5/manifest"
+	"go.podman.io/image/v5/pkg/blobinfocache/none"
 	"go.podman.io/image/v5/pkg/compression"
 	compressiontypes "go.podman.io/image/v5/pkg/compression/types"
 	"go.podman.io/image/v5/types"
@@ -451,7 +453,9 @@ func TestManifestOCI1EditedImage(t *testing.T) {
 		_, err = original.EditedImage(context.Background(), EditedImageEdits{
 			ManifestMIMEType: mime,
 		}, EditedImageInfo{
-			Destination: &memoryImageDest{ref: originalSrc.ref},
+			Destination: newMemoryImageDest(originalSrc.ref),
+			Cache:       none.NoCache,
+			Digests:     digests.CanonicalDefault(),
 		})
 		assert.NoError(t, err, mime)
 	}
@@ -496,12 +500,15 @@ func TestManifestOCI1ConvertToManifestSchema1(t *testing.T) {
 	originalSrc := newOCI1ImageSource(t, "oci1-config.json", "httpd-copy:latest")
 	original := manifestOCI1FromFixture(t, originalSrc, "oci1.json")
 	original2 := manifestOCI1FromFixture(t, originalSrc, "oci1.json")
-	memoryDest := &memoryImageDest{ref: originalSrc.ref}
+	memoryDest := newMemoryImageDest(originalSrc.ref)
+	memoryDestInfo := EditedImageInfo{
+		Destination: memoryDest,
+		Cache:       none.NoCache,
+		Digests:     digests.CanonicalDefault(),
+	}
 	res := successfulOCI1Conversion(t, original, original2, EditedImageEdits{
 		ManifestMIMEType: manifest.DockerV2Schema1SignedMediaType,
-	}, EditedImageInfo{
-		Destination: memoryDest,
-	})
+	}, memoryDestInfo)
 
 	convertedJSON, mt, err := res.Manifest(context.Background())
 	require.NoError(t, err)
@@ -516,9 +523,7 @@ func TestManifestOCI1ConvertToManifestSchema1(t *testing.T) {
 	res = successfulOCI1Conversion(t, original, original2, EditedImageEdits{
 		LayerInfos:       updatedLayers,
 		ManifestMIMEType: manifest.DockerV2Schema1SignedMediaType,
-	}, EditedImageInfo{
-		Destination: memoryDest,
-	})
+	}, memoryDestInfo)
 	assert.Equal(t, updatedLayersCopy, updatedLayers) // updatedLayers have not been modified in place
 	convertedJSON, mt, err = res.Manifest(context.Background())
 	require.NoError(t, err)
@@ -548,9 +553,7 @@ func TestManifestOCI1ConvertToManifestSchema1(t *testing.T) {
 	artifact := manifestOCI1FromFixture(t, originalSrc, "oci1-artifact.json")
 	_, err = artifact.EditedImage(context.Background(), EditedImageEdits{
 		ManifestMIMEType: manifest.DockerV2Schema1SignedMediaType,
-	}, EditedImageInfo{
-		Destination: memoryDest,
-	})
+	}, memoryDestInfo)
 	var expected manifest.NonImageArtifactError
 	assert.ErrorAs(t, err, &expected)
 
@@ -559,18 +562,14 @@ func TestManifestOCI1ConvertToManifestSchema1(t *testing.T) {
 	encrypted2 := manifestOCI1FromFixture(t, originalSrc, "oci1.encrypted.json")
 	_, err = encrypted.EditedImage(context.Background(), EditedImageEdits{
 		ManifestMIMEType: manifest.DockerV2Schema1SignedMediaType,
-	}, EditedImageInfo{
-		Destination: memoryDest,
-	})
+	}, memoryDestInfo)
 	assert.Error(t, err)
 
 	// Conversion to schema1 with encryption fails
 	_, err = original.EditedImage(context.Background(), EditedImageEdits{
 		LayerInfos:       layerInfosWithCryptoOperation(original.LayerInfos(), types.Encrypt),
 		ManifestMIMEType: manifest.DockerV2Schema1SignedMediaType,
-	}, EditedImageInfo{
-		Destination: memoryDest,
-	})
+	}, memoryDestInfo)
 	assert.Error(t, err)
 
 	// Conversion to schema1 with simultaneous decryption is possible
@@ -579,9 +578,7 @@ func TestManifestOCI1ConvertToManifestSchema1(t *testing.T) {
 	res = successfulOCI1Conversion(t, encrypted, encrypted2, EditedImageEdits{
 		LayerInfos:       updatedLayers,
 		ManifestMIMEType: manifest.DockerV2Schema1SignedMediaType,
-	}, EditedImageInfo{
-		Destination: memoryDest,
-	})
+	}, memoryDestInfo)
 	assert.Equal(t, updatedLayersCopy, updatedLayers) // updatedLayers have not been modified in place
 	convertedJSON, mt, err = res.Manifest(context.Background())
 	require.NoError(t, err)
@@ -613,9 +610,7 @@ func TestManifestOCI1ConvertToManifestSchema1(t *testing.T) {
 	mixedImage2 := manifestOCI1FromFixture(t, mixedSrc, "oci1-all-media-types.json")
 	_, err = mixedImage.EditedImage(context.Background(), EditedImageEdits{
 		ManifestMIMEType: manifest.DockerV2Schema1SignedMediaType,
-	}, EditedImageInfo{
-		Destination: memoryDest,
-	})
+	}, memoryDestInfo)
 	assert.Error(t, err) // zstd compression is not supported for docker images
 
 	// Conversion to schema1 of an image with Zstd layers, while editing layers to be uncompressed, or gzip-compressed, is possible.
@@ -631,9 +626,7 @@ func TestManifestOCI1ConvertToManifestSchema1(t *testing.T) {
 		res = successfulOCI1Conversion(t, mixedImage, mixedImage2, EditedImageEdits{
 			LayerInfos:       updatedLayers,
 			ManifestMIMEType: manifest.DockerV2Schema1SignedMediaType,
-		}, EditedImageInfo{
-			Destination: memoryDest,
-		})
+		}, memoryDestInfo)
 		assert.Equal(t, updatedLayersCopy, updatedLayers) // updatedLayers have not been modified in place
 		convertedJSON, mt, err = res.Manifest(context.Background())
 		require.NoError(t, err)
