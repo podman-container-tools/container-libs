@@ -591,8 +591,21 @@ func (ic *imageCopier) copyUpdatedConfigAndManifest(ctx context.Context, instanc
 		}
 		pendingImage = pi
 	}
-	if err := ic.copyConfig(ctx, pendingImage); err != nil {
+	updatedConfigDigest, err := ic.copyConfig(ctx, pendingImage)
+	if err != nil {
 		return nil, "", err
+	}
+	if updatedConfigDigest != "" {
+		if ic.cannotModifyManifestReason != "" {
+			return nil, "", fmt.Errorf("internal error: copy needs an updated config digest in manifest but that was known to be forbidden: %q", ic.cannotModifyManifestReason)
+		}
+		pi, err := image.EditedImage(ctx, pendingImage, image.EditedImageEdits{
+			ConfigDigest: updatedConfigDigest,
+		}, ic.manifestEditInfo)
+		if err != nil {
+			return nil, "", fmt.Errorf("creating an updated image manifest: %w", err)
+		}
+		pendingImage = pi
 	}
 
 	man, _, err := pendingImage.Manifest(ctx)
@@ -616,7 +629,7 @@ func (ic *imageCopier) copyUpdatedConfigAndManifest(ctx context.Context, instanc
 }
 
 // copyConfig copies config.json, if any, from src to dest,
-// and returns a config digest _if_ the manifest needs modifying.
+// and returns an updated config digest _if_ the manifest needs modifying.
 func (ic *imageCopier) copyConfig(ctx context.Context, src image.EditableImage) (digest.Digest, error) {
 	srcInfo := src.ConfigInfo()
 	updatedConfigDigest := digest.Digest("")
