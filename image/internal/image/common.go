@@ -16,7 +16,7 @@ type commonImage struct {
 // This is a horribly specific interface, but computing InformationOnly.LayerDiffIDs can be very expensive to compute
 // (most importantly it forces us to download the full layers even if they are already present at the destination).
 func (i *commonImage) UpdatedImageNeedsLayerDiffIDs(options types.ManifestUpdateOptions) bool {
-	return i.genericManifest.EditedImageNeedsLayerDiffIDs(options)
+	return i.genericManifest.EditedImageNeedsLayerDiffIDs(editedImageEditsFromManifestUpdateOptions(&options))
 }
 
 // UpdatedImage returns a types.Image modified according to options.
@@ -29,5 +29,16 @@ func (i *commonImage) UpdatedImageNeedsLayerDiffIDs(options types.ManifestUpdate
 // options.ManifestMIMEType or with different CompressionOperation+CompressionAlgorithm
 // values might succeed.
 func (i *commonImage) UpdatedImage(ctx context.Context, options types.ManifestUpdateOptions) (types.Image, error) {
-	return i.genericManifest.editedImage(ctx, options)
+	return i.genericManifest.editedImage(ctx,
+		editedImageEditsFromManifestUpdateOptions(&options),
+		options.InformationOnly)
+}
+
+// editedImageEditsFromManifestUpdateOptions returns EditedImageEdits corresponding to types.ManifestUpdateOptions.
+func editedImageEditsFromManifestUpdateOptions(options *types.ManifestUpdateOptions) EditedImageEdits {
+	return EditedImageEdits{
+		LayerInfos:              options.LayerInfos,
+		EmbeddedDockerReference: options.EmbeddedDockerReference,
+		ManifestMIMEType:        options.ManifestMIMEType,
+	}
 }

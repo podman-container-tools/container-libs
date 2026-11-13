@@ -52,16 +52,23 @@ type genericManifest interface {
 	// algorithms depends not on the current format, but possibly on the target of a conversion (if EditedImage converts
 	// to a different manifest format).
 	CanChangeLayerCompression(mimeType string) bool
-	// EditedImageNeedsLayerDiffIDs returns true iff EditedImage(options) needs InformationOnly.LayerDiffIDs.
-	// This is a horribly specific interface, but computing InformationOnly.LayerDiffIDs can be very expensive to compute
+	// EditedImageNeedsLayerDiffIDs returns true iff EditedImage(edits) needs ManifestUpdateInformation.LayerDiffIDs.
+	// This is a horribly specific interface, but computing ManifestUpdateInformation.LayerDiffIDs can be very expensive to compute
 	// (most importantly it forces us to download the full layers even if they are already present at the destination).
-	EditedImageNeedsLayerDiffIDs(options types.ManifestUpdateOptions) bool
+	EditedImageNeedsLayerDiffIDs(edits EditedImageEdits) bool
 	// editedImage FIXME
-	editedImage(ctx context.Context, options types.ManifestUpdateOptions) (types.Image, error)
+	editedImage(ctx context.Context, edits EditedImageEdits, info types.ManifestUpdateInformation) (types.Image, error)
+}
+
+// EditedImageEdits collects requested edits in EditedImage as named optional arguments.
+type EditedImageEdits struct {
+	LayerInfos              []types.BlobInfo // Complete BlobInfos (size+digest+urls+annotations) which should replace the originals, in order (the root layer first, and then successive layered layers). BlobInfos' MediaType fields are ignored.
+	EmbeddedDockerReference reference.Named
+	ManifestMIMEType        string
 }
 
 // EditedImage FIXME
-func EditedImage(ctx context.Context, image genericManifest, options types.ManifestUpdateOptions) (types.Image, error) {
+func EditedImage(ctx context.Context, image genericManifest, edits EditedImageEdits, info types.ManifestUpdateInformation) (types.Image, error) {
 	// FIXME: Is this structure with an external function necessary?!
 	// This returns genericManifest because we have two kinds of callers:
 	// editedImage returns genericManifest because we have two kinds of callers:
@@ -71,7 +78,7 @@ func EditedImage(ctx context.Context, image genericManifest, options types.Manif
 	// We could define an internal superset of types.Image that satisfies both, but nothing
 	// really needs that, and ultimately the outcome of an image edit is always a memoryImage;
 	// so we can factor the creation of the memoryImage out of the schema-specific implementations.
-	return image.editedImage(ctx, options)
+	return image.editedImage(ctx, edits, info)
 }
 
 // manifestInstanceFromBlob returns a genericManifest implementation for (manblob, mt) in src.
@@ -104,31 +111,33 @@ func manifestLayerInfosToBlobInfos(layers []manifest.LayerInfo) []types.BlobInfo
 
 // manifestConvertFn (a method of genericManifest object) returns a genericManifest implementation
 // converted to a specific manifest MIME type.
-// It may use options.InformationOnly and also adjust *options to be appropriate for editing the returned
-// value.
+// It may use info and also adjust *edits to be appropriate for editing the returned value.
 // This does not change the state of the original genericManifest object.
-type manifestConvertFn func(ctx context.Context, options *types.ManifestUpdateOptions) (genericManifest, error)
+type manifestConvertFn func(ctx context.Context, edits *EditedImageEdits,
+	info types.ManifestUpdateInformation) (genericManifest, error)
 
 // convertManifestIfRequiredWithUpdate will run conversion functions of a manifest if
-// required and re-apply the options to the converted type.
+// required and re-apply the edits to the converted type.
 // It returns (nil, nil) if no conversion was requested.
-func convertManifestIfRequiredWithUpdate(ctx context.Context, options types.ManifestUpdateOptions, converters map[string]manifestConvertFn) (types.Image, error) {
-	if options.ManifestMIMEType == "" {
+func convertManifestIfRequiredWithUpdate(ctx context.Context, edits EditedImageEdits, info types.ManifestUpdateInformation,
+	converters map[string]manifestConvertFn,
+) (types.Image, error) {
+	if edits.ManifestMIMEType == "" {
 		return nil, nil
 	}
 
-	converter, ok := converters[options.ManifestMIMEType]
+	converter, ok := converters[edits.ManifestMIMEType]
 	if !ok {
-		return nil, fmt.Errorf("Unsupported conversion type: %v", options.ManifestMIMEType)
+		return nil, fmt.Errorf("Unsupported conversion type: %v", edits.ManifestMIMEType)
 	}
 
-	optionsCopy := options
-	convertedManifest, err := converter(ctx, &optionsCopy)
+	editsCopy := edits
+	convertedManifest, err := converter(ctx, &editsCopy, info)
 	if err != nil {
 		return nil, err
 	}
 	convertedImage := memoryImageFromManifest(convertedManifest)
 
-	optionsCopy.ManifestMIMEType = ""
-	return convertedImage.editedImage(ctx, optionsCopy)
+	editsCopy.ManifestMIMEType = ""
+	return convertedImage.editedImage(ctx, editsCopy, info)
 }
