@@ -79,6 +79,7 @@ func (ic *imageCloser) Close() error {
 //
 // Internal users may depend on methods available in SourcedImage but not (yet?) in types.Image.
 type SourcedImage struct {
+	compat
 	*UnparsedImage
 	ManifestBlob     []byte // The manifest of the relevant instance
 	ManifestMIMEType string // MIME type of ManifestBlob
@@ -111,12 +112,14 @@ func FromUnparsedImage(ctx context.Context, sys *types.SystemContext, unparsed *
 		return nil, err
 	}
 
-	return &SourcedImage{
+	res := &SourcedImage{
 		UnparsedImage:    unparsed,
 		ManifestBlob:     manifestBlob,
 		ManifestMIMEType: manifestMIMEType,
 		genericManifest:  parsedManifest,
-	}, nil
+	}
+	res.compat = addCompat(res)
+	return res, nil
 }
 
 // Size returns the size of the image as stored, if it's known, or -1 if it isn't.

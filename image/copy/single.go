@@ -33,7 +33,8 @@ import (
 // imageCopier tracks state specific to a single image (possibly an item of a manifest list)
 type imageCopier struct {
 	c                             *copier
-	manifestUpdates               *types.ManifestUpdateOptions
+	manifestEdits                 image.EditedImageEdits
+	manifestEditInfo              types.ManifestUpdateInformation
 	src                           *image.SourcedImage
 	manifestConversionPlan        manifestConversionPlan
 	diffIDsAreNeeded              bool
@@ -136,9 +137,9 @@ func (c *copier) copySingleImage(ctx context.Context, unparsedImage *image.Unpar
 	}
 
 	ic := imageCopier{
-		c:               c,
-		manifestUpdates: &types.ManifestUpdateOptions{InformationOnly: types.ManifestUpdateInformation{Destination: c.dest}},
-		src:             src,
+		c:                c,
+		manifestEditInfo: types.ManifestUpdateInformation{Destination: c.dest},
+		src:              src,
 		// manifestConversionPlan and diffIDsAreNeeded are computed later
 		cannotModifyManifestReason:    cannotModifyManifestReason,
 		requireCompressionFormatMatch: opts.requireCompressionFormatMatch,
@@ -205,11 +206,11 @@ func (c *copier) copySingleImage(ctx context.Context, unparsedImage *image.Unpar
 	// (e.g. the UpdatedImageNeedsLayerDiffIDs check just below) can make decisions based
 	// on the expected destination format.
 	if ic.manifestConversionPlan.preferredMIMETypeNeedsConversion {
-		ic.manifestUpdates.ManifestMIMEType = ic.manifestConversionPlan.preferredMIMEType
+		ic.manifestEdits.ManifestMIMEType = ic.manifestConversionPlan.preferredMIMEType
 	}
 
 	// If src.UpdatedImageNeedsLayerDiffIDs(ic.manifestUpdates) will be true, it needs to be true by the time we get here.
-	ic.diffIDsAreNeeded = src.UpdatedImageNeedsLayerDiffIDs(*ic.manifestUpdates)
+	ic.diffIDsAreNeeded = src.EditedImageNeedsLayerDiffIDs(ic.manifestEdits)
 
 	// If enabled, fetch and compare the destination's manifest. And as an optimization skip updating the destination iff equal
 	if c.options.OptimizeDestinationImageAlreadyExists {
@@ -273,7 +274,7 @@ func (c *copier) copySingleImage(ctx context.Context, unparsedImage *image.Unpar
 		errs := []string{fmt.Sprintf("%s(%v)", ic.manifestConversionPlan.preferredMIMEType, err)}
 		for _, manifestMIMEType := range ic.manifestConversionPlan.otherMIMETypeCandidates {
 			logrus.Debugf("Trying to use manifest type %s…", manifestMIMEType)
-			ic.manifestUpdates.ManifestMIMEType = manifestMIMEType
+			ic.manifestEdits.ManifestMIMEType = manifestMIMEType
 			attemptedManifest, attemptedManifestDigest, err := ic.copyUpdatedConfigAndManifest(ctx, targetInstance)
 			if err != nil {
 				logrus.Debugf("Upload of manifest type %s failed: %v", manifestMIMEType, err)
@@ -366,12 +367,12 @@ func (ic *imageCopier) updateEmbeddedDockerReference() error {
 		return fmt.Errorf("Copying a schema1 image with an embedded Docker reference to %s (Docker reference %s) would change the manifest, which we cannot do: %q",
 			transports.ImageName(ic.c.dest.Reference()), destRef.String(), ic.cannotModifyManifestReason)
 	}
-	ic.manifestUpdates.EmbeddedDockerReference = destRef
+	ic.manifestEdits.EmbeddedDockerReference = destRef
 	return nil
 }
 
 func (ic *imageCopier) noPendingManifestUpdates() bool {
-	return reflect.DeepEqual(*ic.manifestUpdates, types.ManifestUpdateOptions{InformationOnly: ic.manifestUpdates.InformationOnly})
+	return reflect.DeepEqual(ic.manifestEdits, image.EditedImageEdits{})
 }
 
 // compareImageDestinationManifestEqual compares the source and destination image manifests (reading the manifest from the
@@ -536,14 +537,14 @@ func (ic *imageCopier) copyLayers(ctx context.Context) ([]compressiontypes.Algor
 		diffIDs[i] = cld.diffID
 	}
 
-	// WARNING: If you are adding new reasons to change ic.manifestUpdates, also update the
+	// WARNING: If you are adding new reasons to change ic.manifestEdits, also update the
 	// OptimizeDestinationImageAlreadyExists short-circuit conditions
-	ic.manifestUpdates.InformationOnly.LayerInfos = destInfos
+	ic.manifestEditInfo.LayerInfos = destInfos
 	if ic.diffIDsAreNeeded {
-		ic.manifestUpdates.InformationOnly.LayerDiffIDs = diffIDs
+		ic.manifestEditInfo.LayerDiffIDs = diffIDs
 	}
 	if srcInfosUpdated || layerDigestsDiffer(srcInfos, destInfos) {
-		ic.manifestUpdates.LayerInfos = destInfos
+		ic.manifestEdits.LayerInfos = destInfos
 	}
 	algos, err := algorithmsByNames(compressionAlgos.All())
 	if err != nil {
@@ -568,16 +569,16 @@ func (ic *imageCopier) copyUpdatedConfigAndManifest(ctx context.Context, instanc
 		if ic.cannotModifyManifestReason != "" {
 			return nil, "", fmt.Errorf("Internal error: copy needs an updated manifest but that was known to be forbidden: %q", ic.cannotModifyManifestReason)
 		}
-		if !ic.diffIDsAreNeeded && ic.src.UpdatedImageNeedsLayerDiffIDs(*ic.manifestUpdates) {
+		if !ic.diffIDsAreNeeded && ic.src.EditedImageNeedsLayerDiffIDs(ic.manifestEdits) {
 			// We have set ic.diffIDsAreNeeded based on the preferred MIME type returned by determineManifestConversion.
 			// So, this can only happen if we are trying to upload using one of the other MIME type candidates.
 			// Because UpdatedImageNeedsLayerDiffIDs is true only when converting from s1 to s2, this case should only arise
 			// when ic.c.dest.SupportedManifestMIMETypes() includes both s1 and s2, the upload using s1 failed, and we are now trying s2.
 			// Supposedly s2-only registries do not exist or are extremely rare, so failing with this error message is good enough for now.
 			// If handling such registries turns out to be necessary, we could compute ic.diffIDsAreNeeded based on the full list of manifest MIME type candidates.
-			return nil, "", fmt.Errorf("Can not convert image to %s, preparing DiffIDs for this case is not supported", ic.manifestUpdates.ManifestMIMEType)
+			return nil, "", fmt.Errorf("Can not convert image to %s, preparing DiffIDs for this case is not supported", ic.manifestEdits.ManifestMIMEType)
 		}
-		pi, err := ic.src.UpdatedImageInternal(ctx, *ic.manifestUpdates)
+		pi, err := ic.src.EditedImage(ctx, ic.manifestEdits, ic.manifestEditInfo)
 		if err != nil {
 			return nil, "", fmt.Errorf("creating an updated image manifest: %w", err)
 		}

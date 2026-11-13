@@ -14,15 +14,18 @@ import (
 // collection of all related information, e.g. there is no way to get layer blobs
 // from a memoryImage.
 type memoryImage struct {
+	compat
 	genericManifest
 	serializedManifest []byte // A private cache for Manifest()
 }
 
 func memoryImageFromManifest(m genericManifest) *memoryImage {
-	return &memoryImage{
+	res := &memoryImage{
 		genericManifest:    m,
 		serializedManifest: nil,
 	}
+	res.compat = addCompat(res)
+	return res
 }
 
 // Reference returns the reference used to set up this source, _as specified by the user_
