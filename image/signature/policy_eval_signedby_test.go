@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.podman.io/image/v5/directory"
 	"go.podman.io/image/v5/docker/reference"
+	"go.podman.io/image/v5/internal/digests"
 	"go.podman.io/image/v5/internal/image"
 	"go.podman.io/image/v5/internal/imagesource"
 	"go.podman.io/image/v5/internal/private"
@@ -27,14 +28,16 @@ func dirImageMock(t *testing.T, dir, dockerReference string) private.UnparsedIma
 func dirImageMockWithRef(t *testing.T, dir string, ref types.ImageReference) private.UnparsedImage {
 	srcRef, err := directory.NewReference(dir)
 	require.NoError(t, err)
-	src, err := srcRef.NewImageSource(context.Background(), nil)
+	src, err := imagesource.NewImageSource(context.Background(), srcRef, private.NewImageSourceOptions{
+		Digests: digests.CanonicalDefault(),
+	})
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		err := src.Close()
 		require.NoError(t, err)
 	})
 	return image.UnparsedInstance(&dirImageSourceMock{
-		ImageSource: imagesource.FromPublic(src),
+		ImageSource: src,
 		ref:         ref,
 	}, nil)
 }

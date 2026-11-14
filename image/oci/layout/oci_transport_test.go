@@ -9,9 +9,12 @@ import (
 	imgspecv1 "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.podman.io/image/v5/internal/private"
 	_ "go.podman.io/image/v5/internal/testing/explicitfilepath-tmpdir"
 	"go.podman.io/image/v5/types"
 )
+
+var _ private.ImageReference = (*ociReference)(nil)
 
 func TestGetManifestDescriptor(t *testing.T) {
 	for _, c := range []struct {

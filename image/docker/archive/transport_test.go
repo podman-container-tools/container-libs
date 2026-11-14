@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.podman.io/image/v5/docker/reference"
+	"go.podman.io/image/v5/internal/private"
 	"go.podman.io/image/v5/types"
 )
 
@@ -18,6 +19,8 @@ const (
 	sha256digest    = "@sha256:" + sha256digestHex
 	tarFixture      = "fixtures/almostempty.tar"
 )
+
+var _ private.ImageReference = (*archiveReference)(nil)
 
 func TestTransportName(t *testing.T) {
 	assert.Equal(t, "docker-archive", Transport.Name())

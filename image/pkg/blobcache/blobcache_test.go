@@ -18,7 +18,9 @@ import (
 	"github.com/sirupsen/logrus"
 	cp "go.podman.io/image/v5/copy"
 	"go.podman.io/image/v5/directory"
+	"go.podman.io/image/v5/internal/digests"
 	"go.podman.io/image/v5/internal/image"
+	"go.podman.io/image/v5/internal/imagesource"
 	"go.podman.io/image/v5/internal/private"
 	"go.podman.io/image/v5/pkg/blobinfocache/none"
 	"go.podman.io/image/v5/pkg/compression"
@@ -30,6 +32,7 @@ import (
 
 var (
 	_ types.ImageReference     = &BlobCache{}
+	_ private.ImageReference   = &BlobCache{}
 	_ types.ImageSource        = &blobCacheSource{}
 	_ private.ImageSource      = (*blobCacheSource)(nil)
 	_ types.ImageDestination   = &blobCacheDestination{}
@@ -127,7 +130,10 @@ func pushImageThroughCache(t *testing.T, cacheDir string, blobBytes []byte, diff
 	if err != nil {
 		t.Fatalf("error writing config blob: %v", err)
 	}
-	srcImage, err := srcRef.NewImageSource(context.TODO(), systemContext)
+	srcImage, err := imagesource.NewImageSource(context.TODO(), srcRef, private.NewImageSourceOptions{
+		Sys:     systemContext,
+		Digests: digests.CanonicalDefault(),
+	})
 	if err != nil {
 		t.Fatalf("error opening source: %v", err)
 	}
