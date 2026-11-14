@@ -115,7 +115,14 @@ func GetAllCredentials(sys *types.SystemContext) (map[string]types.DockerAuthCon
 					return nil, err
 				}
 			}
-			allKeys.AddSeq(maps.Keys(creds))
+			for key := range creds {
+				// Helpers may list URL keys (e.g. Docker's https://index.docker.io/v1/); lookups use the host name.
+				host := strings.TrimPrefix(strings.TrimPrefix(key, "https://"), "http://")
+				if host != key {
+					host, _, _ = strings.Cut(host, "/")
+				}
+				allKeys.Add(host)
+			}
 		}
 	}
 
