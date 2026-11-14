@@ -73,3 +73,57 @@ vendor:
 	@$(MAKE) -C storage tidy
 	$(GO) work vendor
 	$(GO) work sync
+
+.PHONY: test-dependencies-check
+test-dependencies-check:
+	@missing=""; \
+		for bin in crun conmon go git podman iptables bats fuse-overlayfs slirp4netns; do \
+			command -v $$bin >/dev/null 2>&1 || missing="$$missing $$bin"; \
+		done; \
+		for bin in netavark aardvark-dns catatonit; do \
+			test -x /usr/libexec/podman/$$bin || missing="$$missing $$bin"; \
+		done; \
+		if [ -n "$$missing" ]; then \
+			echo "Missing required tools: $$missing"; \
+			echo "Install these before running test-dependencies-local"; \
+			exit 1; \
+		fi
+	@echo "All dependencies installed."
+
+.PHONY: test-dependencies-podman
+test-dependencies-podman: test-dependencies-check
+	if [ ! -d /tmp/test-dependencies/podman ]; then \
+		mkdir -p /tmp/test-dependencies; \
+		git clone --depth 1 https://github.com/podman-container-tools/podman.git /tmp/test-dependencies/podman; \
+	fi
+	cd /tmp/test-dependencies/podman && \
+		go mod edit -replace go.podman.io/common=$(CURDIR)/common && \
+		go mod edit -replace go.podman.io/storage=$(CURDIR)/storage && \
+		go mod edit -replace go.podman.io/image/v5=$(CURDIR)/image && \
+		go mod tidy && \
+		go mod vendor && \
+		make podman && \
+		make localunit; \
+		make localintegration
+
+.PHONY: test-dependencies-buildah
+test-dependencies-buildah: test-dependencies-check
+	if [ ! -d /tmp/test-dependencies/buildah ]; then \
+		mkdir -p /tmp/test-dependencies; \
+		git clone --depth 1 https://github.com/podman-container-tools/buildah.git /tmp/test-dependencies/buildah; \
+	fi
+	cd /tmp/test-dependencies/buildah && \
+		go mod edit -replace go.podman.io/common=$(CURDIR)/common && \
+		go mod edit -replace go.podman.io/storage=$(CURDIR)/storage && \
+		go mod edit -replace go.podman.io/image/v5=$(CURDIR)/image && \
+		go mod tidy && \
+		go mod vendor && \
+		make binaries && \
+		make test-unit;	\
+		make test-integration
+
+.PHONY: test-dependencies-clean
+test-dependencies-clean:
+	rm -rf /tmp/test-dependencies
+	@echo "Note: this does not prune podman storage/networks created by the test run."
+	@echo "Run 'podman system prune --volumes' manually if you want to reclaim that."
