@@ -101,6 +101,11 @@ type StoreOptions struct {
 	DisableVolatile bool `json:"disable-volatile,omitempty"`
 	// If transient, don't persist containers over boot (stores db in runroot)
 	TransientStore bool `json:"transient_store,omitempty"`
+	// SupportProgramCgroup, if non-empty, is the cgroup v2 directory path in
+	// which a graph driver should start long-running helper processes that need
+	// to continue executing after the current process exits (such as
+	// fuse-overlayfs).
+	SupportProgramCgroup string `json:"-" toml:"-"`
 }
 
 // setDefaultRootlessStoreOptions sets the storage opts for containers running as non root
