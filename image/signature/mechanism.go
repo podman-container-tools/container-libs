@@ -4,6 +4,7 @@ package signature
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -73,7 +74,7 @@ func NewGPGSigningMechanism() (SigningMechanism, error) {
 // of these keys.
 // The caller must call .Close() on the returned SigningMechanism.
 func NewEphemeralGPGSigningMechanism(blob []byte) (SigningMechanism, []string, error) {
-	return newEphemeralGPGSigningMechanism([][]byte{blob})
+	return newEphemeralGPGSigningMechanism(context.Background(), [][]byte{blob})
 }
 
 // gpgUntrustedSignatureContents returns UNTRUSTED contents of the signature WITHOUT ANY VERIFICATION,
