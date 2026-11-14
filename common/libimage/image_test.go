@@ -7,12 +7,15 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 
+	"github.com/opencontainers/go-digest"
 	"github.com/stretchr/testify/require"
 	"go.podman.io/common/pkg/config"
 	"go.podman.io/image/v5/transports/alltransports"
+	"go.podman.io/storage"
 )
 
 func TestImageFunctions(t *testing.T) {
@@ -179,6 +182,73 @@ func TestImageFunctions(t *testing.T) {
 	require.Equal(t, image.Digest().String(), imageData.Digest.String(), "inspect data should match")
 	require.Equal(t, labels, imageData.Labels, "inspect data should match")
 	require.Equal(t, image.NamesHistory(), imageData.NamesHistory, "inspect data should match")
+}
+
+func TestRepoDigests(t *testing.T) {
+	digestA := digest.Digest("sha256:" + strings.Repeat("a", 64))
+	digestB := digest.Digest("sha256:" + strings.Repeat("b", 64))
+	digestC := digest.Digest("sha256:" + strings.Repeat("c", 64))
+	bothDigests := []digest.Digest{digestA, digestB}
+	for _, test := range []struct {
+		name        string
+		names       []string
+		nameDigests map[string][]digest.Digest
+		expected    []string
+	}{
+		{
+			"name without a record is paired with all digests",
+			[]string{"quay.io/r:t"},
+			nil,
+			[]string{"quay.io/r@" + digestA.String(), "quay.io/r@" + digestB.String()},
+		},
+		{
+			"name with a record is paired with its recorded digests only",
+			[]string{"quay.io/r:t"},
+			map[string][]digest.Digest{"quay.io/r:t": {digestB}},
+			[]string{"quay.io/r@" + digestB.String()},
+		},
+		{
+			"record of a name that moved to another image is still reported",
+			[]string{},
+			map[string][]digest.Digest{"quay.io/r:latest": {digestA}},
+			[]string{"quay.io/r@" + digestA.String()},
+		},
+		{
+			"recorded digest the image does not have is skipped",
+			[]string{"quay.io/r:t"},
+			map[string][]digest.Digest{"quay.io/r:t": {digestA, digestC}},
+			[]string{"quay.io/r@" + digestA.String()},
+		},
+		{
+			"name whose recorded digests the image does not have is paired with all digests",
+			[]string{"quay.io/r:t"},
+			map[string][]digest.Digest{"quay.io/r:t": {digestC}},
+			[]string{"quay.io/r@" + digestA.String(), "quay.io/r@" + digestB.String()},
+		},
+		{
+			"unrecorded tag of the same repo adds all digests",
+			[]string{"quay.io/r:a", "quay.io/r:b"},
+			map[string][]digest.Digest{"quay.io/r:a": {digestA}},
+			[]string{"quay.io/r@" + digestA.String(), "quay.io/r@" + digestB.String()},
+		},
+		{
+			"digested name with a record, result is sorted",
+			[]string{"quay.io/z@" + digestA.String(), "quay.io/a:t"},
+			map[string][]digest.Digest{"quay.io/z@" + digestA.String(): {digestB, digestA}, "quay.io/a:t": {digestB}},
+			[]string{"quay.io/a@" + digestB.String(), "quay.io/z@" + digestA.String(), "quay.io/z@" + digestB.String()},
+		},
+		{
+			"unparseable record is skipped",
+			[]string{"quay.io/r:t"},
+			map[string][]digest.Digest{"quay.io/r:t": {digestA}, "UPPERCASE:t": {digestB}},
+			[]string{"quay.io/r@" + digestA.String()},
+		},
+	} {
+		image := &Image{storageImage: &storage.Image{Names: test.names, NameDigests: test.nameDigests, Digest: digestA, Digests: bothDigests}}
+		repoDigests, err := image.RepoDigests()
+		require.NoError(t, err, test.name)
+		require.Equal(t, test.expected, repoDigests, test.name)
+	}
 }
 
 func TestLookupImage(t *testing.T) {
