@@ -68,6 +68,27 @@ func TestExecWithInput(t *testing.T) {
 	require.Error(t, err, "failed to connect: ssh: handshake failed: ssh: disconnect, reason 2: Too many authentication failures")
 }
 
+func TestExecWithOutput(t *testing.T) {
+	input, err := os.Open("/etc/fstab")
+	require.NoError(t, err)
+	defer input.Close()
+
+	options := ConnectionExecOptions{
+		Port: 22,
+		Host: "localhost",
+		Args: []string{"md5sum"},
+	}
+
+	// Native mode: Start() succeeds but the connection fails when the process runs.
+	// The error surfaces when the caller closes the reader.
+	rc, err := ExecWithOutput(&options, NativeMode, input)
+	require.NoError(t, err)
+	require.Error(t, rc.Close(), "exit status 255")
+
+	_, err = ExecWithOutput(&options, GolangMode, input)
+	require.Error(t, err, "failed to connect: ssh: handshake failed: ssh: disconnect, reason 2: Too many authentication failures")
+}
+
 func TestDial(t *testing.T) {
 	options := ConnectionDialOptions{
 		Port: 22,
