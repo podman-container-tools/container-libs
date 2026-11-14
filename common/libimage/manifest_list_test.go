@@ -237,6 +237,32 @@ func TestCreateAndRemoveManifestList(t *testing.T) {
 	require.Equal(t, []string{"localhost/manifestlist:latest"}, rmReports[0].Untagged)
 }
 
+// TestAddListToList ensures that we can add one list to another, adding all of
+// the entries in the source list to the destination list.
+func TestAddManifestListToManifestList(t *testing.T) {
+	const imageListAmd64MemberName = "registry.k8s.io/pause@sha256:59eec8837a4d942cc19a52b8c09ea75121acc38114a2c68b98983ce9356b8610"
+	const imageListArm64MemberName = "registry.k8s.io/pause@sha256:f365626a556e58189fc21d099fc64603db0f440bff07f77c740989515c544a39"
+
+	runtime := testNewRuntime(t)
+	ctx := context.Background()
+
+	firstList, err := runtime.CreateManifestList("firstlist")
+	require.NoError(t, err)
+	require.NotNil(t, firstList)
+	_, err = firstList.Add(ctx, imageListAmd64MemberName, nil)
+	require.NoError(t, err)
+	_, err = firstList.Add(ctx, imageListArm64MemberName, nil)
+	require.NoError(t, err)
+	require.Equalf(t, 2, len(firstList.list.Instances()), "expected to have added two items to list")
+
+	secondList, err := runtime.CreateManifestList("mythirdlist")
+	require.NoError(t, err)
+	require.NotNil(t, secondList)
+	_, err = secondList.Add(ctx, firstList.ID(), &ManifestListAddOptions{All: true})
+	require.NoError(t, err)
+	require.Equalf(t, len(firstList.list.Instances()), len(secondList.list.Instances()), "expected to have all of the items in the list")
+}
+
 // TestAddSomeArtifacts ensures that we don't fail to add artifact manifests to
 // a manifest list, even (or especially) when their config blobs aren't valid
 // OCI or Docker config blobs.
