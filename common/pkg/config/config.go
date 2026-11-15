@@ -806,10 +806,13 @@ func (c *Config) CheckCgroupsAndAdjustConfig() {
 	}
 
 	if !hasSession && unshare.GetRootlessUID() != 0 {
-		logrus.Warningf("The cgroupv2 manager is set to systemd but there is no systemd user session available")
-		logrus.Warningf("For using systemd, you may need to log in using a user session")
-		logrus.Warningf("Alternatively, you can enable lingering with: `loginctl enable-linger %d` (possibly as root)", unshare.GetRootlessUID())
-		logrus.Warningf("Falling back to --cgroup-manager=cgroupfs")
+		if os.Getenv("_CONTAINERS_CGROUP_MANAGER_WARNED") == "" {
+			logrus.Warningf("The cgroupv2 manager is set to systemd but there is no systemd user session available")
+			logrus.Warningf("For using systemd, you may need to log in using a user session")
+			logrus.Warningf("Alternatively, you can enable lingering with: `loginctl enable-linger %d` (possibly as root)", unshare.GetRootlessUID())
+			logrus.Warningf("Falling back to --cgroup-manager=cgroupfs")
+			os.Setenv("_CONTAINERS_CGROUP_MANAGER_WARNED", "1")
+		}
 		c.Engine.CgroupManager = CgroupfsCgroupsManager
 	}
 }
