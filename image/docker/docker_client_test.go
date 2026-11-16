@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -15,8 +16,12 @@ import (
 	"testing"
 	"time"
 
+	digest "github.com/opencontainers/go-digest"
+	"github.com/opencontainers/image-spec/specs-go"
+	imgspecv1 "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.podman.io/image/v5/internal/set"
 	"go.podman.io/image/v5/internal/useragent"
 	"go.podman.io/image/v5/types"
 )
@@ -572,5 +577,204 @@ func TestResolveRequestURLWithNamespaceProxy(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, c.expected, result.String())
 		})
+	}
+}
+
+// newTestDockerClient returns a dockerClient for a test server using handler, and a reference to a repository on that server.
+func newTestDockerClient(t *testing.T, handler http.Handler) (*dockerClient, dockerReference) {
+	s := httptest.NewServer(handler)
+	t.Cleanup(s.Close)
+	registry := strings.TrimPrefix(s.URL, "http://")
+	ref, err := ParseReference("//" + registry + "/test/repo:latest")
+	require.NoError(t, err)
+	client := &dockerClient{
+		sys:              &types.SystemContext{},
+		registry:         registry,
+		scheme:           "http",
+		client:           s.Client(),
+		tokenCache:       map[string]*bearerToken{},
+		reportedWarnings: set.New[string](),
+	}
+	client.detectPropertiesOnce.Do(func() {}) // Use the values above instead of probing the server.
+	return client, ref.(dockerReference)
+}
+
+func TestDockerClientGetReferrersFromTagSchema(t *testing.T) {
+	sha256Digest := digest.FromString("subject")
+	sha512Digest := digest.SHA512.FromString("subject")
+	sha256Tag := "sha256-" + sha256Digest.Encoded()
+	sha512Tag := "sha512-" + sha512Digest.Encoded()[:64]
+	index := `{"schemaVersion":2,"mediaType":"application/vnd.oci.image.index.v1+json","manifests":[` +
+		`{"mediaType":"application/vnd.oci.image.manifest.v1+json","digest":"` + digest.FromString("a").String() + `","size":1},` +
+		`{"mediaType":"application/vnd.oci.image.manifest.v1+json","digest":"` + digest.FromString("b").String() + `","size":2}]}`
+	manifestUnknown := `{"errors":[{"code":"MANIFEST_UNKNOWN","message":"manifest unknown"}]}`
+
+	for _, c := range []struct {
+		subject     digest.Digest
+		tag         string
+		status      int
+		contentType string
+		body        string
+		expected    int // Number of descriptors, or -1 if an error is expected
+	}{
+		{sha256Digest, sha256Tag, http.StatusOK, imgspecv1.MediaTypeImageIndex, index, 2},
+		{sha512Digest, sha512Tag, http.StatusOK, imgspecv1.MediaTypeImageIndex, index, 2},
+		{sha256Digest, sha256Tag, http.StatusOK, imgspecv1.MediaTypeImageIndex, `{"schemaVersion":2,"mediaType":"application/vnd.oci.image.index.v1+json","manifests":[]}`, 0},
+		{sha256Digest, sha256Tag, http.StatusNotFound, "application/json", manifestUnknown, 0},
+		{sha256Digest, sha256Tag, http.StatusNotFound, "text/plain", "Not found", 0},                         // A plain 404, without an errcode payload
+		{sha256Digest, sha256Tag, http.StatusOK, imgspecv1.MediaTypeImageManifest, `{"schemaVersion":2}`, 0}, // Not an index
+		{sha256Digest, sha256Tag, http.StatusOK, imgspecv1.MediaTypeImageIndex, "invalid JSON", 0},
+		{sha256Digest, sha256Tag, http.StatusInternalServerError, "text/plain", "", -1},
+	} {
+		client, ref := newTestDockerClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, "/v2/test/repo/manifests/"+c.tag, r.URL.Path)
+			w.Header().Set("Content-Type", c.contentType)
+			w.WriteHeader(c.status)
+			_, _ = w.Write([]byte(c.body))
+		}))
+		res, err := client.getReferrersFromTagSchema(context.Background(), ref, c.subject)
+		if c.expected == -1 {
+			assert.Error(t, err, c.body)
+		} else {
+			require.NoError(t, err, c.body)
+			assert.Len(t, res, c.expected, c.body)
+		}
+	}
+}
+
+// referrersTestResponse is a response of a test server for TestDockerClientGetReferrers.
+type referrersTestResponse struct {
+	status      int
+	contentType string
+	body        string
+	link        string // "" if there is no Link header
+}
+
+func (r referrersTestResponse) write(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", r.contentType)
+	if r.link != "" {
+		w.Header().Set("Link", r.link)
+	}
+	w.WriteHeader(r.status)
+	_, _ = w.Write([]byte(r.body))
+}
+
+// referrersTestIndex returns a 200 response with an image index containing descs.
+func referrersTestIndex(t *testing.T, descs ...imgspecv1.Descriptor) referrersTestResponse {
+	body, err := json.Marshal(imgspecv1.Index{
+		Versioned: specs.Versioned{SchemaVersion: 2},
+		MediaType: imgspecv1.MediaTypeImageIndex,
+		Manifests: descs,
+	})
+	require.NoError(t, err)
+	return referrersTestResponse{status: http.StatusOK, contentType: imgspecv1.MediaTypeImageIndex, body: string(body)}
+}
+
+func TestDockerClientGetReferrers(t *testing.T) {
+	subject := digest.FromString("subject")
+	apiPath := "/v2/test/repo/referrers/" + subject.String()
+	tagPath := "/v2/test/repo/manifests/sha256-" + subject.Encoded()
+	descA := imgspecv1.Descriptor{MediaType: imgspecv1.MediaTypeImageManifest, Digest: digest.FromString("a"), Size: 1, ArtifactType: "type/x"}
+	descB := imgspecv1.Descriptor{MediaType: imgspecv1.MediaTypeImageManifest, Digest: digest.FromString("b"), Size: 1, ArtifactType: "type/y"}
+	descTag := imgspecv1.Descriptor{MediaType: imgspecv1.MediaTypeImageManifest, Digest: digest.FromString("tag"), Size: 1, ArtifactType: "type/x"}
+	descInvalid := imgspecv1.Descriptor{MediaType: imgspecv1.MediaTypeImageManifest, Digest: digest.Digest("sha256:../x"), Size: 1}
+	withNext := func(r referrersTestResponse) referrersTestResponse {
+		r.link = "<" + apiPath + `?page=2>; rel="next"`
+		return r
+	}
+	notFound := referrersTestResponse{status: http.StatusNotFound, contentType: "text/plain"}
+	html := referrersTestResponse{status: http.StatusOK, contentType: "text/html", body: "<html></html>"}
+	status := func(s int) referrersTestResponse { return referrersTestResponse{status: s, contentType: "text/plain"} }
+
+	for i, c := range []struct {
+		page1, page2 referrersTestResponse
+		artifactType string
+		expected     []digest.Digest // nil if an error is expected
+	}{
+		{referrersTestIndex(t, descA, descB), notFound, "", []digest.Digest{descA.Digest, descB.Digest}},
+		{referrersTestIndex(t, descA, descB), notFound, "type/x", []digest.Digest{descA.Digest, descB.Digest}},                  // The registry ignored the filter
+		{withNext(referrersTestIndex(t, descA)), referrersTestIndex(t, descB), "", []digest.Digest{descA.Digest, descB.Digest}}, // Two pages
+		{referrersTestIndex(t), notFound, "", []digest.Digest{}},
+		{referrersTestIndex(t, descInvalid, descA), notFound, "", []digest.Digest{descInvalid.Digest, descA.Digest}},
+		{notFound, notFound, "", []digest.Digest{descTag.Digest}}, // No API: use the tag schema
+		{status(http.StatusMethodNotAllowed), notFound, "", []digest.Digest{descTag.Digest}},
+		{status(http.StatusNotImplemented), notFound, "", []digest.Digest{descTag.Digest}},
+		{html, notFound, "", []digest.Digest{descTag.Digest}},
+		{notFound, notFound, "type/y", []digest.Digest{descTag.Digest}}, // The fallback tag does not support filtering
+		{status(http.StatusUnauthorized), notFound, "", nil},
+		{status(http.StatusForbidden), notFound, "", nil},
+		{status(http.StatusInternalServerError), notFound, "", nil},
+		{withNext(referrersTestIndex(t, descA)), html, "", nil},     // Only the first page can show that the API is not implemented
+		{withNext(referrersTestIndex(t, descA)), notFound, "", nil}, // Same
+	} {
+		tagRequested := false
+		client, ref := newTestDockerClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case r.URL.Path == apiPath && r.URL.Query().Get("page") == "":
+				assert.Equal(t, c.artifactType, r.URL.Query().Get("artifactType"), i)
+				c.page1.write(w)
+			case r.URL.Path == apiPath && r.URL.Query().Get("page") == "2":
+				c.page2.write(w)
+			case r.URL.Path == tagPath:
+				tagRequested = true
+				referrersTestIndex(t, descTag).write(w)
+			default:
+				assert.Fail(t, "Unexpected request", "%d: %s", i, r.URL.String())
+			}
+		}))
+		res, err := client.getReferrers(context.Background(), ref, subject, c.artifactType)
+		if c.expected == nil {
+			assert.Error(t, err, i)
+			assert.False(t, tagRequested, i)
+			continue
+		}
+		require.NoError(t, err, i)
+		digests := []digest.Digest{}
+		for _, desc := range res {
+			digests = append(digests, desc.Digest)
+		}
+		assert.Equal(t, c.expected, digests, i)
+	}
+
+	// A fallback for one subject does not skip the API on the next lookup.
+	otherSubject := digest.FromString("other subject")
+	otherResponse := referrersTestIndex(t, descA)
+	client, ref := newTestDockerClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v2/test/repo/referrers/"+otherSubject.String() {
+			otherResponse.write(w)
+			return
+		}
+		notFound.write(w)
+	}))
+	res, err := client.getReferrers(context.Background(), ref, subject, "")
+	require.NoError(t, err)
+	assert.Empty(t, res)
+	res, err = client.getReferrers(context.Background(), ref, otherSubject, "")
+	require.NoError(t, err)
+	assert.Equal(t, []imgspecv1.Descriptor{descA}, res)
+
+	// Limits
+	descs := make([]imgspecv1.Descriptor, maxReferrers+1)
+	for i := range descs {
+		descs[i] = descA
+	}
+	for _, response := range []referrersTestResponse{
+		withNext(referrersTestIndex(t)), // The next page is the same empty page, forever
+		referrersTestIndex(t, descs...),
+	} {
+		client, ref := newTestDockerClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			response.write(w)
+		}))
+		_, err := client.getReferrers(context.Background(), ref, subject, "")
+		assert.Error(t, err)
+	}
+
+	// Invalid subject digest
+	client, ref = newTestDockerClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Fail(t, "Unexpected request", r.URL.String())
+	}))
+	for _, invalid := range []digest.Digest{"invalid", "sha256:../../../etc/passwd"} {
+		_, err := client.getReferrers(context.Background(), ref, invalid, "")
+		assert.Error(t, err)
 	}
 }

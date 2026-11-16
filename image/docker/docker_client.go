@@ -50,6 +50,7 @@ const (
 	blobsPath               = "/v2/%s/blobs/%s"
 	blobUploadPath          = "/v2/%s/blobs/uploads/"
 	extensionsSignaturePath = "/extensions/v2/%s/signatures/%s"
+	referrersPath           = "/v2/%s/referrers/%s"
 
 	minimumTokenLifetimeSeconds = 60
 
@@ -59,7 +60,13 @@ const (
 	backoffNumIterations = 5
 	backoffInitialDelay  = 2 * time.Second
 	backoffMaxDelay      = 60 * time.Second
+
+	// Bound the number of pages and descriptors collected from the Referrers API.
+	maxReferrersPages = 100
+	maxReferrers      = 10_000
 )
+
+var errReferrersAPINotSupported = errors.New("registry does not implement the OCI Referrers API")
 
 // extensionSignature and extensionSignatureList come from github.com/openshift/origin/pkg/dockerregistry/server/signaturedispatcher.go:
 // signature represents a Docker image signature.
@@ -1273,6 +1280,125 @@ func (c *dockerClient) getSigstoreAttachmentManifest(ctx context.Context, ref do
 		return nil, fmt.Errorf("parsing manifest %s: %w", sigstoreRef.String(), err)
 	}
 	return res, nil
+}
+
+// getReferrers lists referrers of d in ref’s repository, using the fallback tag if the API is unavailable.
+// A non-empty artifactType requests filtering from the API; results are not filtered locally.
+func (c *dockerClient) getReferrers(ctx context.Context, ref dockerReference, d digest.Digest, artifactType string) ([]imgspecv1.Descriptor, error) {
+	if err := d.Validate(); err != nil {
+		return nil, err
+	}
+	descs, err := c.getReferrersFromAPI(ctx, ref, d, artifactType)
+	if errors.Is(err, errReferrersAPINotSupported) {
+		logrus.Debugf("Referrers API unavailable for %s, trying the fallback tag", ref.ref.Name())
+		descs, err = c.getReferrersFromTagSchema(ctx, ref, d)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("listing referrers of %s in %s: %w", d.String(), ref.ref.Name(), err)
+	}
+	return descs, nil
+}
+
+// getReferrersFromAPI lists referrers for the validated digest d.
+// Optionally, specify an artifactType to filter the results.
+// If the API is unavailable, this returns errReferrersAPINotSupported.
+func (c *dockerClient) getReferrersFromAPI(ctx context.Context, ref dockerReference, d digest.Digest, artifactType string) ([]imgspecv1.Descriptor, error) {
+	path := fmt.Sprintf(referrersPath, reference.Path(ref.ref), d)
+	if artifactType != "" {
+		path += "?" + url.Values{"artifactType": {artifactType}}.Encode()
+	}
+	var res []imgspecv1.Descriptor
+	for page := 0; path != ""; page++ {
+		if page == maxReferrersPages {
+			return nil, fmt.Errorf("more than %d pages of referrers", maxReferrersPages)
+		}
+		descs, nextPath, err := c.getReferrersPage(ctx, path, page == 0)
+		if err != nil {
+			return nil, err
+		}
+
+		// Check that the referrers collected in this iteration of the loop
+		// plus the ones collected in previous iterations
+		// do not exceed the maximum number of referrers allowed.
+		if len(descs) > maxReferrers-len(res) {
+			return nil, fmt.Errorf("more than %d referrers", maxReferrers)
+		}
+		res = append(res, descs...)
+		path = nextPath
+	}
+	return res, nil
+}
+
+// getReferrersFromTagSchema reads the fallback index for the validated digest d.
+// A missing tag or a tag that doesn’t point to an OCI image index means no referrers.
+// The OCI fallback tag is <algorithm>-<digest prefix>, with at most 64 digest characters.
+func (c *dockerClient) getReferrersFromTagSchema(ctx context.Context, ref dockerReference, d digest.Digest) ([]imgspecv1.Descriptor, error) {
+	encoded := d.Encoded()
+	tag := d.Algorithm().String() + "-" + encoded[:min(len(encoded), 64)]
+	logrus.Debugf("Looking for referrers of %s in tag %s", d, tag)
+	manifestBlob, mimeType, err := c.fetchManifest(ctx, ref, tag)
+	if err != nil {
+		if isManifestUnknownError(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if mimeType != imgspecv1.MediaTypeImageIndex {
+		logrus.Debugf("Ignoring referrers tag %s with unexpected MIME type %q", tag, mimeType)
+		return nil, nil
+	}
+	index, err := manifest.OCI1IndexFromManifest(manifestBlob)
+	if err != nil {
+		logrus.Debugf("Ignoring invalid referrers tag %s: %v", tag, err)
+		return nil, nil
+	}
+	return index.Manifests, nil
+}
+
+// getReferrersPage returns one page of descriptors and the next path, or "" on the last page.
+// Only the first page can signal errReferrersAPINotSupported.
+func (c *dockerClient) getReferrersPage(ctx context.Context, path string, firstPage bool) ([]imgspecv1.Descriptor, string, error) {
+	headers := map[string][]string{
+		"Accept": {imgspecv1.MediaTypeImageIndex},
+	}
+	res, err := c.makeRequest(ctx, http.MethodGet, path, headers, nil, v2Auth, nil)
+	if err != nil {
+		return nil, "", err
+	}
+	defer res.Body.Close()
+
+	status := res.StatusCode
+	mimeType := simplifyContentType(res.Header.Get("Content-Type"))
+	isIndex := mimeType == imgspecv1.MediaTypeImageIndex
+	switch {
+	// On the first page, treat 404, 405, 501, or 200 with a non-index Content-Type
+	// as signs that the referrers API are not supported.
+	// A proxy can return 200 with HTML for an unknown endpoint.
+	case firstPage && (status == http.StatusNotFound ||
+		status == http.StatusMethodNotAllowed ||
+		status == http.StatusNotImplemented ||
+		(status == http.StatusOK && !isIndex)):
+		return nil, "", errReferrersAPINotSupported
+	// Other HTTP errors, even on the first page, don't imply the API is unsupported.
+	case status != http.StatusOK:
+		return nil, "", registryHTTPResponseToError(res)
+	// A later page returned 200 with an unexpected Content-Type.
+	case !isIndex:
+		return nil, "", fmt.Errorf("unexpected MIME type %q of a referrers page", mimeType)
+	}
+	body, err := iolimits.ReadAtMost(res.Body, iolimits.MaxManifestBodySize)
+	if err != nil {
+		return nil, "", err
+	}
+	index, err := manifest.OCI1IndexFromManifest(body)
+	if err != nil {
+		return nil, "", err
+	}
+	nextPath, err := nextPagePath(res)
+	if err != nil {
+		return nil, "", err
+	}
+	return index.Manifests, nextPath, nil
 }
 
 // getExtensionsSignatures returns signatures from the X-Registry-Supports-Signatures API extension,
