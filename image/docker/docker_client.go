@@ -459,22 +459,12 @@ func SearchRegistry(ctx context.Context, sys *types.SystemContext, registry, ima
 			}
 		}
 
-		link := resp.Header.Get("Link")
-		if link == "" {
-			break
-		}
-		linkURLPart, _, _ := strings.Cut(link, ";")
-		linkURL, err := url.Parse(strings.Trim(linkURLPart, "<>"))
+		path, err = nextPagePath(resp)
 		if err != nil {
 			return searchRes, err
 		}
-
-		// can be relative or absolute, but we only want the path (and I
-		// guess we're in trouble if it forwards to a new place...)
-		path = linkURL.Path
-		if linkURL.RawQuery != "" {
-			path += "?"
-			path += linkURL.RawQuery
+		if path == "" {
+			break
 		}
 	}
 	return searchRes, nil
@@ -508,6 +498,27 @@ func (c *dockerClient) resolveRequestURL(path string) (*url.URL, error) {
 		res.RawQuery = q.Encode()
 	}
 	return res, nil
+}
+
+// nextPagePath resolves the Link against the response URL and returns only its path and query.
+// The next request still uses the client's configured registry and scheme.
+// An empty path means there is no next page.
+func nextPagePath(res *http.Response) (string, error) {
+	linkURLPart, _, _ := strings.Cut(res.Header.Get("Link"), ";")
+	target := strings.Trim(strings.TrimSpace(linkURLPart), "<>")
+	if target == "" {
+		return "", nil
+	}
+	next, err := res.Request.URL.Parse(target)
+	if err != nil {
+		return "", err
+	}
+	path := next.RequestURI()
+	// makeRequest appends this to the registry address, so it must start with a slash.
+	if !strings.HasPrefix(path, "/") {
+		return "", errors.New("pagination link does not resolve to an absolute path")
+	}
+	return path, nil
 }
 
 // Checks if the auth headers in the response contain an indication of a failed
