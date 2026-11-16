@@ -6,8 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
-	"strings"
 
 	"github.com/opencontainers/go-digest"
 	"github.com/sirupsen/logrus"
@@ -115,23 +113,12 @@ func GetRepositoryTags(ctx context.Context, sys *types.SystemContext, ref types.
 			tags = append(tags, tag)
 		}
 
-		link := res.Header.Get("Link")
-		if link == "" {
-			break
-		}
-
-		linkURLPart, _, _ := strings.Cut(link, ";")
-		linkURL, err := url.Parse(strings.Trim(linkURLPart, "<>"))
+		path, err = nextPagePath(res)
 		if err != nil {
 			return tags, err
 		}
-
-		// can be relative or absolute, but we only want the path (and I
-		// guess we're in trouble if it forwards to a new place...)
-		path = linkURL.Path
-		if linkURL.RawQuery != "" {
-			path += "?"
-			path += linkURL.RawQuery
+		if path == "" {
+			break
 		}
 	}
 	return tags, nil

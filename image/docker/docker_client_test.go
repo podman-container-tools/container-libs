@@ -356,6 +356,41 @@ func TestNeedsNoRetry(t *testing.T) {
 	}
 }
 
+func TestNextPagePath(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "https://registry.example.com/v2/foo/tags/list?last=a", nil)
+	for _, c := range []struct {
+		link     string // "" means no Link header
+		expected string
+	}{
+		{"", ""},
+		{`<>; rel="next"`, ""},
+		{`</v2/foo/tags/list?last=b&n=2>; rel="next"`, "/v2/foo/tags/list?last=b&n=2"},
+		{`</v2/foo/tags/list>; rel="next"`, "/v2/foo/tags/list"},
+		{`<?n=2>; rel="next"`, "/v2/foo/tags/list?n=2"},
+		{`<list?last=b>; rel="next"`, "/v2/foo/tags/list?last=b"},
+		{`</v2/foo%2Fbar/tags/list>; rel="next"`, "/v2/foo%2Fbar/tags/list"},
+		{`<https://registry.example.com/v2/foo/tags/list?n=2>; rel="next"`, "/v2/foo/tags/list?n=2"},
+		{`<https://user:pass@registry.example.com/v2/foo/tags/list?n=2>; rel="next"`, "/v2/foo/tags/list?n=2"},
+		{`<https://other.example.com/next?page=2>; rel="next"`, "/next?page=2"},
+		{`<http://registry.example.com/next?page=2>; rel="next"`, "/next?page=2"},
+		{`<https://registry.example.com:5000/next?page=2>; rel="next"`, "/next?page=2"},
+		{`</v2/_catalog?last=f35%2Fs2i-base&n=100>; rel="next"`, "/v2/_catalog?last=f35%2Fs2i-base&n=100"},
+	} {
+		res, err := nextPagePath(&http.Response{Request: req, Header: http.Header{"Link": {c.link}}})
+		require.NoError(t, err, c.link)
+		assert.Equal(t, c.expected, res, c.link)
+	}
+
+	for _, link := range []string{
+		`<:invalid>; rel="next"`,
+		`<urn:example:next>; rel="next"`,
+	} {
+		path, err := nextPagePath(&http.Response{Request: req, Header: http.Header{"Link": {link}}})
+		assert.Error(t, err, link)
+		assert.Empty(t, path, link)
+	}
+}
+
 func TestParseRegistryWarningHeader(t *testing.T) {
 	for _, c := range []struct{ header, expected string }{
 		{"completely invalid", ""},
