@@ -36,7 +36,7 @@ jobs:
       with:
         persist-credentials: false
         fetch-depth: 2
-    - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+    - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
       with:
         go-version: 1.27.x
         # By default the go cache will only use go.sum in the root which we don't have,
@@ -86,7 +86,7 @@ jobs:
         ref: ${{ github.event.pull_request.head.sha }}
         # Fetch all commits, a sparse checkout with only the commits count in the PR will not result in the right range.
         fetch-depth: 0
-    - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+    - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
       with:
         go-version: 1.27.x
         # See comment on lint task
@@ -101,7 +101,7 @@ jobs:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         persist-credentials: false
-    - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+    - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
       with:
         go-version: 1.27.x
         # See comment on lint task
