@@ -227,6 +227,27 @@ func TestResolve(t *testing.T) {
 	require.Nil(t, resolved)
 }
 
+// Note that despite this test, the output content of Description() is not an API promise and may change any time.
+func TestResolvedDescription(t *testing.T) {
+	sys := &types.SystemContext{
+		SystemRegistriesConfPath:                                  "testdata/aliases.conf",
+		SystemRegistriesConfDirPath:                               "testdata/this-does-not-exist",
+		PodmanOnlyShortNamesIgnoreRegistriesConfAndForceDockerHub: true,
+	}
+	digest := "@sha256:d366a4665ab44f0648d7a00ae3fae139d55e32f9712c67accd604bb55df9d05a"
+
+	for _, test := range []struct{ input, description string }{
+		{"docker", `Resolving "docker" to docker.io (enforced by caller)`},
+		{"docker:tag", `Resolving "docker" to docker.io (enforced by caller)`},
+		{"quay/foo" + digest, `Resolving "quay/foo" to docker.io (enforced by caller)`},
+		{"registry.com/repo/image:tag", ""},
+	} {
+		resolved, err := Resolve(sys, test.input)
+		require.NoError(t, err, "%s", test.input)
+		assert.Equal(t, test.description, resolved.Description(), "%s", test.input)
+	}
+}
+
 func toNamed(t *testing.T, input string, trim bool) reference.Named {
 	ref, err := reference.Parse(input)
 	require.NoError(t, err)
