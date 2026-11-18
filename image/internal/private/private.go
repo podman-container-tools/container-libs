@@ -9,6 +9,7 @@ import (
 	imgspecv1 "github.com/opencontainers/image-spec/specs-go/v1"
 	"go.podman.io/image/v5/docker/reference"
 	"go.podman.io/image/v5/internal/blobinfocache"
+	"go.podman.io/image/v5/internal/digests"
 	"go.podman.io/image/v5/internal/signature"
 	compression "go.podman.io/image/v5/pkg/compression/types"
 	"go.podman.io/image/v5/types"
@@ -104,6 +105,10 @@ type UploadedBlob struct {
 type PutBlobOptions struct {
 	Cache    blobinfocache.BlobInfoCache2 // Cache to optionally update with the uploaded bloblook up blob infos.
 	IsConfig bool                         // True if the blob is a config
+	Digests  digests.Options
+	// If not "", inputInfo.Digest must be set, and this is the reason why PutBlobWithOptions is provided with a digest
+	// and the destination must use precisely that one (in particular, use that algorithm).
+	CannotChangeDigestReason string
 
 	// The following fields are new to internal/private.  Users of internal/private MUST fill them in,
 	// but they also must expect that they will be ignored by types.ImageDestination transports.
