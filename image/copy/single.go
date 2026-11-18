@@ -920,9 +920,12 @@ func updatedBlobInfoFromReuse(inputInfo types.BlobInfo, reusedBlob private.Reuse
 		}
 	}
 	// The chunked annotations describe the original blob's TOC; if the
-	// reused blob uses a different compression, they no longer describe
-	// the blob and must not survive into the result.
-	if res.CompressionAlgorithm == nil || res.CompressionAlgorithm.Name() != compression.ZstdChunked.Name() {
+	// blob was substituted by a different one, they no longer describe
+	// the blob and must not survive into the result. The compression
+	// algorithm alone does not decide this: substituting one
+	// zstd:chunked blob by another still invalidates the original TOC,
+	// so this is decided by digest equality.
+	if reusedBlob.Digest != inputInfo.Digest {
 		res.Annotations = annotationsAfterCompressionChange(res.Annotations)
 	}
 	if len(reusedBlob.CompressionAnnotations) != 0 {

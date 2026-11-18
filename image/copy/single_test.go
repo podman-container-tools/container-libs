@@ -181,6 +181,32 @@ func TestUpdatedBlobInfoFromReuse(t *testing.T) {
 				CompressionAlgorithm: &compression.ZstdChunked,
 			},
 		},
+		{ // Reuse with substitution to a different chunked blob: the old TOC
+			// annotations describe the original blob, so they must go even
+			// though the new blob is chunked too; only the fresh value
+			// supplied with the reused blob survives
+			reused: private.ReusedBlob{
+				Digest:               "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+				Size:                 51354364,
+				CompressionOperation: types.PreserveOriginal,
+				CompressionAlgorithm: &compression.ZstdChunked,
+				CompressionAnnotations: map[string]string{
+					"io.github.containers.zstd-chunked.manifest-checksum": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+				},
+			},
+			expected: types.BlobInfo{
+				Digest: "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+				Size:   51354364,
+				URLs:   nil,
+				Annotations: map[string]string{
+					"test-annotation-2": "two",
+					"io.github.containers.zstd-chunked.manifest-checksum": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+				},
+				MediaType:            imgspecv1.MediaTypeImageLayerZstd,
+				CompressionOperation: types.PreserveOriginal,
+				CompressionAlgorithm: &compression.ZstdChunked,
+			},
+		},
 	} {
 		res := updatedBlobInfoFromReuse(chunkedSrcInfo, c.reused)
 		assert.Equal(t, c.expected, res, fmt.Sprintf("%#v", c.reused))
