@@ -33,7 +33,9 @@ import (
 
 // imageCopier tracks state specific to a single image (possibly an item of a manifest list)
 type imageCopier struct {
-	c                             *copier
+	c *copier
+	// WARNING: If you are adding new reasons to change manifestUpdates, also update the
+	// OptimizeDestinationImageAlreadyExists short-circuit conditions.
 	manifestUpdates               *types.ManifestUpdateOptions
 	src                           *image.SourcedImage
 	manifestConversionPlan        manifestConversionPlan
@@ -216,6 +218,7 @@ func (c *copier) copySingleImage(ctx context.Context, unparsedImage *image.Unpar
 	if c.options.OptimizeDestinationImageAlreadyExists {
 		shouldUpdateSigs := len(sigs) > 0 || len(c.signers) != 0 // TODO: Consider allowing signatures updates only and skipping the image's layers/manifest copy if possible
 		noPendingManifestUpdates := ic.noPendingManifestUpdates()
+		// FIXME: handle digests.Options here
 
 		logrus.Debugf("Checking if we can skip copying: has signatures=%t, OCI encryption=%t, no manifest updates=%t, compression match required for reusing blobs=%t", shouldUpdateSigs, destRequiresOciEncryption, noPendingManifestUpdates, opts.requireCompressionFormatMatch)
 		if !shouldUpdateSigs && !destRequiresOciEncryption && noPendingManifestUpdates && !ic.requireCompressionFormatMatch {
