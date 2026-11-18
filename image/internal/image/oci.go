@@ -159,6 +159,10 @@ func (m *manifestOCI1) editedImage(ctx context.Context, edits EditedImageEdits, 
 	}
 
 	// No conversion required, update manifest
+	if edits.ConfigDigest != "" {
+		copy.m.Config.Digest = edits.ConfigDigest
+	}
+
 	if edits.LayerInfos != nil {
 		if err := copy.m.UpdateLayerInfos(edits.LayerInfos); err != nil {
 			return nil, err
