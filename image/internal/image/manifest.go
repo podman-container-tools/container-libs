@@ -85,6 +85,7 @@ type EditableImage interface {
 
 // EditedImageEdits collects requested edits in EditedImage as named optional arguments.
 type EditedImageEdits struct {
+	ConfigDigest            digest.Digest    // Or ""
 	LayerInfos              []types.BlobInfo // Complete BlobInfos (size+digest+urls+annotations) which should replace the originals, in order (the root layer first, and then successive layered layers). BlobInfos' MediaType fields are ignored.
 	EmbeddedDockerReference reference.Named
 	ManifestMIMEType        string

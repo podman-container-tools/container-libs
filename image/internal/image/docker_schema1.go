@@ -2,6 +2,7 @@ package image
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 
@@ -125,6 +126,10 @@ func (m *manifestSchema1) editedImage(ctx context.Context, edits EditedImageEdit
 	}
 
 	// No conversion required, update manifest
+	if edits.ConfigDigest != "" {
+		return nil, errors.New("internal error: asked to edit config digest of a schema1 manifest")
+	}
+
 	if edits.LayerInfos != nil {
 		if err := copy.m.UpdateLayerInfos(edits.LayerInfos); err != nil {
 			return nil, err
