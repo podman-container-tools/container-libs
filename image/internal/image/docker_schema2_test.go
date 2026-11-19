@@ -427,12 +427,12 @@ func (d *memoryImageDest) PutBlobWithOptions(ctx context.Context, stream io.Read
 	if d.storedBlobs == nil {
 		d.storedBlobs = make(map[digest.Digest][]byte)
 	}
-	if inputInfo.Digest == "" {
-		panic("inputInfo.Digest unexpectedly empty")
-	}
 	contents, err := io.ReadAll(stream)
 	if err != nil {
 		return private.UploadedBlob{}, err
+	}
+	if inputInfo.Digest == "" {
+		inputInfo.Digest = digest.FromBytes(contents)
 	}
 	d.storedBlobs[inputInfo.Digest] = contents
 	return private.UploadedBlob{Digest: inputInfo.Digest, Size: int64(len(contents))}, nil
