@@ -602,11 +602,12 @@ func TestConvertToManifestSchema1(t *testing.T) {
 	originalSrc := newSchema2ImageSource(t, "httpd-copy:latest")
 	original := manifestSchema2FromFixture(t, originalSrc, "schema2.json", false)
 	memoryDest := &memoryImageDest{ref: originalSrc.ref}
+	memoryDestInfo := types.ManifestUpdateInformation{
+		Destination: memoryDest,
+	}
 	res, err := original.UpdatedImage(context.Background(), types.ManifestUpdateOptions{
 		ManifestMIMEType: manifest.DockerV2Schema1SignedMediaType,
-		InformationOnly: types.ManifestUpdateInformation{
-			Destination: memoryDest,
-		},
+		InformationOnly:  memoryDestInfo,
 	})
 	require.NoError(t, err)
 
@@ -627,9 +628,7 @@ func TestConvertToManifestSchema1(t *testing.T) {
 	res, err = original.UpdatedImage(context.Background(), types.ManifestUpdateOptions{
 		LayerInfos:       updatedLayers,
 		ManifestMIMEType: manifest.DockerV2Schema1SignedMediaType,
-		InformationOnly: types.ManifestUpdateInformation{
-			Destination: memoryDest,
-		},
+		InformationOnly:  memoryDestInfo,
 	})
 	require.NoError(t, err)
 	assert.Equal(t, updatedLayersCopy, updatedLayers) // updatedLayers have not been modified in place
@@ -661,9 +660,7 @@ func TestConvertToManifestSchema1(t *testing.T) {
 	_, err = original.UpdatedImage(context.Background(), types.ManifestUpdateOptions{
 		LayerInfos:       layerInfosWithCryptoOperation(original.LayerInfos(), types.Encrypt),
 		ManifestMIMEType: manifest.DockerV2Schema1SignedMediaType,
-		InformationOnly: types.ManifestUpdateInformation{
-			Destination: memoryDest,
-		},
+		InformationOnly:  memoryDestInfo,
 	})
 	assert.Error(t, err)
 

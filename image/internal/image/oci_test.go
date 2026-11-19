@@ -498,11 +498,12 @@ func TestManifestOCI1ConvertToManifestSchema1(t *testing.T) {
 	original := manifestOCI1FromFixture(t, originalSrc, "oci1.json")
 	original2 := manifestOCI1FromFixture(t, originalSrc, "oci1.json")
 	memoryDest := &memoryImageDest{ref: originalSrc.ref}
+	memoryDestInfo := types.ManifestUpdateInformation{
+		Destination: memoryDest,
+	}
 	res := successfulOCI1Conversion(t, original, original2, types.ManifestUpdateOptions{
 		ManifestMIMEType: manifest.DockerV2Schema1SignedMediaType,
-		InformationOnly: types.ManifestUpdateInformation{
-			Destination: memoryDest,
-		},
+		InformationOnly:  memoryDestInfo,
 	})
 
 	convertedJSON, mt, err := res.Manifest(context.Background())
@@ -518,9 +519,7 @@ func TestManifestOCI1ConvertToManifestSchema1(t *testing.T) {
 	res = successfulOCI1Conversion(t, original, original2, types.ManifestUpdateOptions{
 		LayerInfos:       updatedLayers,
 		ManifestMIMEType: manifest.DockerV2Schema1SignedMediaType,
-		InformationOnly: types.ManifestUpdateInformation{
-			Destination: memoryDest,
-		},
+		InformationOnly:  memoryDestInfo,
 	})
 	assert.Equal(t, updatedLayersCopy, updatedLayers) // updatedLayers have not been modified in place
 	convertedJSON, mt, err = res.Manifest(context.Background())
@@ -551,9 +550,7 @@ func TestManifestOCI1ConvertToManifestSchema1(t *testing.T) {
 	artifact := manifestOCI1FromFixture(t, originalSrc, "oci1-artifact.json")
 	_, err = artifact.UpdatedImage(context.Background(), types.ManifestUpdateOptions{
 		ManifestMIMEType: manifest.DockerV2Schema1SignedMediaType,
-		InformationOnly: types.ManifestUpdateInformation{
-			Destination: memoryDest,
-		},
+		InformationOnly:  memoryDestInfo,
 	})
 	var expected manifest.NonImageArtifactError
 	assert.ErrorAs(t, err, &expected)
@@ -563,9 +560,7 @@ func TestManifestOCI1ConvertToManifestSchema1(t *testing.T) {
 	encrypted2 := manifestOCI1FromFixture(t, originalSrc, "oci1.encrypted.json")
 	_, err = encrypted.UpdatedImage(context.Background(), types.ManifestUpdateOptions{
 		ManifestMIMEType: manifest.DockerV2Schema1SignedMediaType,
-		InformationOnly: types.ManifestUpdateInformation{
-			Destination: memoryDest,
-		},
+		InformationOnly:  memoryDestInfo,
 	})
 	assert.Error(t, err)
 
@@ -573,9 +568,7 @@ func TestManifestOCI1ConvertToManifestSchema1(t *testing.T) {
 	_, err = original.UpdatedImage(context.Background(), types.ManifestUpdateOptions{
 		LayerInfos:       layerInfosWithCryptoOperation(original.LayerInfos(), types.Encrypt),
 		ManifestMIMEType: manifest.DockerV2Schema1SignedMediaType,
-		InformationOnly: types.ManifestUpdateInformation{
-			Destination: memoryDest,
-		},
+		InformationOnly:  memoryDestInfo,
 	})
 	assert.Error(t, err)
 
@@ -585,9 +578,7 @@ func TestManifestOCI1ConvertToManifestSchema1(t *testing.T) {
 	res = successfulOCI1Conversion(t, encrypted, encrypted2, types.ManifestUpdateOptions{
 		LayerInfos:       updatedLayers,
 		ManifestMIMEType: manifest.DockerV2Schema1SignedMediaType,
-		InformationOnly: types.ManifestUpdateInformation{
-			Destination: memoryDest,
-		},
+		InformationOnly:  memoryDestInfo,
 	})
 	assert.Equal(t, updatedLayersCopy, updatedLayers) // updatedLayers have not been modified in place
 	convertedJSON, mt, err = res.Manifest(context.Background())
@@ -620,9 +611,7 @@ func TestManifestOCI1ConvertToManifestSchema1(t *testing.T) {
 	mixedImage2 := manifestOCI1FromFixture(t, mixedSrc, "oci1-all-media-types.json")
 	_, err = mixedImage.UpdatedImage(context.Background(), types.ManifestUpdateOptions{
 		ManifestMIMEType: manifest.DockerV2Schema1SignedMediaType,
-		InformationOnly: types.ManifestUpdateInformation{
-			Destination: memoryDest,
-		},
+		InformationOnly:  memoryDestInfo,
 	})
 	assert.Error(t, err) // zstd compression is not supported for docker images
 
@@ -639,9 +628,7 @@ func TestManifestOCI1ConvertToManifestSchema1(t *testing.T) {
 		res = successfulOCI1Conversion(t, mixedImage, mixedImage2, types.ManifestUpdateOptions{
 			LayerInfos:       updatedLayers,
 			ManifestMIMEType: manifest.DockerV2Schema1SignedMediaType,
-			InformationOnly: types.ManifestUpdateInformation{
-				Destination: memoryDest,
-			},
+			InformationOnly:  memoryDestInfo,
 		})
 		assert.Equal(t, updatedLayersCopy, updatedLayers) // updatedLayers have not been modified in place
 		convertedJSON, mt, err = res.Manifest(context.Background())
