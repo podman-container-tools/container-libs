@@ -16,13 +16,22 @@ import (
 )
 
 // fakeLayerFiles serves content for the entries named in byName, and reports
-// every other entry as unavailable.
+// every other entry as unavailable.  Content that cannot be referenced is
+// read from inline, if set.
 type fakeLayerFiles struct {
 	byName map[string][]byte
+	inline storage.FileGetter
 }
 
 func (f *fakeLayerFiles) DirFDs() []*os.File { return nil }
 func (f *fakeLayerFiles) Close() error       { return nil }
+
+func (f *fakeLayerFiles) Open(name string) (io.ReadCloser, error) {
+	if f.inline == nil {
+		return nil, os.ErrNotExist
+	}
+	return f.inline.Get(name)
+}
 
 func (f *fakeLayerFiles) Lookup(name string, size int64, _ bool) (int, string, bool, error) {
 	content, ok := f.byName[name]
@@ -108,9 +117,9 @@ func TestConvertRoundTrip(t *testing.T) {
 	// Wait for everything to be recorded before reading it back.
 	require.NoError(t, <-done)
 
-	files := &fakeLayerFiles{byName: map[string][]byte{"dir/referenced": referenced, "dir/\xff": notUTF8}}
 	getter := &recordingGetter{FileGetter: contents, got: map[string]bool{}}
-	layer := &convertLayer{tarSplit: &tarSplit, files: files, getter: getter}
+	files := &fakeLayerFiles{byName: map[string][]byte{"dir/referenced": referenced, "dir/\xff": notUTF8}, inline: getter}
+	layer := &convertLayer{tarSplit: &tarSplit, files: files}
 
 	var stream bytes.Buffer
 	require.NoError(t, convert(&stream, layer, false))
@@ -131,13 +140,11 @@ func TestConvertRoundTrip(t *testing.T) {
 type convertLayer struct {
 	tarSplit io.Reader
 	files    *fakeLayerFiles
-	getter   storage.FileGetter
 }
 
-func (l *convertLayer) Files() driver.LayerFiles               { return l.files }
-func (l *convertLayer) TarSplit() io.Reader                    { return l.tarSplit }
-func (l *convertLayer) Get(name string) (io.ReadCloser, error) { return l.getter.Get(name) }
-func (l *convertLayer) Close() error                           { return nil }
+func (l *convertLayer) Files() driver.LayerFiles { return l.files }
+func (l *convertLayer) TarSplit() io.Reader      { return l.tarSplit }
+func (l *convertLayer) Close() error             { return nil }
 
 type recordingGetter struct {
 	storage.FileGetter
