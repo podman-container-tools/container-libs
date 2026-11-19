@@ -14,13 +14,13 @@ import (
 // collection of all related information, e.g. there is no way to get layer blobs
 // from a memoryImage.
 type memoryImage struct {
-	genericManifest
+	commonImage               // Embeds genericManifest
 	serializedManifest []byte // A private cache for Manifest()
 }
 
-func memoryImageFromManifest(m genericManifest) types.Image {
+func memoryImageFromManifest(m genericManifest) *memoryImage {
 	return &memoryImage{
-		genericManifest:    m,
+		commonImage:        commonImage{genericManifest: m},
 		serializedManifest: nil,
 	}
 }

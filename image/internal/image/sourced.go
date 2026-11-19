@@ -92,10 +92,10 @@ type SourcedImage struct {
 	*UnparsedImage
 	ManifestBlob     []byte // The manifest of the relevant instance
 	ManifestMIMEType string // MIME type of ManifestBlob
-	// genericManifest contains data corresponding to manifestBlob.
+	// Embeds genericManifest, which contains data corresponding to ManifestBlob.
 	// NOTE: The manifest may have been modified in the process; DO NOT reserialize and store genericManifest
-	// if you want to preserve the original manifest; use manifestBlob directly.
-	genericManifest
+	// if you want to preserve the original manifest; use ManifestBlob directly.
+	commonImage
 }
 
 // FromUnparsedImage returns a types.Image implementation for unparsed.
@@ -125,7 +125,7 @@ func FromUnparsedImage(ctx context.Context, sys *types.SystemContext, unparsed *
 		UnparsedImage:    unparsed,
 		ManifestBlob:     manifestBlob,
 		ManifestMIMEType: manifestMIMEType,
-		genericManifest:  parsedManifest,
+		commonImage:      commonImage{genericManifest: parsedManifest},
 	}, nil
 }
 
