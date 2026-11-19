@@ -920,11 +920,8 @@ func updatedBlobInfoFromReuse(inputInfo types.BlobInfo, reusedBlob private.Reuse
 		}
 	}
 	// The chunked annotations describe the original blob's TOC; if the
-	// blob was substituted by a different one, they no longer describe
-	// the blob and must not survive into the result. The compression
-	// algorithm alone does not decide this: substituting one
-	// zstd:chunked blob by another still invalidates the original TOC,
-	// so this is decided by digest equality.
+	// blob is different, the TOC links don't match, so the annotations
+	// must not survive into the result.
 	if reusedBlob.Digest != inputInfo.Digest {
 		res.Annotations = annotationsAfterCompressionChange(res.Annotations)
 	}
