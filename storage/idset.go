@@ -10,6 +10,7 @@ import (
 )
 
 // idSet represents a set of integer IDs. It is stored as an ordered set of intervals.
+// A nil *idSet is a valid empty set, and all methods accept it.
 type idSet struct {
 	set *intervalset.ImmutableSet
 }
