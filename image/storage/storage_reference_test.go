@@ -10,10 +10,13 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.podman.io/image/v5/docker/reference"
+	"go.podman.io/image/v5/internal/private"
 	"go.podman.io/image/v5/pkg/blobinfocache/memory"
 	"go.podman.io/storage"
 	"go.podman.io/storage/pkg/archive"
 )
+
+var _ private.ImageReference = (*storageReference)(nil)
 
 func TestNewReference(t *testing.T) {
 	newStore(t)

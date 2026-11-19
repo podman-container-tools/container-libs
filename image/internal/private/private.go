@@ -15,6 +15,25 @@ import (
 	"go.podman.io/image/v5/types"
 )
 
+// ImageReferenceInternalOnly is the part of private.ImageReference that is not
+// a part of types.ImageReference
+type ImageReferenceInternalOnly interface {
+	// NewImageSourceWithOptions returns a private.ImageSource for this reference.
+	// The caller must call .Close() on the returned ImageSource.
+	NewImageSourceWithOptions(ctx context.Context, options NewImageSourceOptions) (ImageSource, error)
+}
+
+// ImageReference is an internal extension to the types.ImageReference interface.
+type ImageReference interface {
+	types.ImageReference
+	ImageReferenceInternalOnly
+}
+
+type NewImageSourceOptions struct {
+	Sys     *types.SystemContext
+	Digests digests.Options // If creating a source involves computing new digests. Does not affect digests that already exist in the source.
+}
+
 // ImageSourceInternalOnly is the part of private.ImageSource that is not
 // a part of types.ImageSource.
 type ImageSourceInternalOnly interface {

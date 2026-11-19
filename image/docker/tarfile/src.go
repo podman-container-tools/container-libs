@@ -6,6 +6,8 @@ import (
 
 	digest "github.com/opencontainers/go-digest"
 	internal "go.podman.io/image/v5/docker/internal/tarfile"
+	"go.podman.io/image/v5/internal/digests"
+	"go.podman.io/image/v5/internal/private"
 	"go.podman.io/image/v5/types"
 )
 
@@ -29,7 +31,10 @@ func NewSourceFromFileWithContext(sys *types.SystemContext, path string) (*Sourc
 	if err != nil {
 		return nil, err
 	}
-	src := internal.NewSource(archive, true, "[An external docker/tarfile caller]", nil, -1)
+	src := internal.NewSource(archive, true, "[An external docker/tarfile caller]", nil, -1, private.NewImageSourceOptions{
+		Sys:     sys,
+		Digests: digests.CanonicalDefault(),
+	})
 	return &Source{internal: src}, nil
 }
 
@@ -51,7 +56,10 @@ func NewSourceFromStreamWithSystemContext(sys *types.SystemContext, inputStream 
 	if err != nil {
 		return nil, err
 	}
-	src := internal.NewSource(archive, true, "[An external docker/tarfile caller]", nil, -1)
+	src := internal.NewSource(archive, true, "[An external docker/tarfile caller]", nil, -1, private.NewImageSourceOptions{
+		Sys:     sys,
+		Digests: digests.CanonicalDefault(),
+	})
 	return &Source{internal: src}, nil
 }
 
