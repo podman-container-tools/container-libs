@@ -3,6 +3,9 @@ package image
 import (
 	"context"
 
+	"go.podman.io/image/v5/internal/digests"
+	"go.podman.io/image/v5/internal/imagedestination"
+	"go.podman.io/image/v5/pkg/blobinfocache/none"
 	"go.podman.io/image/v5/types"
 )
 
@@ -32,7 +35,9 @@ func (i *commonImage) UpdatedImage(ctx context.Context, options types.ManifestUp
 	m, err := i.genericManifest.editedImage(ctx,
 		editedImageEditsFromManifestUpdateOptions(&options),
 		EditedImageInfo{
-			Destination: options.InformationOnly.Destination,
+			Destination: imagedestination.FromPublic(options.InformationOnly.Destination),
+			Cache:       none.NoCache,
+			Digests:     digests.CanonicalDefault(),
 
 			LayerInfos:   options.InformationOnly.LayerInfos,
 			LayerDiffIDs: options.InformationOnly.LayerDiffIDs,

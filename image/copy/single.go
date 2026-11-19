@@ -142,6 +142,8 @@ func (c *copier) copySingleImage(ctx context.Context, unparsedImage *image.Unpar
 		c: c,
 		manifestEditInfo: image.EditedImageInfo{
 			Destination: c.dest,
+			Cache:       c.blobInfoCache,
+			Digests:     c.options.digestOptions,
 		},
 		src: src,
 		// manifestConversionPlan and diffIDsAreNeeded are computed later
