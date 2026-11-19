@@ -478,7 +478,7 @@ func TestManifestOCI1EditedImage(t *testing.T) {
 // It returns the resulting image, for more checks
 func successfulOCI1Conversion(t *testing.T, original genericManifest, originalClone genericManifest,
 	edits EditedImageEdits, info EditedImageInfo,
-) types.Image {
+) genericManifest {
 	res, err := original.editedImage(context.Background(), edits, info)
 	require.NoError(t, err)
 
@@ -504,9 +504,10 @@ func TestManifestOCI1ConvertToManifestSchema1(t *testing.T) {
 		ManifestMIMEType: manifest.DockerV2Schema1SignedMediaType,
 	}, memoryDestInfo)
 
-	convertedJSON, mt, err := res.Manifest(context.Background())
-	require.NoError(t, err)
+	mt := res.manifestMIMEType()
 	assert.Equal(t, manifest.DockerV2Schema1SignedMediaType, mt)
+	convertedJSON, err := res.serialize()
+	require.NoError(t, err)
 	assertJSONEqualsFixture(t, convertedJSON, "oci1-to-schema1.json", "signatures")
 
 	assert.Equal(t, GzippedEmptyLayer, memoryDest.storedBlobs[GzippedEmptyLayerDigest])
@@ -519,9 +520,10 @@ func TestManifestOCI1ConvertToManifestSchema1(t *testing.T) {
 		ManifestMIMEType: manifest.DockerV2Schema1SignedMediaType,
 	}, memoryDestInfo)
 	assert.Equal(t, updatedLayersCopy, updatedLayers) // updatedLayers have not been modified in place
-	convertedJSON, mt, err = res.Manifest(context.Background())
-	require.NoError(t, err)
+	mt = res.manifestMIMEType()
 	assert.Equal(t, manifest.DockerV2Schema1SignedMediaType, mt)
+	convertedJSON, err = res.serialize()
+	require.NoError(t, err)
 	// Layers have been updated as expected
 	s1Manifest, err := manifestSchema1FromManifest(convertedJSON)
 	require.NoError(t, err)
@@ -574,9 +576,10 @@ func TestManifestOCI1ConvertToManifestSchema1(t *testing.T) {
 		ManifestMIMEType: manifest.DockerV2Schema1SignedMediaType,
 	}, memoryDestInfo)
 	assert.Equal(t, updatedLayersCopy, updatedLayers) // updatedLayers have not been modified in place
-	convertedJSON, mt, err = res.Manifest(context.Background())
-	require.NoError(t, err)
+	mt = res.manifestMIMEType()
 	assert.Equal(t, manifest.DockerV2Schema1SignedMediaType, mt)
+	convertedJSON, err = res.serialize()
+	require.NoError(t, err)
 	// Layers have been updated as expected
 	s1Manifest, err = manifestSchema1FromManifest(convertedJSON)
 	require.NoError(t, err)
@@ -622,9 +625,10 @@ func TestManifestOCI1ConvertToManifestSchema1(t *testing.T) {
 			ManifestMIMEType: manifest.DockerV2Schema1SignedMediaType,
 		}, memoryDestInfo)
 		assert.Equal(t, updatedLayersCopy, updatedLayers) // updatedLayers have not been modified in place
-		convertedJSON, mt, err = res.Manifest(context.Background())
-		require.NoError(t, err)
+		mt = res.manifestMIMEType()
 		assert.Equal(t, manifest.DockerV2Schema1SignedMediaType, mt)
+		convertedJSON, err = res.serialize()
+		require.NoError(t, err)
 		s1Manifest, err = manifestSchema1FromManifest(convertedJSON)
 		require.NoError(t, err)
 		// The schema1 data does not contain a MIME type (and we don’t update the digests), so both loop iterations look the same here
@@ -659,9 +663,10 @@ func TestConvertToManifestSchema2(t *testing.T) {
 		ManifestMIMEType: manifest.DockerV2Schema2MediaType,
 	}, EditedImageInfo{})
 
-	convertedJSON, mt, err := res.Manifest(context.Background())
-	require.NoError(t, err)
+	mt := res.manifestMIMEType()
 	assert.Equal(t, manifest.DockerV2Schema2MediaType, mt)
+	convertedJSON, err := res.serialize()
+	require.NoError(t, err)
 	assertJSONEqualsFixture(t, convertedJSON, "oci1-to-schema2.json")
 
 	convertedConfig, err := res.ConfigBlob(context.Background())
@@ -699,9 +704,10 @@ func TestConvertToManifestSchema2(t *testing.T) {
 		ManifestMIMEType: manifest.DockerV2Schema2MediaType,
 	}, EditedImageInfo{})
 	assert.Equal(t, updatedLayersCopy, updatedLayers) // updatedLayers have not been modified in place
-	convertedJSON, mt, err = res.Manifest(context.Background())
-	require.NoError(t, err)
+	mt = res.manifestMIMEType()
 	assert.Equal(t, manifest.DockerV2Schema2MediaType, mt)
+	convertedJSON, err = res.serialize()
+	require.NoError(t, err)
 	s2Manifest, err := manifestSchema2FromManifest(originalSrc, convertedJSON)
 	require.NoError(t, err)
 	assert.Equal(t, []types.BlobInfo{
@@ -753,9 +759,10 @@ func TestConvertToManifestSchema2(t *testing.T) {
 		ManifestMIMEType: manifest.DockerV2Schema2MediaType,
 	}, EditedImageInfo{})
 	assert.Equal(t, updatedLayersCopy, updatedLayers) // updatedLayers have not been modified in place
-	convertedJSON, mt, err = res.Manifest(context.Background())
-	require.NoError(t, err)
+	mt = res.manifestMIMEType()
 	assert.Equal(t, manifest.DockerV2Schema2MediaType, mt)
+	convertedJSON, err = res.serialize()
+	require.NoError(t, err)
 	s2Manifest, err = manifestSchema2FromManifest(mixedSrc, convertedJSON)
 	require.NoError(t, err)
 	assert.Equal(t, []types.BlobInfo{
@@ -802,9 +809,10 @@ func TestConvertToManifestSchema2(t *testing.T) {
 		ManifestMIMEType: manifest.DockerV2Schema2MediaType,
 	}, EditedImageInfo{})
 	assert.Equal(t, updatedLayersCopy, updatedLayers) // updatedLayers have not been modified in place
-	convertedJSON, mt, err = res.Manifest(context.Background())
-	require.NoError(t, err)
+	mt = res.manifestMIMEType()
 	assert.Equal(t, manifest.DockerV2Schema2MediaType, mt)
+	convertedJSON, err = res.serialize()
+	require.NoError(t, err)
 	s2Manifest, err = manifestSchema2FromManifest(mixedSrc, convertedJSON)
 	require.NoError(t, err)
 	assert.Equal(t, []types.BlobInfo{

@@ -448,9 +448,10 @@ func TestManifestSchema1ConvertToSchema2(t *testing.T) {
 	}, schema1FixtureInfo)
 	require.NoError(t, err)
 
-	convertedJSON, mt, err := res.Manifest(context.Background())
-	require.NoError(t, err)
+	mt := res.manifestMIMEType()
 	assert.Equal(t, manifest.DockerV2Schema2MediaType, mt)
+	convertedJSON, err := res.serialize()
+	require.NoError(t, err)
 	// Ignore "config": we don’t want to hard-code a specific digest and size of the marshaled config here.
 	assertJSONEqualsFixture(t, convertedJSON, "schema1-to-schema2.json", "config")
 
@@ -473,9 +474,10 @@ func TestManifestSchema1ConvertToSchema2(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.Equal(t, updatedLayersCopy, updatedLayers) // updatedLayers have not been modified in place
-	convertedJSON, mt, err = res.Manifest(context.Background())
-	require.NoError(t, err)
+	mt = res.manifestMIMEType()
 	assert.Equal(t, manifest.DockerV2Schema2MediaType, mt)
+	convertedJSON, err = res.serialize()
+	require.NoError(t, err)
 	// Layers have been updated as expected
 	originalSrc := newSchema2ImageSource(t, "httpd:latest")
 	s2Manifest, err := manifestSchema2FromManifest(originalSrc, convertedJSON)
@@ -529,9 +531,10 @@ func TestManifestSchema1ConvertToManifestOCI1(t *testing.T) {
 	}, schema1FixtureInfo)
 	require.NoError(t, err)
 
-	convertedJSON, mt, err := res.Manifest(context.Background())
-	require.NoError(t, err)
+	mt := res.manifestMIMEType()
 	assert.Equal(t, imgspecv1.MediaTypeImageManifest, mt)
+	convertedJSON, err := res.serialize()
+	require.NoError(t, err)
 	// Ignore "config": we don’t want to hard-code a specific digest and size of the marshaled config here.
 	assertJSONEqualsFixture(t, convertedJSON, "schema1-to-oci1.json", "config")
 
@@ -554,9 +557,10 @@ func TestManifestSchema1ConvertToManifestOCI1(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.Equal(t, updatedLayersCopy, updatedLayers) // updatedLayers have not been modified in place
-	convertedJSON, mt, err = res.Manifest(context.Background())
-	require.NoError(t, err)
+	mt = res.manifestMIMEType()
 	assert.Equal(t, imgspecv1.MediaTypeImageManifest, mt)
+	convertedJSON, err = res.serialize()
+	require.NoError(t, err)
 	// Layers have been updated as expected
 	originalSrc := newSchema2ImageSource(t, "httpd:latest")
 	ociManifest, err := manifestOCI1FromManifest(originalSrc, convertedJSON)
@@ -599,9 +603,10 @@ func TestManifestSchema1ConvertToManifestOCI1(t *testing.T) {
 		LayerDiffIDs: schema1WithThrowawaysFixtureLayerDiffIDs,
 	})
 	require.NoError(t, err)
-	convertedJSON, mt, err = res.Manifest(context.Background())
-	require.NoError(t, err)
+	mt = res.manifestMIMEType()
 	assert.Equal(t, imgspecv1.MediaTypeImageManifest, mt)
+	convertedJSON, err = res.serialize()
+	require.NoError(t, err)
 	// Layers have been updated as expected
 	ociManifest, err = manifestOCI1FromManifest(originalSrc, convertedJSON)
 	require.NoError(t, err)
