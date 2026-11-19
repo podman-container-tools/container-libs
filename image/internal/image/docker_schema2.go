@@ -298,7 +298,13 @@ func (m *manifestSchema2) convertToManifestSchema1(ctx context.Context, edits *E
 						IsConfig:   false,
 						Digests:    info.Digests,
 						EmptyLayer: true,
-						LayerIndex: &v2Index,
+						// In ordinary schema1 copies, the empty layers are included in LayerIndex counting.
+						// But we have already uploaded all non-empty layers, and used the LayerIndex space
+						// as indexed in the source image: there are no gap index values we could use
+						// for the empty layers. So, hope that the destination is fine with receiving empty
+						// layers at the end, with no index. (This is an internal API and the only
+						// user is storageImageDestination, where this works fine.)
+						LayerIndex: nil,
 					})
 				if err != nil {
 					return nil, fmt.Errorf("uploading empty layer: %w", err)
