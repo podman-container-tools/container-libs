@@ -575,7 +575,7 @@ func layerDigestsDiffer(a, b []types.BlobInfo) bool {
 // stores the resulting config and manifest to the destination, and returns the stored manifest
 // and its digest.
 func (ic *imageCopier) copyUpdatedConfigAndManifest(ctx context.Context, instanceDigest *digest.Digest) ([]byte, digest.Digest, error) {
-	var pendingImage types.Image
+	var pendingImage image.EditableImage = ic.src
 	if !ic.noPendingManifestEdits() {
 		if ic.cannotModifyManifestReason != "" {
 			return nil, "", fmt.Errorf("Internal error: copy needs an updated manifest but that was known to be forbidden: %q", ic.cannotModifyManifestReason)
@@ -589,13 +589,11 @@ func (ic *imageCopier) copyUpdatedConfigAndManifest(ctx context.Context, instanc
 			// If handling such registries turns out to be necessary, we could compute ic.diffIDsAreNeeded based on the full list of manifest MIME type candidates.
 			return nil, "", fmt.Errorf("Can not convert image to %s, preparing DiffIDs for this case is not supported", ic.manifestEdits.ManifestMIMEType)
 		}
-		pi, err := image.EditedImage(ctx, ic.src, ic.manifestEdits, ic.manifestEditInfo)
+		pi, err := image.EditedImage(ctx, pendingImage, ic.manifestEdits, ic.manifestEditInfo)
 		if err != nil {
 			return nil, "", fmt.Errorf("creating an updated image manifest: %w", err)
 		}
 		pendingImage = pi
-	} else {
-		pendingImage = ic.src
 	}
 	man, _, err := pendingImage.Manifest(ctx)
 	if err != nil {
@@ -622,7 +620,7 @@ func (ic *imageCopier) copyUpdatedConfigAndManifest(ctx context.Context, instanc
 }
 
 // copyConfig copies config.json, if any, from src to dest.
-func (ic *imageCopier) copyConfig(ctx context.Context, src types.Image) error {
+func (ic *imageCopier) copyConfig(ctx context.Context, src image.EditableImage) error {
 	srcInfo := src.ConfigInfo()
 	if srcInfo.Digest != "" {
 		if err := ic.c.concurrentBlobCopiesSemaphore.Acquire(ctx, 1); err != nil {
