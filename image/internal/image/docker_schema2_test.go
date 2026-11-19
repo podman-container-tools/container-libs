@@ -525,9 +525,10 @@ func TestConvertToManifestOCI(t *testing.T) {
 	}, EditedImageInfo{})
 	require.NoError(t, err)
 
-	convertedJSON, mt, err := res.Manifest(context.Background())
-	require.NoError(t, err)
+	mt := res.manifestMIMEType()
 	assert.Equal(t, imgspecv1.MediaTypeImageManifest, mt)
+	convertedJSON, err := res.serialize()
+	require.NoError(t, err)
 	assertJSONEqualsFixture(t, convertedJSON, "schema2-to-oci1.json")
 
 	convertedConfig, err := res.ConfigBlob(context.Background())
@@ -540,9 +541,10 @@ func TestConvertToManifestOCI(t *testing.T) {
 		ManifestMIMEType: imgspecv1.MediaTypeImageManifest,
 	}, EditedImageInfo{})
 	require.NoError(t, err)
-	convertedJSON, mt, err = res.Manifest(context.Background())
-	require.NoError(t, err)
+	mt = res.manifestMIMEType()
 	assert.Equal(t, imgspecv1.MediaTypeImageManifest, mt)
+	convertedJSON, err = res.serialize()
+	require.NoError(t, err)
 	// Layers have been updated as expected
 	ociManifest, err := manifestOCI1FromManifest(originalSrc, convertedJSON)
 	require.NoError(t, err)
@@ -582,9 +584,10 @@ func TestConvertToManifestOCIAllMediaTypes(t *testing.T) {
 		ManifestMIMEType: imgspecv1.MediaTypeImageManifest,
 	}, EditedImageInfo{})
 	require.NoError(t, err)
-	convertedJSON, mt, err := res.Manifest(context.Background())
-	require.NoError(t, err)
+	mt := res.manifestMIMEType()
 	assert.Equal(t, imgspecv1.MediaTypeImageManifest, mt)
+	convertedJSON, err := res.serialize()
+	require.NoError(t, err)
 	assertJSONEqualsFixture(t, convertedJSON, "schema2-all-media-types-to-oci1.json")
 
 	convertedConfig, err := res.ConfigBlob(context.Background())
@@ -609,9 +612,10 @@ func TestConvertToManifestSchema1(t *testing.T) {
 	}, memoryDestInfo)
 	require.NoError(t, err)
 
-	convertedJSON, mt, err := res.Manifest(context.Background())
-	require.NoError(t, err)
+	mt := res.manifestMIMEType()
 	assert.Equal(t, manifest.DockerV2Schema1SignedMediaType, mt)
+	convertedJSON, err := res.serialize()
+	require.NoError(t, err)
 
 	// schema2-to-schema1-by-docker.json is the result of asking the Docker Hub for a schema1 manifest,
 	// except that we have replaced "name" to verify that the ref from
@@ -629,9 +633,10 @@ func TestConvertToManifestSchema1(t *testing.T) {
 	}, memoryDestInfo)
 	require.NoError(t, err)
 	assert.Equal(t, updatedLayersCopy, updatedLayers) // updatedLayers have not been modified in place
-	convertedJSON, mt, err = res.Manifest(context.Background())
-	require.NoError(t, err)
+	mt = res.manifestMIMEType()
 	assert.Equal(t, manifest.DockerV2Schema1SignedMediaType, mt)
+	convertedJSON, err = res.serialize()
+	require.NoError(t, err)
 	// Layers have been updated as expected
 	s1Manifest, err := manifestSchema1FromManifest(convertedJSON)
 	require.NoError(t, err)

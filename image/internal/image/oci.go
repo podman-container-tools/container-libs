@@ -138,7 +138,7 @@ func (m *manifestOCI1) EditedImageNeedsLayerDiffIDs(edits EditedImageEdits) bool
 }
 
 // editedImage FIXME
-func (m *manifestOCI1) editedImage(ctx context.Context, edits EditedImageEdits, info EditedImageInfo) (types.Image, error) {
+func (m *manifestOCI1) editedImage(ctx context.Context, edits EditedImageEdits, info EditedImageInfo) (genericManifest, error) {
 	copy := manifestOCI1{ // NOTE: This is not a deep copy, it still shares slices etc.
 		src:        m.src,
 		configBlob: m.configBlob,
@@ -166,7 +166,7 @@ func (m *manifestOCI1) editedImage(ctx context.Context, edits EditedImageEdits, 
 	}
 	// Ignore edits.EmbeddedDockerReference: it may be set when converting from schema1, but we really don't care.
 
-	return memoryImageFromManifest(&copy), nil
+	return &copy, nil
 }
 
 func schema2DescriptorFromOCI1Descriptor(d imgspecv1.Descriptor) manifest.Schema2Descriptor {

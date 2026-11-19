@@ -58,7 +58,7 @@ type genericManifest interface {
 	// (most importantly it forces us to download the full layers even if they are already present at the destination).
 	EditedImageNeedsLayerDiffIDs(edits EditedImageEdits) bool
 	// editedImage FIXME
-	editedImage(ctx context.Context, edits EditedImageEdits, info EditedImageInfo) (types.Image, error)
+	editedImage(ctx context.Context, edits EditedImageEdits, info EditedImageInfo) (genericManifest, error)
 }
 
 // EditedImageEdits collects requested edits in EditedImage as named optional arguments.
@@ -87,7 +87,11 @@ func EditedImage(ctx context.Context, image genericManifest, edits EditedImageEd
 	// We could define an internal superset of types.Image that satisfies both, but nothing
 	// really needs that, and ultimately the outcome of an image edit is always a memoryImage;
 	// so we can factor the creation of the memoryImage out of the schema-specific implementations.
-	return image.editedImage(ctx, edits, info)
+	m, err := image.editedImage(ctx, edits, info)
+	if err != nil {
+		return nil, err
+	}
+	return memoryImageFromManifest(m), nil
 }
 
 // manifestInstanceFromBlob returns a genericManifest implementation for (manblob, mt) in src.
@@ -129,7 +133,7 @@ type manifestConvertFn func(ctx context.Context, edits *EditedImageEdits, info E
 // It returns (nil, nil) if no conversion was requested.
 func convertManifestIfRequiredWithUpdate(ctx context.Context, edits EditedImageEdits, info EditedImageInfo,
 	converters map[string]manifestConvertFn,
-) (types.Image, error) {
+) (genericManifest, error) {
 	if edits.ManifestMIMEType == "" {
 		return nil, nil
 	}
@@ -144,8 +148,7 @@ func convertManifestIfRequiredWithUpdate(ctx context.Context, edits EditedImageE
 	if err != nil {
 		return nil, err
 	}
-	convertedImage := memoryImageFromManifest(convertedManifest)
 
 	editsCopy.ManifestMIMEType = ""
-	return convertedImage.editedImage(ctx, editsCopy, info)
+	return convertedManifest.editedImage(ctx, editsCopy, info)
 }
