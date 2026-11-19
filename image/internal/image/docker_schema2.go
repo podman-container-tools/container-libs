@@ -15,6 +15,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"go.podman.io/image/v5/docker/reference"
 	"go.podman.io/image/v5/internal/iolimits"
+	"go.podman.io/image/v5/internal/private"
 	"go.podman.io/image/v5/manifest"
 	"go.podman.io/image/v5/pkg/blobinfocache/none"
 	"go.podman.io/image/v5/types"
@@ -269,6 +270,7 @@ func (m *manifestSchema2) convertToManifestSchema1(ctx context.Context, edits *E
 	var parentV1ID string // Set in the loop
 	v1ID := ""
 	haveGzippedEmptyLayer := false
+	var gzippedEmptyLayerBlobInfo types.BlobInfo // Valid if haveGzippedEmptyLayer.
 	if len(imageConfig.History) == 0 {
 		// What would this even mean?! Anyhow, the rest of the code depends on fsLayers[0] and history[0] existing.
 		return nil, fmt.Errorf("Cannot convert an image with 0 history entries to %s", manifest.DockerV2Schema1SignedMediaType)
@@ -279,25 +281,31 @@ func (m *manifestSchema2) convertToManifestSchema1(ctx context.Context, edits *E
 
 		var blobDigest digest.Digest
 		if historyEntry.EmptyLayer {
-			emptyLayerBlobInfo := types.BlobInfo{Digest: GzippedEmptyLayerDigest, Size: int64(len(GzippedEmptyLayer))}
-
+			// We assume that the effect of info.Digests on PutBlobWithOptions is consistent,
+			// i.e. that we only need to upload the empty layer once.
 			if !haveGzippedEmptyLayer {
 				logrus.Debugf("Uploading empty layer during conversion to schema 1")
-				// Ideally we should update the relevant BlobInfoCache about this layer, but that would require passing it down here,
-				// and anyway this blob is so small that it’s easier to just copy it than to worry about figuring out another location where to get it.
-				info, err := info.Destination.PutBlob(ctx, bytes.NewReader(GzippedEmptyLayer), emptyLayerBlobInfo, none.NoCache, false)
+				info, err := info.Destination.PutBlobWithOptions(ctx, bytes.NewReader(GzippedEmptyLayer),
+					// We don’t set Digest: GzippedEmptyLayerDigest to give the destination the most possible
+					// flexibility in choosing an algorithm.
+					types.BlobInfo{Digest: "", Size: int64(len(GzippedEmptyLayer))},
+					private.PutBlobOptions{
+						Cache:      info.Cache,
+						IsConfig:   false,
+						Digests:    info.Digests,
+						EmptyLayer: true,
+						LayerIndex: &v2Index,
+					})
 				if err != nil {
 					return nil, fmt.Errorf("uploading empty layer: %w", err)
 				}
-				if info.Digest != emptyLayerBlobInfo.Digest {
-					return nil, fmt.Errorf("Internal error: Uploaded empty layer has digest %#v instead of %s", info.Digest, emptyLayerBlobInfo.Digest)
-				}
+				gzippedEmptyLayerBlobInfo = types.BlobInfo{Digest: info.Digest, Size: info.Size}
 				haveGzippedEmptyLayer = true
 			}
 			if edits.LayerInfos != nil {
-				convertedLayerUpdates = append(convertedLayerUpdates, emptyLayerBlobInfo)
+				convertedLayerUpdates = append(convertedLayerUpdates, gzippedEmptyLayerBlobInfo)
 			}
-			blobDigest = emptyLayerBlobInfo.Digest
+			blobDigest = gzippedEmptyLayerBlobInfo.Digest
 		} else {
 			if nonemptyLayerIndex >= len(m.m.LayersDescriptors) {
 				return nil, fmt.Errorf("Invalid image configuration, needs more than the %d distributed layers", len(m.m.LayersDescriptors))
