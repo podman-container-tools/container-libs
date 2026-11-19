@@ -59,6 +59,11 @@ var schema1FixtureLayerDiffIDs = []digest.Digest{
 	"sha256:9bd63850e406167b4751f5050f6dc0ebd789bb5ef5e5c6c31ed062bda8c063e8",
 }
 
+var schema1FixtureInfo = types.ManifestUpdateInformation{
+	LayerInfos:   schema1FixtureLayerInfos,
+	LayerDiffIDs: schema1FixtureLayerDiffIDs,
+}
+
 var schema1WithThrowawaysFixtureLayerInfos = []types.BlobInfo{
 	{Digest: "sha256:6a5a5368e0c2d3e5909184fa28ddfd56072e7ff3ee9a945876f7eee5896ef5bb", Size: 51354364},
 	{Digest: GzippedEmptyLayerDigest, Size: int64(len(GzippedEmptyLayer))},
@@ -415,10 +420,7 @@ func TestManifestSchema1UpdatedImage(t *testing.T) {
 	} {
 		_, err = original.UpdatedImage(context.Background(), types.ManifestUpdateOptions{
 			ManifestMIMEType: mime,
-			InformationOnly: types.ManifestUpdateInformation{
-				LayerInfos:   schema1FixtureLayerInfos,
-				LayerDiffIDs: schema1FixtureLayerDiffIDs,
-			},
+			InformationOnly:  schema1FixtureInfo,
 		})
 		assert.NoError(t, err, mime)
 	}
@@ -444,10 +446,7 @@ func TestManifestSchema1ConvertToSchema2(t *testing.T) {
 	original := manifestSchema1FromFixture(t, "schema1.json")
 	res, err := original.UpdatedImage(context.Background(), types.ManifestUpdateOptions{
 		ManifestMIMEType: manifest.DockerV2Schema2MediaType,
-		InformationOnly: types.ManifestUpdateInformation{
-			LayerInfos:   schema1FixtureLayerInfos,
-			LayerDiffIDs: schema1FixtureLayerDiffIDs,
-		},
+		InformationOnly:  schema1FixtureInfo,
 	})
 	require.NoError(t, err)
 
@@ -531,10 +530,7 @@ func TestManifestSchema1ConvertToManifestOCI1(t *testing.T) {
 	original := manifestSchema1FromFixture(t, "schema1.json")
 	res, err := original.UpdatedImage(context.Background(), types.ManifestUpdateOptions{
 		ManifestMIMEType: imgspecv1.MediaTypeImageManifest,
-		InformationOnly: types.ManifestUpdateInformation{
-			LayerInfos:   schema1FixtureLayerInfos,
-			LayerDiffIDs: schema1FixtureLayerDiffIDs,
-		},
+		InformationOnly:  schema1FixtureInfo,
 	})
 	require.NoError(t, err)
 
@@ -694,10 +690,7 @@ func TestConvertSchema1ToManifestOCIWithAnnotations(t *testing.T) {
 	res, err := original.UpdatedImage(context.Background(), types.ManifestUpdateOptions{
 		ManifestMIMEType: imgspecv1.MediaTypeImageManifest,
 		LayerInfos:       layerInfoOverwrites,
-		InformationOnly: types.ManifestUpdateInformation{
-			LayerInfos:   schema1FixtureLayerInfos,
-			LayerDiffIDs: schema1FixtureLayerDiffIDs,
-		},
+		InformationOnly:  schema1FixtureInfo,
 	})
 	require.NoError(t, err)
 	assert.Equal(t, res.LayerInfos(), layerInfoOverwrites)
@@ -707,10 +700,7 @@ func TestConvertSchema1ToManifestOCIWithAnnotations(t *testing.T) {
 	res, err = original.UpdatedImage(context.Background(), types.ManifestUpdateOptions{
 		ManifestMIMEType: manifest.DockerV2Schema2MediaType,
 		LayerInfos:       layerInfoOverwrites,
-		InformationOnly: types.ManifestUpdateInformation{
-			LayerInfos:   schema1FixtureLayerInfos,
-			LayerDiffIDs: schema1FixtureLayerDiffIDs,
-		},
+		InformationOnly:  schema1FixtureInfo,
 	})
 	require.NoError(t, err)
 	assert.NotEqual(t, res.LayerInfos(), layerInfoOverwrites)
