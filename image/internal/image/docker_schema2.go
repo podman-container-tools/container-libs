@@ -218,7 +218,7 @@ func (m *manifestSchema2) convertToManifestOCI1(ctx context.Context, _ *EditedIm
 	config := imgspecv1.Descriptor{
 		MediaType: imgspecv1.MediaTypeImageConfig,
 		Size:      int64(len(configOCIBytes)),
-		Digest:    digest.FromBytes(configOCIBytes),
+		Digest:    digest.FromBytes(configOCIBytes), // FIXME: respect digests.Options
 	}
 
 	layers := make([]imgspecv1.Descriptor, len(m.m.LayersDescriptors))

@@ -216,7 +216,7 @@ func (m *manifestSchema1) convertToManifestSchema2(edits *EditedImageEdits, info
 	configDescriptor := manifest.Schema2Descriptor{
 		MediaType: manifest.DockerV2Schema2ConfigMediaType,
 		Size:      int64(len(configJSON)),
-		Digest:    digest.FromBytes(configJSON),
+		Digest:    digest.FromBytes(configJSON), // FIXME: respect digests.Options
 	}
 
 	if edits.LayerInfos != nil {
