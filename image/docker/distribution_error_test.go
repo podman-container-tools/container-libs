@@ -32,7 +32,7 @@ error="invalid_token",
 error_description="The access token expired"`
 	response := &http.Response{
 		Status:     "401 Unauthorized",
-		StatusCode: 401,
+		StatusCode: http.StatusUnauthorized,
 		Body:       io.NopCloser(bytes.NewReader(json)),
 		Header: http.Header{
 			http.CanonicalHeaderKey("WWW-Authenticate"): []string{challenge},
@@ -56,7 +56,7 @@ error="insufficient_scope",
 error_description="Insufficient permission"`
 	response := &http.Response{
 		Status:     "401 Unauthorized",
-		StatusCode: 401,
+		StatusCode: http.StatusUnauthorized,
 		Body:       io.NopCloser(bytes.NewReader(json)),
 		Header: http.Header{
 			http.CanonicalHeaderKey("WWW-Authenticate"): []string{challenge},
@@ -79,7 +79,7 @@ func TestHandleErrorResponse401InvalidTokenWithoutDescription(t *testing.T) {
 error="invalid_token"`
 	response := &http.Response{
 		Status:     "401 Unauthorized",
-		StatusCode: 401,
+		StatusCode: http.StatusUnauthorized,
 		Body:       io.NopCloser(bytes.NewReader(json)),
 		Header: http.Header{
 			http.CanonicalHeaderKey("WWW-Authenticate"): []string{challenge},
@@ -103,7 +103,7 @@ error="invalid_request",
 error_description="The request is missing a required parameter"`
 	response := &http.Response{
 		Status:     "401 Unauthorized",
-		StatusCode: 401,
+		StatusCode: http.StatusUnauthorized,
 		Body:       io.NopCloser(bytes.NewReader(json)),
 		Header: http.Header{
 			http.CanonicalHeaderKey("WWW-Authenticate"): []string{challenge},
@@ -127,7 +127,7 @@ error="insufficient_scope",
 error_description="Insufficient permission"`
 	response := &http.Response{
 		Status:     "403 Forbidden",
-		StatusCode: 403,
+		StatusCode: http.StatusForbidden,
 		Body:       io.NopCloser(bytes.NewReader(json)),
 		Header: http.Header{
 			http.CanonicalHeaderKey("WWW-Authenticate"): []string{challenge},
@@ -148,7 +148,7 @@ func TestHandleErrorResponse401ValidBody(t *testing.T) {
 	json := []byte("{\"errors\":[{\"code\":\"UNAUTHORIZED\",\"message\":\"action requires authentication\"}]}")
 	response := &http.Response{
 		Status:     "401 Unauthorized",
-		StatusCode: 401,
+		StatusCode: http.StatusUnauthorized,
 		Body:       io.NopCloser(bytes.NewReader(json)),
 	}
 	err := handleErrorResponse(response)
@@ -163,7 +163,7 @@ func TestHandleErrorResponse401WithInvalidBody(t *testing.T) {
 	json := []byte("{invalid json}")
 	response := &http.Response{
 		Status:     "401 Unauthorized",
-		StatusCode: 401,
+		StatusCode: http.StatusUnauthorized,
 		Body:       io.NopCloser(bytes.NewReader(json)),
 	}
 	err := handleErrorResponse(response)
@@ -178,7 +178,7 @@ func TestHandleErrorResponseExpectedStatusCode400ValidBody(t *testing.T) {
 	json := []byte("{\"errors\":[{\"code\":\"DIGEST_INVALID\",\"message\":\"provided digest does not match\"}]}")
 	response := &http.Response{
 		Status:     "400 Bad Request",
-		StatusCode: 400,
+		StatusCode: http.StatusBadRequest,
 		Body:       io.NopCloser(bytes.NewReader(json)),
 	}
 	err := handleErrorResponse(response)
@@ -193,7 +193,7 @@ func TestHandleErrorResponseExpectedStatusCode404EmptyErrorSlice(t *testing.T) {
 	json := []byte(`{"randomkey": "randomvalue"}`)
 	response := &http.Response{
 		Status:     "404 Not Found",
-		StatusCode: 404,
+		StatusCode: http.StatusNotFound,
 		Body:       io.NopCloser(bytes.NewReader(json)),
 	}
 	err := handleErrorResponse(response)
@@ -208,7 +208,7 @@ func TestHandleErrorResponseExpectedStatusCode404InvalidBody(t *testing.T) {
 	json := []byte("{invalid json}")
 	response := &http.Response{
 		Status:     "404 Not Found",
-		StatusCode: 404,
+		StatusCode: http.StatusNotFound,
 		Body:       io.NopCloser(bytes.NewReader(json)),
 	}
 	err := handleErrorResponse(response)
@@ -222,7 +222,7 @@ func TestHandleErrorResponseExpectedStatusCode404InvalidBody(t *testing.T) {
 func TestHandleErrorResponseUnexpectedStatusCode501(t *testing.T) {
 	response := &http.Response{
 		Status:     "501 Not Implemented",
-		StatusCode: 501,
+		StatusCode: http.StatusNotImplemented,
 		Body:       io.NopCloser(bytes.NewReader([]byte("{\"Error Encountered\" : \"Function not implemented.\"}"))),
 	}
 	err := handleErrorResponse(response)
