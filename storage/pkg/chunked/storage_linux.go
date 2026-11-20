@@ -1495,7 +1495,7 @@ func copyAllBlobToFile(stream ImageSourceSeekable, blobSize int64, destination *
 	originalRawDigester := digest.Canonical.Digester()
 	for soe := range streamsOrErrors {
 		if soe.stream != nil {
-			r := io.TeeReader(soe.stream, originalRawDigester.Hash())
+			r := io.TeeReader(io.LimitReader(soe.stream, blobSize+1), originalRawDigester.Hash()) // +1: a server sending more than blobSize is detected
 
 			// copy the entire tarball and compute its digest
 			_, err = io.CopyBuffer(destination, r, copyBuffer)
