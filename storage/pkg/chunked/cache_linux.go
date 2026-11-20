@@ -356,12 +356,12 @@ func calculateHardLinkFingerprint(f *fileMetadata) (string, error) {
 }
 
 // generateFileLocation generates a file location in the form $OFFSET$LEN$PATH_POS
-func generateFileLocation(pathPos int, offset, len uint64) []byte {
+func generateFileLocation(pathPos int, offset, length uint64) []byte {
 	var buf []byte
 
 	buf = binary.AppendUvarint(buf, uint64(pathPos))
 	buf = binary.AppendUvarint(buf, offset)
-	buf = binary.AppendUvarint(buf, len)
+	buf = binary.AppendUvarint(buf, length)
 
 	return buf
 }
@@ -380,21 +380,21 @@ func parseFileLocation(locationData []byte) (int, uint64, uint64, error) {
 		return 0, 0, 0, err
 	}
 
-	len, err := binary.ReadUvarint(reader)
+	length, err := binary.ReadUvarint(reader)
 	if err != nil {
 		return 0, 0, 0, err
 	}
 
-	return int(pathPos), offset, len, nil
+	return int(pathPos), offset, length, nil
 }
 
 // appendTag appends the $OFFSET$LEN information to the provided $DIGEST.
 // The [OFFSET; LEN] points to the variable length data where the file locations
 // are stored.  $DIGEST has length digestLen stored in the cache file file header.
-func appendTag(digest []byte, offset, len uint64) ([]byte, error) {
+func appendTag(digest []byte, offset, length uint64) []byte {
 	digest = binary.LittleEndian.AppendUint64(digest, offset)
-	digest = binary.LittleEndian.AppendUint64(digest, len)
-	return digest, nil
+	digest = binary.LittleEndian.AppendUint64(digest, length)
+	return digest
 }
 
 type setBigData interface {
@@ -520,10 +520,7 @@ func writeCache(manifest []byte, format graphdriver.DifferOutputFormat, id strin
 			off := uint64(vdata.Len())
 			l := uint64(len(location))
 
-			tag, err := appendTag(digest, off, l)
-			if err != nil {
-				return nil, err
-			}
+			tag := appendTag(digest, off, l)
 			if tagLen == 0 {
 				tagLen = len(tag)
 			}
@@ -540,10 +537,7 @@ func writeCache(manifest []byte, format graphdriver.DifferOutputFormat, id strin
 			if err != nil {
 				return nil, err
 			}
-			tag, err = appendTag(digestHardLink, off, l)
-			if err != nil {
-				return nil, err
-			}
+			tag = appendTag(digestHardLink, off, l)
 			if tagLen != len(tag) {
 				return nil, errors.New("digest with different length found")
 			}
@@ -567,10 +561,7 @@ func writeCache(manifest []byte, format graphdriver.DifferOutputFormat, id strin
 			if err != nil {
 				return nil, err
 			}
-			d, err := appendTag(digest, off, l)
-			if err != nil {
-				return nil, err
-			}
+			d := appendTag(digest, off, l)
 			if tagLen == 0 {
 				tagLen = len(d)
 			}
@@ -774,9 +765,9 @@ func findBinaryTag(binaryDigest []byte, cacheFile *cacheFile) (bool, uint64, uin
 			offsetAndLen := cacheFile.tags[startOff : (i+1)*cacheFile.tagLen]
 
 			off := binary.LittleEndian.Uint64(offsetAndLen[:8])
-			len := binary.LittleEndian.Uint64(offsetAndLen[8:16])
+			length := binary.LittleEndian.Uint64(offsetAndLen[8:16])
 
-			return true, off, len
+			return true, off, length
 		}
 	}
 	return false, 0, 0

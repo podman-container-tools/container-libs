@@ -1,6 +1,6 @@
 //go:build !linux
 
-package copy //nolint: predeclared
+package copy
 
 import (
 	"io"

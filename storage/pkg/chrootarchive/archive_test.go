@@ -114,7 +114,7 @@ func TestChrootUntarEmptyArchive(t *testing.T) {
 	}
 }
 
-func prepareSourceDirectory(numberOfFiles int, targetPath string, makeSymLinks bool) (int, error) {
+func prepareSourceDirectory(numberOfFiles int, targetPath string, makeSymLinks bool) (int, error) { //nolint:unparam
 	fileData := []byte("fooo")
 	for n := range numberOfFiles {
 		fileName := fmt.Sprintf("file-%d", n)
@@ -181,14 +181,18 @@ func compareFiles(src string, dest string) error {
 	return nil
 }
 
-func compareFilesChown(src string, dest string, uid, gid int) error {
+func compareFilesChown(src string, dest string, uid, gid int) error { //nolint:unparam
 	if err := compareFiles(src, dest); err != nil {
 		return err
 	}
 	fi, err := os.Lstat(dest)
 	if err == nil {
-		statuid := fi.Sys().(*syscall.Stat_t).Uid
-		statgid := fi.Sys().(*syscall.Stat_t).Gid
+		st, ok := fi.Sys().(*syscall.Stat_t)
+		if !ok {
+			return fmt.Errorf("expected *syscall.Stat_t, got %T", fi.Sys())
+		}
+		statuid := st.Uid
+		statgid := st.Gid
 		if statuid != uint32(uid) || statgid != uint32(gid) {
 			return fmt.Errorf("%d:%d ownership on %s is different expected %d:%d", statuid, statgid, dest, uid, gid)
 		}
