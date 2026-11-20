@@ -1357,7 +1357,7 @@ func (c *chunkedDiffer) findAndCopyFile(dirfd int, r *fileMetadata, copyOptions 
 // where each file content is only represented once, and uses composefs.RegularFilePathForValidatedDigest for its name.
 // If flatPathNameMap is not nil, this function writes to it a mapping from filepath.Clean(originalName) to the composefs name.
 func makeEntriesFlat(mergedEntries []fileMetadata, flatPathNameMap map[string]string) ([]fileMetadata, error) {
-	var new []fileMetadata
+	var newEntries []fileMetadata
 
 	knownFlatPaths := make(map[string]struct{})
 	for i := range mergedEntries {
@@ -1387,9 +1387,9 @@ func makeEntriesFlat(mergedEntries []fileMetadata, flatPathNameMap map[string]st
 		mergedEntries[i].Name = path
 		mergedEntries[i].skipSetAttrs = true
 
-		new = append(new, mergedEntries[i])
+		newEntries = append(newEntries, mergedEntries[i])
 	}
-	return new, nil
+	return newEntries, nil
 }
 
 type streamOrErr struct {
@@ -2128,8 +2128,8 @@ func (c *chunkedDiffer) mergeTocEntries(fileType compressedFileType, entries []m
 			for j := 0; j <= nChunks; j++ {
 				// we need a copy here, otherwise we override the
 				// .Size later
-				copy := entries[i+j]
-				e.chunks[j] = &copy
+				entry := entries[i+j]
+				e.chunks[j] = &entry
 				e.EndOffset = entries[i+j].EndOffset
 			}
 			i += nChunks

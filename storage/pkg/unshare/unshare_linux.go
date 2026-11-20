@@ -88,14 +88,14 @@ func IsSetID(path string, modeid os.FileMode, capid capability.Cap) (bool, error
 	if mode&modeid == modeid {
 		return true, nil
 	}
-	cap, err := capability.NewFile2(path)
+	fileCap, err := capability.NewFile2(path)
 	if err != nil {
 		return false, err
 	}
-	if err := cap.Load(); err != nil {
+	if err := fileCap.Load(); err != nil {
 		return false, err
 	}
-	return cap.Get(capability.EFFECTIVE, capid), nil
+	return fileCap.Get(capability.EFFECTIVE, capid), nil
 }
 
 func (c *Cmd) Start() (retErr error) {

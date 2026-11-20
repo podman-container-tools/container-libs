@@ -239,7 +239,7 @@ func readZstdChunkedManifest(tmpDir string, blobStream ImageSourceSeekable, tocD
 		}
 	}()
 
-	readBlob := func(len uint64) ([]byte, error) {
+	readBlob := func(length uint64) ([]byte, error) {
 		soe, ok := <-streamsOrErrors
 		if !ok {
 			return nil, errors.New("stream closed")
@@ -249,7 +249,7 @@ func readZstdChunkedManifest(tmpDir string, blobStream ImageSourceSeekable, tocD
 		}
 		defer soe.stream.Close()
 
-		blob := make([]byte, len)
+		blob := make([]byte, length)
 		if _, err := io.ReadFull(soe.stream, blob); err != nil {
 			return nil, err
 		}

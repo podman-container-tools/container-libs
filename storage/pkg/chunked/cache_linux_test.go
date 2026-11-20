@@ -128,9 +128,9 @@ func findTag(digest string, cacheFile *cacheFile) (string, uint64, uint64) {
 	if len(binaryDigest) != cacheFile.digestLen {
 		return "", 0, 0
 	}
-	found, off, len := findBinaryTag(binaryDigest, cacheFile)
+	found, off, length := findBinaryTag(binaryDigest, cacheFile)
 	if found {
-		return digest, off, len
+		return digest, off, length
 	}
 	return "", 0, 0
 }
@@ -191,7 +191,7 @@ func TestWriteCache(t *testing.T) {
 		}
 		if r.ChunkDigest != "" {
 			// find the element in the cache by the chunk digest checksum
-			digest, off, len := findTag(r.ChunkDigest, cache)
+			digest, off, length := findTag(r.ChunkDigest, cache)
 			if digest == "" {
 				t.Error("chunk tag not found")
 			}
@@ -199,7 +199,7 @@ func TestWriteCache(t *testing.T) {
 				t.Error("wrong digest found")
 			}
 			expectedLocation := generateFileLocation(0, uint64(r.ChunkOffset), uint64(r.ChunkSize))
-			location := cache.vdata[off : off+len]
+			location := cache.vdata[off : off+length]
 			if !bytes.Equal(location, expectedLocation) {
 				t.Errorf("wrong file found %q instead of %q", location, expectedLocation)
 			}
@@ -235,7 +235,6 @@ func FuzzReadCache(f *testing.F) {
 	}
 
 	f.Add(dest.buf.Bytes())
-	dest = nil
 
 	f.Fuzz(func(t *testing.T, orig []byte) {
 		cacheRead, err := readCacheFileFromMemory(orig)
