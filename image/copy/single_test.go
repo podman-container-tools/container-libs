@@ -95,6 +95,122 @@ func TestUpdatedBlobInfoFromReuse(t *testing.T) {
 		res := updatedBlobInfoFromReuse(srcInfo, c.reused)
 		assert.Equal(t, c.expected, res, fmt.Sprintf("%#v", c.reused))
 	}
+
+	// Reusing a zstd:chunked layer with a different compression must drop
+	// the chunked annotations: they describe the original blob's TOC, so
+	// keeping them would describe a gzip layer with zstd:chunked
+	// annotations (podman-container-tools/container-libs#123).
+	chunkedSrcInfo := types.BlobInfo{
+		Digest: "sha256:6a5a5368e0c2d3e5909184fa28ddfd56072e7ff3ee9a945876f7eee5896ef5bb",
+		Size:   51354364,
+		Annotations: map[string]string{
+			"test-annotation-2": "two",
+			"io.github.containers.zstd-chunked.manifest-checksum": "sha256:6a5a5368e0c2d3e5909184fa28ddfd56072e7ff3ee9a945876f7eee5896ef5bb",
+			"io.github.containers.zstd-chunked.manifest-position": "0:100:200:1",
+			"io.github.containers.zstd-chunked.tarsplit-position": "0:100:200",
+			"io.github.containers.zstd-chunked.tarsplit-checksum": "sha256:6a5a5368e0c2d3e5909184fa28ddfd56072e7ff3ee9a945876f7eee5896ef5bb",
+			"containerd.io/snapshot/stargz/toc.digest":            "sha256:6a5a5368e0c2d3e5909184fa28ddfd56072e7ff3ee9a945876f7eee5896ef5bb",
+		},
+		MediaType:            imgspecv1.MediaTypeImageLayerZstd,
+		CompressionOperation: types.PreserveOriginal,
+		CompressionAlgorithm: &compression.ZstdChunked,
+	}
+	strippedAnnotations := map[string]string{"test-annotation-2": "two"}
+	for _, c := range []struct {
+		reused   private.ReusedBlob
+		expected types.BlobInfo
+	}{
+		{ // Reuse with substitution to gzip: chunked annotations must go
+			reused: private.ReusedBlob{
+				Digest:               "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+				Size:                 513543640,
+				CompressionOperation: types.PreserveOriginal,
+				CompressionAlgorithm: &compression.Gzip,
+			},
+			expected: types.BlobInfo{
+				Digest:               "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+				Size:                 513543640,
+				URLs:                 nil,
+				Annotations:          strippedAnnotations,
+				MediaType:            imgspecv1.MediaTypeImageLayerZstd,
+				CompressionOperation: types.PreserveOriginal,
+				CompressionAlgorithm: &compression.Gzip,
+			},
+		},
+		{ // Reuse with substitution to decompressed: chunked annotations must go
+			reused: private.ReusedBlob{
+				Digest:               "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+				Size:                 513543640,
+				CompressionOperation: types.Decompress,
+				CompressionAlgorithm: nil,
+			},
+			expected: types.BlobInfo{
+				Digest:               "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+				Size:                 513543640,
+				URLs:                 nil,
+				Annotations:          strippedAnnotations,
+				MediaType:            imgspecv1.MediaTypeImageLayerZstd,
+				CompressionOperation: types.Decompress,
+				CompressionAlgorithm: nil,
+			},
+		},
+		{ // Reuse staying chunked: annotations are kept, fresh TOC value merged in
+			reused: private.ReusedBlob{
+				Digest:               "sha256:6a5a5368e0c2d3e5909184fa28ddfd56072e7ff3ee9a945876f7eee5896ef5bb",
+				Size:                 51354364,
+				CompressionOperation: types.PreserveOriginal,
+				CompressionAlgorithm: &compression.ZstdChunked,
+				CompressionAnnotations: map[string]string{
+					"io.github.containers.zstd-chunked.manifest-checksum": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+				},
+			},
+			expected: types.BlobInfo{
+				Digest: "sha256:6a5a5368e0c2d3e5909184fa28ddfd56072e7ff3ee9a945876f7eee5896ef5bb",
+				Size:   51354364,
+				URLs:   nil,
+				Annotations: map[string]string{
+					"test-annotation-2": "two",
+					"io.github.containers.zstd-chunked.manifest-checksum": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+					"io.github.containers.zstd-chunked.manifest-position": "0:100:200:1",
+					"io.github.containers.zstd-chunked.tarsplit-position": "0:100:200",
+					"io.github.containers.zstd-chunked.tarsplit-checksum": "sha256:6a5a5368e0c2d3e5909184fa28ddfd56072e7ff3ee9a945876f7eee5896ef5bb",
+					"containerd.io/snapshot/stargz/toc.digest":            "sha256:6a5a5368e0c2d3e5909184fa28ddfd56072e7ff3ee9a945876f7eee5896ef5bb",
+				},
+				MediaType:            imgspecv1.MediaTypeImageLayerZstd,
+				CompressionOperation: types.PreserveOriginal,
+				CompressionAlgorithm: &compression.ZstdChunked,
+			},
+		},
+		{ // Reuse with substitution to a different chunked blob: the old TOC
+			// annotations describe the original blob, so they must go even
+			// though the new blob is chunked too; only the fresh value
+			// supplied with the reused blob survives
+			reused: private.ReusedBlob{
+				Digest:               "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+				Size:                 51354364,
+				CompressionOperation: types.PreserveOriginal,
+				CompressionAlgorithm: &compression.ZstdChunked,
+				CompressionAnnotations: map[string]string{
+					"io.github.containers.zstd-chunked.manifest-checksum": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+				},
+			},
+			expected: types.BlobInfo{
+				Digest: "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+				Size:   51354364,
+				URLs:   nil,
+				Annotations: map[string]string{
+					"test-annotation-2": "two",
+					"io.github.containers.zstd-chunked.manifest-checksum": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+				},
+				MediaType:            imgspecv1.MediaTypeImageLayerZstd,
+				CompressionOperation: types.PreserveOriginal,
+				CompressionAlgorithm: &compression.ZstdChunked,
+			},
+		},
+	} {
+		res := updatedBlobInfoFromReuse(chunkedSrcInfo, c.reused)
+		assert.Equal(t, c.expected, res, fmt.Sprintf("%#v", c.reused))
+	}
 }
 
 func goDiffIDComputationGoroutineWithTimeout(layerStream io.ReadCloser, decompressor compressiontypes.DecompressorFunc) *diffIDResult {
