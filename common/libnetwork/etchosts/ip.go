@@ -33,23 +33,27 @@ type HostContainersInternalOptions struct {
 	HostNetwork bool
 }
 
-func gvProxyHostIP() string {
+func gvProxyHostIP() []string {
 	var errMsg string
 	addrs, err := net.LookupIP(HostContainersInternal)
 	if err == nil {
 		if len(addrs) > 0 {
-			return addrs[0].String()
+			var ips []string
+			for _, addr := range addrs {
+				ips = append(ips, addr.String())
+			}
+			return ips
 		}
 		errMsg = "lookup result is empty"
 	} else {
 		errMsg = err.Error()
 	}
 	logrus.Warnf("Failed to resolve %s for the host entry ip address: %s", HostContainersInternal, errMsg)
-	return ""
+	return nil
 }
 
 // Lookup "host.containers.internal" dns name so we can add it to /etc/hosts when running inside podman machine.
-var machineHostContainersInternalIP = sync.OnceValue(func() string {
+var machineHostContainersInternalIP = sync.OnceValue(func() []string {
 	// If machine using gvproxy we let the gvproxy dns server handle resolve the name and then use that ip.
 	if machine.IsGvProxyBased() {
 		return gvProxyHostIP()
@@ -58,32 +62,35 @@ var machineHostContainersInternalIP = sync.OnceValue(func() string {
 })
 
 // GetHostContainersInternalIP returns the host.containers.internal ip.
-func GetHostContainersInternalIP(opts HostContainersInternalOptions) string {
+func GetHostContainersInternalIP(opts HostContainersInternalOptions) []string {
 	switch opts.Conf.Containers.HostContainersInternalIP {
 	case "":
 		if machine.IsPodmanMachine() {
 			return machineHostContainersInternalIP()
 		}
 	case "none":
-		return ""
+		return nil
 	default:
-		return opts.Conf.Containers.HostContainersInternalIP
+		return []string{opts.Conf.Containers.HostContainersInternalIP}
 	}
 
 	if opts.HostNetwork {
-		return "127.0.0.1"
+		return []string{"127.0.0.1"}
 	}
 
 	// caller has a specific ip it prefers
 	if opts.PreferIP != "" {
-		return opts.PreferIP
+		return []string{opts.PreferIP}
 	}
 
-	ip := ""
+	var ips []string
 	// Only use the bridge ip when root, as rootless the interfaces are created
 	// inside the special netns and not the host so we cannot use them.
 	if unshare.IsRootless() {
-		return util.GetLocalIPExcluding(opts.Exclude)
+		if ip := util.GetLocalIPExcluding(opts.Exclude); ip != "" {
+			return []string{ip}
+		}
+		return nil
 	}
 	for net, status := range opts.NetStatus {
 		network, err := opts.NetworkInterface.NetworkInspect(net)
@@ -95,25 +102,27 @@ func GetHostContainersInternalIP(opts HostContainersInternalOptions) string {
 		for _, netInt := range status.Interfaces {
 			for _, netAddress := range netInt.Subnets {
 				if netAddress.Gateway != nil {
-					if util.IsIPv4(netAddress.Gateway) {
-						return netAddress.Gateway.String()
+					if netAddress.Gateway != nil {
+						ips = append(ips, netAddress.Gateway.String())
 					}
-					// ipv6 address but keep looking since we prefer to use ipv4
-					ip = netAddress.Gateway.String()
 				}
 			}
 		}
 	}
-	if ip != "" {
-		return ip
+	if len(ips) > 0 {
+		return ips
 	}
-	return util.GetLocalIPExcluding(opts.Exclude)
+
+	if ip := util.GetLocalIPExcluding(opts.Exclude); ip != "" {
+		return []string{ip}
+	}
+	return nil
 }
 
-// GetHostContainersInternalIPExcluding returns the host.containers.internal ip
+// GetHostContainersInternalIPsExcluding returns the host.containers.internal ips
 // Exclude are ips that should not be returned, this is useful to prevent returning the same ip as in the container.
 // if netStatus is not nil then networkInterface also must be non nil otherwise this function panics.
-func GetHostContainersInternalIPExcluding(conf *config.Config, netStatus map[string]types.StatusBlock, networkInterface types.ContainerNetwork, exclude []net.IP) string {
+func GetHostContainersInternalIPsExcluding(conf *config.Config, netStatus map[string]types.StatusBlock, networkInterface types.ContainerNetwork, exclude []net.IP) []string {
 	return GetHostContainersInternalIP(HostContainersInternalOptions{
 		Conf:             conf,
 		NetStatus:        netStatus,
