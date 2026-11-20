@@ -251,7 +251,8 @@ func TestResolvedDescription(t *testing.T) {
 func toNamed(t *testing.T, input string, trim bool) reference.Named {
 	ref, err := reference.Parse(input)
 	require.NoError(t, err)
-	named := ref.(reference.Named)
+	named, ok := ref.(reference.Named)
+	require.True(t, ok)
 	require.NotNil(t, named)
 
 	if trim {

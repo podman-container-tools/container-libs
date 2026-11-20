@@ -192,16 +192,16 @@ func (d *dockerImageDestination) PutBlobWithOptions(ctx context.Context, stream 
 		// This error text should never be user-visible, we terminate only after makeRequestToResolvedURL
 		// returns, so there isn’t a way for the error text to be provided to any of our callers.
 		defer uploadReader.Terminate(errors.New("Reading data from an already terminated upload"))
-		res, err = d.c.makeRequestToResolvedURL(ctx, http.MethodPatch, uploadLocation, map[string][]string{"Content-Type": {"application/octet-stream"}}, uploadReader, inputInfo.Size, v2Auth, nil)
+		patchRes, err := d.c.makeRequestToResolvedURL(ctx, http.MethodPatch, uploadLocation, map[string][]string{"Content-Type": {"application/octet-stream"}}, uploadReader, inputInfo.Size, v2Auth, nil)
 		if err != nil {
 			logrus.Debugf("Error uploading layer chunked %v", err)
 			return nil, err
 		}
-		defer res.Body.Close()
-		if !successStatus(res.StatusCode) {
-			return nil, fmt.Errorf("uploading layer chunked: %w", registryHTTPResponseToError(res))
+		defer patchRes.Body.Close()
+		if !successStatus(patchRes.StatusCode) {
+			return nil, fmt.Errorf("uploading layer chunked: %w", registryHTTPResponseToError(patchRes))
 		}
-		uploadLocation, err := res.Location()
+		uploadLocation, err := patchRes.Location()
 		if err != nil {
 			return nil, fmt.Errorf("determining upload URL: %w", err)
 		}
