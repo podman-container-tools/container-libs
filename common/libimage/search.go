@@ -267,7 +267,7 @@ func searchRepositoryTags(ctx context.Context, sys *types.SystemContext, registr
 	}
 	tags, err := registryTransport.GetRepositoryTags(ctx, sys, imageRef)
 	if err != nil {
-		return nil, fmt.Errorf("getting repository tags: %v", err)
+		return nil, fmt.Errorf("getting repository tags: %w", err)
 	}
 	limit := min(len(tags), searchMaxQueries)
 	if options.Limit != 0 {

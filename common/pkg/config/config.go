@@ -937,7 +937,7 @@ func (c *ContainersConfig) Validate() error {
 	}
 
 	if _, err := units.FromHumanSize(c.ShmSize); err != nil {
-		return fmt.Errorf("invalid --shm-size %s, %q", c.ShmSize, err)
+		return fmt.Errorf("invalid --shm-size %s, %w", c.ShmSize, err)
 	}
 
 	return nil

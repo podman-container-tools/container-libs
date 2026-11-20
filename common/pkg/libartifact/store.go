@@ -123,7 +123,7 @@ func (as *ArtifactStore) lookupArtifactLocked(ctx context.Context, asr ArtifactS
 				}
 				storedRef, err := reference.ParseNamed(a.Name)
 				if err != nil {
-					logrus.Error(fmt.Errorf("error parsing %s in %s: %q", a.Name, as.storePath, err))
+					logrus.Error(fmt.Errorf("error parsing %s in %s: %w", a.Name, as.storePath, err))
 					continue
 				}
 				if storedRef.Name() == lookupRef.Name() {

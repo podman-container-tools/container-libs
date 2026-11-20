@@ -4,6 +4,7 @@ package exec
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	osexec "os/exec"
@@ -80,7 +81,7 @@ func RunWithOptions(ctx context.Context, options RunOptions) error {
 		case err = <-exit:
 		}
 		if err != nil {
-			return fmt.Errorf("%w, %w", err, ctx.Err())
+			return errors.Join(err, ctx.Err())
 		}
 		// Process must have completed successfully before the kill signal was delivered, we consider that success.
 		return nil

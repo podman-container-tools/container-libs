@@ -276,7 +276,7 @@ func replaceURLByHostPort(repository string) (string, error) {
 	}
 	u, err := url.Parse(repository)
 	if err != nil {
-		return "", fmt.Errorf("trimming http{s} prefix: %v", err)
+		return "", fmt.Errorf("trimming http{s} prefix: %w", err)
 	}
 	return u.Host, nil
 }

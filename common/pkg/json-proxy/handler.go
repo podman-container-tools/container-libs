@@ -729,7 +729,7 @@ func (h *handler) processRequest(ctx context.Context, readBytes []byte) (rb repl
 
 	// Parse the request JSON
 	if err = json.Unmarshal(readBytes, &req); err != nil {
-		err = fmt.Errorf("invalid request: %v", err)
+		err = fmt.Errorf("invalid request: %w", err)
 		return
 	}
 	h.logger.Debugf("Executing method %s", req.Method)

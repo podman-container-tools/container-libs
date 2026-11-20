@@ -476,7 +476,10 @@ func (m *ManifestList) parseNameToExtantReference(ctx context.Context, sys *type
 		if err != nil {
 			image, _, lookupErr := m.image.runtime.LookupImage(name, &LookupImageOptions{ManifestList: manifestList})
 			if lookupErr != nil {
-				return nil, fmt.Errorf("locating %s: %q: %w; %q: %w", what, withDocker, err, name, lookupErr)
+				return nil, fmt.Errorf("locating %s: %w", what, errors.Join(
+					fmt.Errorf("%q: %w", withDocker, err),
+					fmt.Errorf("%q: %w", name, lookupErr),
+				))
 			}
 			ref, err = image.storageReference, nil
 		}
