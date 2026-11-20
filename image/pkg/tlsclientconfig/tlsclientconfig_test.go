@@ -40,14 +40,14 @@ func TestSetupCertificates(t *testing.T) {
 	// and succeeds.
 	// There isn’t a plausible alternative to calling .Subjects() here.
 	loadedSubjectBytes := set.New[string]()
-	// lint:ignore SA1019 Receiving no data for system roots is acceptable.
-	for _, s := range tlsc.RootCAs.Subjects() { //nolint staticcheck: the lint:ignore directive is somehow not recognized (and causes an extra warning!)
+	// Receiving no data for system roots is acceptable.
+	for _, s := range tlsc.RootCAs.Subjects() { //nolint:staticcheck // SA1019: Subjects is deprecated but still needed here.
 		loadedSubjectBytes.Add(string(s))
 	}
 	systemCertPool, err := x509.SystemCertPool()
 	require.NoError(t, err)
-	// lint:ignore SA1019 Receiving no data for system roots is acceptable.
-	for _, s := range systemCertPool.Subjects() { //nolint staticcheck: the lint:ignore directive is somehow not recognized (and causes an extra warning!)
+	// Receiving no data for system roots is acceptable.
+	for _, s := range systemCertPool.Subjects() { //nolint:staticcheck // SA1019: Subjects is deprecated but still needed here.
 		ok := loadedSubjectBytes.Contains(string(s))
 		assert.True(t, ok)
 	}
@@ -56,8 +56,8 @@ func TestSetupCertificates(t *testing.T) {
 	// We could possibly test without .Subjects() this by validating certificates
 	// signed by our test CAs.
 	loadedSubjectCNs := set.New[string]()
-	// lint:ignore SA1019 We only care about non-system roots here.
-	for _, s := range tlsc.RootCAs.Subjects() { //nolint staticcheck: the lint:ignore directive is somehow not recognized (and causes an extra warning!)
+	// We only care about non-system roots here.
+	for _, s := range tlsc.RootCAs.Subjects() { //nolint:staticcheck // SA1019: Subjects is deprecated but still needed here.
 		subjectRDN := pkix.RDNSequence{}
 		rest, err := asn1.Unmarshal(s, &subjectRDN)
 		require.NoError(t, err)

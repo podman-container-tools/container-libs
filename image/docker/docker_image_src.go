@@ -336,7 +336,7 @@ func splitHTTP200ResponseToPartial(streams chan io.ReadCloser, errs chan error, 
 	defer close(errs)
 	currentOffset := uint64(0)
 
-	body = makeBufferedNetworkReader(body, 64, 16384)
+	body = makeBufferedNetworkReader(body, 64)
 	defer body.Close()
 	for _, c := range chunks {
 		if c.Offset != currentOffset {
@@ -384,7 +384,7 @@ func handle206Response(streams chan io.ReadCloser, errs chan error, body io.Read
 		body.Close()
 		return
 	}
-	buffered := makeBufferedNetworkReader(body, 64, 16384)
+	buffered := makeBufferedNetworkReader(body, 64)
 	defer buffered.Close()
 	mr := multipart.NewReader(buffered, boundary)
 	parts := 0
@@ -1136,7 +1136,9 @@ func (n *bufferedNetworkReader) Read(p []byte) (int, error) {
 	return n.read(p)
 }
 
-func makeBufferedNetworkReader(stream io.ReadCloser, nBuffers, bufferSize uint) *bufferedNetworkReader {
+const bufferedNetworkReaderBufferSize = 16384
+
+func makeBufferedNetworkReader(stream io.ReadCloser, nBuffers uint) *bufferedNetworkReader {
 	br := bufferedNetworkReader{
 		stream:      stream,
 		emptyBuffer: make(chan *bufferedNetworkReaderBuffer, nBuffers),
@@ -1150,7 +1152,7 @@ func makeBufferedNetworkReader(stream io.ReadCloser, nBuffers, bufferSize uint) 
 
 	for range nBuffers {
 		b := bufferedNetworkReaderBuffer{
-			data: make([]byte, bufferSize),
+			data: make([]byte, bufferedNetworkReaderBufferSize),
 		}
 		br.emptyBuffer <- &b
 	}

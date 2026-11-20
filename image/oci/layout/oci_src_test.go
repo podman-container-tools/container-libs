@@ -43,12 +43,15 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
+// Fixture digest for delete_image_only_one_image / shared_blobs layouts used by testConsumeImage.
+const testConsumeImageManifestDigest = digest.Digest("sha256:eaa95f3cfaac07c8a5153eb77c933269586ad0226c83405776be08547e4d2a18")
+
 // testConsumeImage ensures that a single-platform image at ref can be read,
 // and that manifest and layers have the expected contents.
 //
 // The config is not read/validated: the transport does not really differentiate
 // between configs and layers, so testing layers is sufficient.
-func testConsumeImage(t *testing.T, ref types.ImageReference, sys *types.SystemContext, manifestDigest digest.Digest, layerDigests []digest.Digest) {
+func testConsumeImage(t *testing.T, ref types.ImageReference, sys *types.SystemContext, layerDigests []digest.Digest) {
 	src, err := ref.NewImageSource(context.Background(), sys)
 	require.NoError(t, err)
 	defer src.Close()
@@ -57,7 +60,7 @@ func testConsumeImage(t *testing.T, ref types.ImageReference, sys *types.SystemC
 	require.NoError(t, err)
 	md, err := manifest.Digest(manifestBlob)
 	require.NoError(t, err)
-	assert.Equal(t, manifestDigest, md)
+	assert.Equal(t, testConsumeImageManifestDigest, md)
 
 	var ociManifest imgspecv1.Manifest
 	err = json.Unmarshal(manifestBlob, &ociManifest)
@@ -82,20 +85,19 @@ func testConsumeImage(t *testing.T, ref types.ImageReference, sys *types.SystemC
 func TestImageSourceFSAccess(t *testing.T) {
 	// This exercises the success paths of doing file I/O in newImageSource + GetManifest + GetBlob
 
-	const manifestDigest = "sha256:eaa95f3cfaac07c8a5153eb77c933269586ad0226c83405776be08547e4d2a18"
 	layerDigests := []digest.Digest{"sha256:0c8b263642b51b5c1dc40fe402ae2e97119c6007b6e52146419985ec1f0092dc"}
 
 	// Base case
 	ref, err := NewReference("fixtures/delete_image_only_one_image", "latest")
 	require.NoError(t, err)
-	testConsumeImage(t, ref, nil, manifestDigest, layerDigests)
+	testConsumeImage(t, ref, nil, layerDigests)
 
 	// OCISharedBlobDirPath
 	ref, err = NewReference("fixtures/delete_image_shared_blobs_dir", "latest")
 	require.NoError(t, err)
 	testConsumeImage(t, ref,
 		&types.SystemContext{OCISharedBlobDirPath: "fixtures/delete_image_shared_blobs_dir/shared_blobs"},
-		manifestDigest, layerDigests)
+		layerDigests)
 
 	// Reader
 	root, err := os.OpenRoot("fixtures/delete_image_only_one_image")
@@ -104,7 +106,7 @@ func TestImageSourceFSAccess(t *testing.T) {
 	reader := NewReaderWithRoot(root)
 	ref, err = reader.NewReference("fixtures/delete_image_only_one_image", "latest")
 	require.NoError(t, err)
-	testConsumeImage(t, ref, nil, manifestDigest, layerDigests)
+	testConsumeImage(t, ref, nil, layerDigests)
 
 	// Reader + OCISharedBlobDirPath
 	// The fixture has shared_blobs inside the layout root; copy it outside to test that the root does not constrain OCISharedBlobDirPath .
@@ -117,7 +119,7 @@ func TestImageSourceFSAccess(t *testing.T) {
 	reader = NewReaderWithRoot(root)
 	ref, err = reader.NewReference("fixtures/delete_image_shared_blobs_dir", "latest")
 	require.NoError(t, err)
-	testConsumeImage(t, ref, &types.SystemContext{OCISharedBlobDirPath: sharedBlobsDir}, manifestDigest, layerDigests)
+	testConsumeImage(t, ref, &types.SystemContext{OCISharedBlobDirPath: sharedBlobsDir}, layerDigests)
 }
 
 // fixtureCopyWithSymlink returns a t.Tempdir() copy of srcDir, except that within the copy, relativeSymlinkPath is a symlink to the
