@@ -56,8 +56,10 @@ func TestCopyDir(t *testing.T) {
 		dstFileInfo, err := os.Lstat(dstPath)
 		require.NoError(t, err)
 
-		srcFileSys := f.Sys().(*syscall.Stat_t)
-		dstFileSys := dstFileInfo.Sys().(*syscall.Stat_t)
+		srcFileSys, ok := f.Sys().(*syscall.Stat_t)
+		require.True(t, ok, "expected *syscall.Stat_t from source file info")
+		dstFileSys, ok := dstFileInfo.Sys().(*syscall.Stat_t)
+		require.True(t, ok, "expected *syscall.Stat_t from destination file info")
 
 		t.Log(relPath)
 		if srcFileSys.Dev == dstFileSys.Dev {

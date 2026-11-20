@@ -43,9 +43,15 @@ func (info *FileInfo) isDir() bool {
 }
 
 func getIno(fi os.FileInfo) uint64 {
-	return fi.Sys().(*syscall.Stat_t).Ino
+	if st, ok := fi.Sys().(*syscall.Stat_t); ok {
+		return st.Ino
+	}
+	return 0
 }
 
 func hasHardlinks(fi os.FileInfo) bool {
-	return fi.Sys().(*syscall.Stat_t).Nlink > 1
+	if st, ok := fi.Sys().(*syscall.Stat_t); ok {
+		return st.Nlink > 1
+	}
+	return false
 }

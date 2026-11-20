@@ -14,7 +14,9 @@ var filterPath sync.Map
 func getFilterPath(name string) string {
 	path, ok := filterPath.Load(name)
 	if ok {
-		return path.(string)
+		if s, ok := path.(string); ok {
+			return s
+		}
 	}
 
 	path, err := exec.LookPath(name)
@@ -23,7 +25,10 @@ func getFilterPath(name string) string {
 	}
 
 	filterPath.Store(name, path)
-	return path.(string)
+	if s, ok := path.(string); ok {
+		return s
+	}
+	return ""
 }
 
 type errorRecordingReader struct {

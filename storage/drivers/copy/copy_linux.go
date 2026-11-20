@@ -254,7 +254,10 @@ func DirCopy(srcDir, dstDir string, copyMode Mode, copyXattrs bool) error {
 		return err
 	}
 	for e := dirsToSetMtimes.Front(); e != nil; e = e.Next() {
-		mtimeInfo := e.Value.(*dirMtimeInfo)
+		mtimeInfo, ok := e.Value.(*dirMtimeInfo)
+		if !ok {
+			return fmt.Errorf("unexpected dir mtime info type %T", e.Value)
+		}
 		ts := []syscall.Timespec{mtimeInfo.stat.Atim, mtimeInfo.stat.Mtim}
 		if err := system.LUtimesNano(*mtimeInfo.dstPath, ts); err != nil {
 			return err

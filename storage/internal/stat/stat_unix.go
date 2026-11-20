@@ -69,5 +69,9 @@ func (s StatT) IsSymlink() bool {
 
 // FromFileInfo converts a os.FileInfo type to a StatT type
 func FromFileInfo(fi os.FileInfo) *StatT {
-	return FromStatT(fi.Sys().(*syscall.Stat_t))
+	st, ok := fi.Sys().(*syscall.Stat_t)
+	if !ok {
+		return nil
+	}
+	return FromStatT(st)
 }

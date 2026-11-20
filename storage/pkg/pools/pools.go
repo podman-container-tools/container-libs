@@ -47,7 +47,10 @@ func newBufioReaderPoolWithSize(size int) *BufioReaderPool {
 
 // Get returns a bufio.Reader which reads from r. The buffer size is that of the pool.
 func (bufPool *BufioReaderPool) Get(r io.Reader) *bufio.Reader {
-	buf := bufPool.pool.Get().(*bufio.Reader)
+	buf, ok := bufPool.pool.Get().(*bufio.Reader)
+	if !ok {
+		panic("pools: bufio.Reader pool returned unexpected type")
+	}
 	buf.Reset(r)
 	return buf
 }
@@ -94,7 +97,10 @@ func newBufioWriterPoolWithSize(size int) *BufioWriterPool {
 
 // Get returns a bufio.Writer which writes to w. The buffer size is that of the pool.
 func (bufPool *BufioWriterPool) Get(w io.Writer) *bufio.Writer {
-	buf := bufPool.pool.Get().(*bufio.Writer)
+	buf, ok := bufPool.pool.Get().(*bufio.Writer)
+	if !ok {
+		panic("pools: bufio.Writer pool returned unexpected type")
+	}
 	buf.Reset(w)
 	return buf
 }

@@ -180,5 +180,9 @@ func getBuffer(size int) *fixedBuffer {
 		bufPools[size] = pool
 	}
 	bufPoolsLock.Unlock()
-	return pool.Get().(*fixedBuffer)
+	buf, ok := pool.Get().(*fixedBuffer)
+	if !ok {
+		panic("bytespipe: fixedBuffer pool returned unexpected type")
+	}
+	return buf
 }

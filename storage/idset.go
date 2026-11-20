@@ -75,10 +75,14 @@ func (s *idSet) iterator() (iteratorFn, cancelFn) {
 	dataCh := make(chan interval)
 	go func() {
 		s.set.Intervals(func(ii intervalset.Interval) bool {
+			in, ok := ii.(interval)
+			if !ok {
+				return true
+			}
 			select {
 			case <-cancelCh:
 				return false
-			case dataCh <- ii.(interval):
+			case dataCh <- in:
 				return true
 			}
 		})
@@ -163,12 +167,18 @@ func (i interval) length() int {
 }
 
 func (i interval) Intersect(other intervalset.Interval) intervalset.Interval {
-	j := other.(interval)
+	j, ok := other.(interval)
+	if !ok {
+		return interval{}
+	}
 	return interval{start: max(i.start, j.start), end: min(i.end, j.end)}
 }
 
 func (i interval) Before(other intervalset.Interval) bool {
-	j := other.(interval)
+	j, ok := other.(interval)
+	if !ok {
+		return false
+	}
 	return !i.IsZero() && !j.IsZero() && i.end < j.start
 }
 
@@ -177,7 +187,10 @@ func (i interval) IsZero() bool {
 }
 
 func (i interval) Bisect(other intervalset.Interval) (intervalset.Interval, intervalset.Interval) {
-	j := other.(interval)
+	j, ok := other.(interval)
+	if !ok {
+		return i, interval{}
+	}
 	if j.IsZero() {
 		return i, interval{}
 	}
@@ -189,7 +202,10 @@ func (i interval) Bisect(other intervalset.Interval) (intervalset.Interval, inte
 }
 
 func (i interval) Adjoin(other intervalset.Interval) intervalset.Interval {
-	j := other.(interval)
+	j, ok := other.(interval)
+	if !ok {
+		return interval{}
+	}
 	if !i.IsZero() && !j.IsZero() && (i.end == j.start || j.end == i.start) {
 		return interval{start: min(i.start, j.start), end: max(i.end, j.end)}
 	}
@@ -197,7 +213,10 @@ func (i interval) Adjoin(other intervalset.Interval) intervalset.Interval {
 }
 
 func (i interval) Encompass(other intervalset.Interval) intervalset.Interval {
-	j := other.(interval)
+	j, ok := other.(interval)
+	if !ok {
+		return i
+	}
 	switch {
 	case i.IsZero():
 		return j
