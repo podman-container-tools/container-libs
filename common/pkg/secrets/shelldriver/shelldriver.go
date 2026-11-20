@@ -44,14 +44,14 @@ func (cfg *driverConfig) ParseOpts(opts map[string]string) error {
 		case "store":
 			cfg.StoreCommand = value
 		default:
-			return fmt.Errorf("invalid shell driver option: %q", key)
+			return define.InvalidArg(fmt.Errorf("invalid shell driver option: %q", key))
 		}
 	}
 	if cfg.DeleteCommand == "" ||
 		cfg.ListCommand == "" ||
 		cfg.LookupCommand == "" ||
 		cfg.StoreCommand == "" {
-		return errMissingConfig
+		return define.InvalidArg(errMissingConfig)
 	}
 	return nil
 }
