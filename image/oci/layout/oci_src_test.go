@@ -48,6 +48,8 @@ func TestMain(m *testing.M) {
 //
 // The config is not read/validated: the transport does not really differentiate
 // between configs and layers, so testing layers is sufficient.
+//
+//nolint:unparam // manifestDigest is fixed for current fixtures but kept as a parameter for symmetry with layerDigests.
 func testConsumeImage(t *testing.T, ref types.ImageReference, sys *types.SystemContext, manifestDigest digest.Digest, layerDigests []digest.Digest) {
 	src, err := ref.NewImageSource(context.Background(), sys)
 	require.NoError(t, err)
