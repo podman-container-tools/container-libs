@@ -126,19 +126,27 @@ func TestParse(t *testing.T) {
 		t.Fatalf("ParseReference(%q) returned nil reference", strRef)
 	}
 
+	st, ok := Transport.(*storageTransport)
+	if !ok {
+		t.Fatalf("Transport is not *storageTransport")
+	}
+	sref, ok := ref.(*storageReference)
+	if !ok {
+		t.Fatalf("ref is not *storageReference")
+	}
 	transport := storageTransport{
 		store:         store,
-		defaultUIDMap: Transport.(*storageTransport).defaultUIDMap,
-		defaultGIDMap: Transport.(*storageTransport).defaultGIDMap,
+		defaultUIDMap: st.defaultUIDMap,
+		defaultGIDMap: st.defaultGIDMap,
 	}
 	_references := []storageReference{
 		{
-			named:     ref.(*storageReference).named,
+			named:     sref.named,
 			id:        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 			transport: transport,
 		},
 		{
-			named:     ref.(*storageReference).named,
+			named:     sref.named,
 			transport: transport,
 		},
 		{

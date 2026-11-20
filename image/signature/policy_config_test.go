@@ -27,7 +27,11 @@ func x(m mSA, fields ...string) mSA {
 	for _, field := range fields {
 		// Not .(mSA) because type assertion of an unnamed type to a named type always fails (the types
 		// are not "identical"), but the assignment is fine because they are "assignable".
-		m = m[field].(map[string]any)
+		next, ok := m[field].(map[string]any)
+		if !ok {
+			panic(fmt.Sprintf("expected map[string]any at %q", field))
+		}
+		m = next
 	}
 	return m
 }
