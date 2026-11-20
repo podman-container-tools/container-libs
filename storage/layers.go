@@ -2454,7 +2454,7 @@ func (r *layerStore) Diff(from, to string, options *DiffOptions) (io.ReadCloser,
 				diff, err := archive.DecompressStream(blob)
 				if err != nil {
 					if err2 := blob.Close(); err2 != nil {
-						err = fmt.Errorf("failed to close blob file: %v: %w", err2, err)
+						err = fmt.Errorf("failed to close blob file: %w", errors.Join(err2, err))
 					}
 					aLayer.Release()
 					return nil, err
@@ -2462,7 +2462,7 @@ func (r *layerStore) Diff(from, to string, options *DiffOptions) (io.ReadCloser,
 				rc, err := maybeCompressReadCloser(diff)
 				if err != nil {
 					if err2 := closeAll(blob.Close, diff.Close); err2 != nil {
-						err = fmt.Errorf("failed to cleanup: %v: %w", err2, err)
+						err = fmt.Errorf("failed to cleanup: %w", errors.Join(err2, err))
 					}
 					aLayer.Release()
 					return nil, err
@@ -3073,7 +3073,7 @@ func closeAll(closes ...func() error) (rErr error) {
 				rErr = fmt.Errorf("close error: %w", err)
 				continue
 			}
-			rErr = fmt.Errorf("%v: %w", err, rErr)
+			rErr = fmt.Errorf("close error: %w", errors.Join(err, rErr))
 		}
 	}
 	return rErr

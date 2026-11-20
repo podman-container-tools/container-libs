@@ -11,7 +11,7 @@ import (
 func status(flags *mflag.FlagSet, action string, m storage.Store, args []string) (int, error) {
 	status, err := m.Status()
 	if err != nil {
-		return 1, fmt.Errorf("status: %+v", err)
+		return 1, fmt.Errorf("status: %w", err)
 	}
 	basics := [][2]string{
 		{"Root", m.GraphRoot()},

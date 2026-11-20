@@ -170,7 +170,7 @@ func invokeUnpack(decompressedArchive io.Reader, dest *unpackDestination, option
 		// we need to exhaust `xz`'s output, otherwise the `xz` side will be
 		// pending on write pipe forever
 		if _, err := io.Copy(io.Discard, decompressedArchive); err != nil {
-			return fmt.Errorf("%w\nexhausting input failed (error: %w)", errorOut, err)
+			return fmt.Errorf("%w\nexhausting input failed (error: %v)", errorOut, err)
 		}
 
 		if exitErr, ok := errors.AsType[*exec.ExitError](err); ok && exitErr.ExitCode() == statusCodeENOSPC {

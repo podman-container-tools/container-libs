@@ -3,6 +3,7 @@
 package zfs
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -60,7 +61,7 @@ func Init(base string, opt graphdriver.Options) (graphdriver.Driver, error) {
 	file, err := unix.Open("/dev/zfs", unix.O_RDWR, 0o600)
 	if err != nil {
 		logger.Debugf("cannot open /dev/zfs: %v", err)
-		return nil, fmt.Errorf("could not open /dev/zfs: %v: %w", err, graphdriver.ErrPrerequisites)
+		return nil, fmt.Errorf("could not open /dev/zfs: %w", errors.Join(err, graphdriver.ErrPrerequisites))
 	}
 	defer unix.Close(file)
 
