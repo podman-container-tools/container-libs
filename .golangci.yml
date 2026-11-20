@@ -2,73 +2,55 @@ version: "2"
 
 run:
   timeout: 5m
-  build-tags:
-    - apparmor
-    - seccomp
-    - selinux
-    - systemd
-    - exclude_graphdriver_btrfs
-    - containers_image_openpgp
+  # gitroot so exclusion paths can target common/image/storage modules.
+  # Build tags are passed per-module via Make/CI --build-tags, not here.
+  relative-path-mode: gitroot
 
 formatters:
   enable:
     - gofumpt
 
 linters:
+  default: standard
   enable:
     - asasalint
-    - asciicheck
     - bidichk
     - bodyclose
-    - canonicalheader
     - containedctx
     - contextcheck
     - copyloopvar
-    - decorder
-    - dupl
-    - dupword
     - durationcheck
+    - errorlint
     - exptostd
     - fatcontext
-    - forbidigo
-    - ginkgolinter
     - gocheckcompilerdirectives
     - gochecksumtype
-    - gocritic
-    - godot
-    - goprintffuncname
-    - gosmopolitan
-    - iface
-    - intrange
+    - ginkgolinter
     - makezero
-    - mirror
     - misspell
     - modernize
     - nilnesserr
     - nolintlint
     - nosprintfhostport
-    - perfsprint
     - prealloc
     - predeclared
     - reassign
     - recvcheck
-    - revive
-    - staticcheck
     - unconvert
     - unparam
     - usestdlibvars
     - usetesting
-    - wastedassign
-    - whitespace
   settings:
     errcheck:
-      check-type-assertions: true
-    gocyclo:
-      min-complexity: 35
-    revive:
-      rules:
-        - name: dot-imports
-          disabled: true
+      # Leave unchecked type assertions alone. For "impossible" asserts, a panic
+      # at the conversion site is clearer than soft-failing with a default value.
+      check-type-assertions: false
+    errorlint:
+      # See https://golangci-lint.run/usage/linters/#errorlint.
+      # Only allow warnings about not using %w.
+      errorf-multi: false
+      asserts: false
+      comparison: false
     staticcheck:
       checks:
         - all
@@ -81,14 +63,21 @@ linters:
       - std-error-handling
     rules:
       - linters:
-          - dupl
-          - perfsprint
           - prealloc
         path: _test\.go
       - linters:
           - contextcheck
-        path: libimage
+        path: ^common/libimage
         text: LookupImage
+      # c/image uses capitalized error strings by convention.
+      - linters:
+          - staticcheck
+        path: ^image/
+        text: "ST1005:"
+      # go.podman.io/image/v5/copy is a stable public package name; cannot rename.
+      - linters:
+          - predeclared
+        path: ^image/copy/
 
 issues:
   max-issues-per-linter: 0

@@ -51,19 +51,22 @@ jobs:
       uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
       with:
         version: "${{ env.LINT_VERSION }}"
-        args: --verbose
+        # Build tags live here (and in module Makefiles), not in the shared config,
+        # so image keeps GPGME coverage and storage keeps its AUTOTAGS.
+        args: --verbose --config ../.golangci.yml --build-tags "apparmor,seccomp,selinux,systemd,exclude_graphdriver_btrfs,containers_image_openpgp"
         working-directory: ./common
     - name: lint-image
       uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
       with:
         version: "${{ env.LINT_VERSION }}"
-        args: --verbose
+        # Empty build-tags matches image's historical lint (GPGME, not openpgp-only).
+        args: --verbose --config ../.golangci.yml --build-tags ""
         working-directory: ./image
     - name: lint-storage
       uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
       with:
         version: "${{ env.LINT_VERSION }}"
-        args: --verbose
+        args: --verbose --config ../.golangci.yml --build-tags "libsubid"
         working-directory: ./storage
 
     - name: validate seccomp
