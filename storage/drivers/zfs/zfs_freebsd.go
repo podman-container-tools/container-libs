@@ -28,6 +28,9 @@ func getMountpoint(id string) string {
 }
 
 func detachUnmount(mountpoint string) error {
-	// FreeBSD's MNT_FORCE is roughly equivalent to MNT_DETACH
-	return unix.Unmount(mountpoint, unix.MNT_FORCE)
+	// FreeBSD has no lazy unmount, and MNT_FORCE is not a substitute: it
+	// revokes every open vnode on the mount, so a pull still unpacking into
+	// the layer fails with EBADF or EIO. A plain unmount fails with EBUSY
+	// instead and leaves the mount to its remaining user.
+	return unix.Unmount(mountpoint, 0)
 }
