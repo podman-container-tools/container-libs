@@ -85,3 +85,83 @@ func TestDiskUsage(t *testing.T) {
 	res[1].Created = time.Time{}
 	require.ElementsMatch(t, []ImageDiskUsage{expectedImageDiskUsage, expectedImageDiskUsage2}, res)
 }
+
+func TestCalculateKeepBytes(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		totalSize int64
+		free      int64
+		opts      RemoveImagesOptions
+		expected  int64
+	}{
+		{
+			name:      "max used space only",
+			totalSize: 100,
+			opts:      RemoveImagesOptions{MaxUsedSpace: 60},
+			expected:  60,
+		},
+		{
+			name:      "min free space already satisfied",
+			totalSize: 100,
+			free:      500,
+			opts:      RemoveImagesOptions{MinFreeSpace: 200},
+			expected:  100,
+		},
+		{
+			name:      "min free space not satisfied",
+			totalSize: 100,
+			free:      150,
+			opts:      RemoveImagesOptions{MinFreeSpace: 200},
+			expected:  50,
+		},
+		{
+			name:      "min free space is the tighter limit",
+			totalSize: 100,
+			free:      150,
+			opts:      RemoveImagesOptions{MaxUsedSpace: 80, MinFreeSpace: 200},
+			expected:  50,
+		},
+		{
+			name:      "max used space is the tighter limit",
+			totalSize: 100,
+			free:      150,
+			opts:      RemoveImagesOptions{MaxUsedSpace: 30, MinFreeSpace: 200},
+			expected:  30,
+		},
+		{
+			name:      "max used space with min free space satisfied",
+			totalSize: 100,
+			free:      500,
+			opts:      RemoveImagesOptions{MaxUsedSpace: 60, MinFreeSpace: 200},
+			expected:  60,
+		},
+		{
+			name:      "reserved space only",
+			totalSize: 100,
+			opts:      RemoveImagesOptions{ReservedSpace: 70},
+			expected:  70,
+		},
+		{
+			name:      "reserved space raises the floor",
+			totalSize: 100,
+			opts:      RemoveImagesOptions{MaxUsedSpace: 30, ReservedSpace: 70},
+			expected:  70,
+		},
+		{
+			name:      "excess larger than total size",
+			totalSize: 100,
+			opts:      RemoveImagesOptions{MinFreeSpace: 300},
+			expected:  0,
+		},
+		{
+			name:      "reserved space larger than total size",
+			totalSize: 100,
+			opts:      RemoveImagesOptions{MaxUsedSpace: 10, ReservedSpace: 500},
+			expected:  500,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.expected, calculateKeepBytes(tc.totalSize, tc.free, &tc.opts))
+		})
+	}
+}
