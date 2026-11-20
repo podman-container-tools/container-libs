@@ -245,7 +245,7 @@ func setFileAttrs(dirfd int, file *os.File, mode os.FileMode, metadata *fileMeta
 
 	doChmod := func() error {
 		var err error
-		op := ""
+		var op string
 		if usePath {
 			err = unix.Fchmodat(dirfd, baseName, uint32(mode), unix.AT_SYMLINK_NOFOLLOW)
 			op = "fchmodat"

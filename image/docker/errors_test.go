@@ -36,7 +36,8 @@ func TestRegistryHTTPResponseToError(t *testing.T) {
 			errorString: "received unexpected HTTP status: 333 HTTP status out of range",
 			errorType:   UnexpectedHTTPStatusError{},
 			fn: func(t *testing.T, err error) {
-				expected := err.(UnexpectedHTTPStatusError)
+				expected, ok := err.(UnexpectedHTTPStatusError)
+				require.True(t, ok)
 				assert.Equal(t, 333, expected.StatusCode)
 			},
 		},

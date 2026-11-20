@@ -100,11 +100,11 @@ const (
 )
 
 // changeState changes pc.state, or fails if the state is unexpected
-func (pc *PolicyContext) changeState(expected, new policyContextState) error {
+func (pc *PolicyContext) changeState(expected, next policyContextState) error {
 	if pc.state != expected {
 		return fmt.Errorf(`Invalid PolicyContext state, expected %q, found %q`, expected, pc.state)
 	}
-	pc.state = new
+	pc.state = next
 	return nil
 }
 

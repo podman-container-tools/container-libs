@@ -11,7 +11,7 @@ import (
 func version(flags *mflag.FlagSet, action string, m storage.Store, args []string) (int, error) {
 	version, err := m.Version()
 	if err != nil {
-		return 1, fmt.Errorf("version: %+v", err)
+		return 1, fmt.Errorf("version: %w", err)
 	}
 	if jsonOutput {
 		return outputJSON(version)

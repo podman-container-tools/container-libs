@@ -27,19 +27,19 @@ var v1RegistriesConfEmptyTestData = []struct {
 
 func TestV1RegistriesConfNonempty(t *testing.T) {
 	for _, c := range v1RegistriesConfEmptyTestData {
-		copy := c.v // A shallow copy
-		res := copy.Nonempty()
+		copied := c.v // A shallow copy
+		res := copied.Nonempty()
 		assert.Equal(t, c.nonempty, res, c.v)
-		assert.Equal(t, c.v, copy, c.v) // Ensure the method did not change the original value
+		assert.Equal(t, c.v, copied, c.v) // Ensure the method did not change the original value
 	}
 }
 
 func TestV1RegistriesConfHasSetField(t *testing.T) {
 	for _, c := range v1RegistriesConfEmptyTestData {
-		copy := c.v // A shallow copy
-		res := copy.hasSetField()
+		copied := c.v // A shallow copy
+		res := copied.hasSetField()
 		assert.Equal(t, c.hasSetField, res, c.v)
-		assert.Equal(t, c.v, copy, c.v) // Ensure the method did not change the original value
+		assert.Equal(t, c.v, copied, c.v) // Ensure the method did not change the original value
 	}
 }
 
@@ -62,19 +62,19 @@ var v2RegistriesConfEmptyTestData = []struct {
 
 func TestV2RegistriesConfNonempty(t *testing.T) {
 	for _, c := range v2RegistriesConfEmptyTestData {
-		copy := c.v // A shallow copy
-		res := copy.Nonempty()
+		copied := c.v // A shallow copy
+		res := copied.Nonempty()
 		assert.Equal(t, c.nonempty, res, c.v)
-		assert.Equal(t, c.v, copy, c.v) // Ensure the method did not change the original value
+		assert.Equal(t, c.v, copied, c.v) // Ensure the method did not change the original value
 	}
 }
 
 func TestV2RegistriesConfHasSetField(t *testing.T) {
 	for _, c := range v2RegistriesConfEmptyTestData {
-		copy := c.v // A shallow copy
-		res := copy.hasSetField()
+		copied := c.v // A shallow copy
+		res := copied.hasSetField()
 		assert.Equal(t, c.hasSetField, res, c.v)
-		assert.Equal(t, c.v, copy, c.v) // Ensure the method did not change the original value
+		assert.Equal(t, c.v, copied, c.v) // Ensure the method did not change the original value
 	}
 }
 

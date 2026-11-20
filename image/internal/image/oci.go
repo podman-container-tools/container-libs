@@ -144,16 +144,16 @@ func (m *manifestOCI1) UpdatedImageNeedsLayerDiffIDs(options types.ManifestUpdat
 // in one or more options.LayerInfos items indicates that a layer is compressed using
 // an algorithm that is not allowed in OCI.
 func (m *manifestOCI1) UpdatedImage(ctx context.Context, options types.ManifestUpdateOptions) (types.Image, error) {
-	copy := manifestOCI1{ // NOTE: This is not a deep copy, it still shares slices etc.
+	copied := manifestOCI1{ // NOTE: This is not a deep copy, it still shares slices etc.
 		src:        m.src,
 		configBlob: m.configBlob,
 		m:          manifest.OCI1Clone(m.m),
 	}
 
 	converted, err := convertManifestIfRequiredWithUpdate(ctx, options, map[string]manifestConvertFn{
-		manifest.DockerV2Schema2MediaType:       copy.convertToManifestSchema2Generic,
-		manifest.DockerV2Schema1MediaType:       copy.convertToManifestSchema1,
-		manifest.DockerV2Schema1SignedMediaType: copy.convertToManifestSchema1,
+		manifest.DockerV2Schema2MediaType:       copied.convertToManifestSchema2Generic,
+		manifest.DockerV2Schema1MediaType:       copied.convertToManifestSchema1,
+		manifest.DockerV2Schema1SignedMediaType: copied.convertToManifestSchema1,
 	})
 	if err != nil {
 		return nil, err
@@ -165,13 +165,13 @@ func (m *manifestOCI1) UpdatedImage(ctx context.Context, options types.ManifestU
 
 	// No conversion required, update manifest
 	if options.LayerInfos != nil {
-		if err := copy.m.UpdateLayerInfos(options.LayerInfos); err != nil {
+		if err := copied.m.UpdateLayerInfos(options.LayerInfos); err != nil {
 			return nil, err
 		}
 	}
 	// Ignore options.EmbeddedDockerReference: it may be set when converting from schema1, but we really don't care.
 
-	return memoryImageFromManifest(&copy), nil
+	return memoryImageFromManifest(&copied), nil
 }
 
 func schema2DescriptorFromOCI1Descriptor(d imgspecv1.Descriptor) manifest.Schema2Descriptor {

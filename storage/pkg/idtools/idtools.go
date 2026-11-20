@@ -394,7 +394,7 @@ func FormatContainersOverrideXattr(uid, gid, mode int) string {
 // that can be used as the value for the ContainersOverrideXattr xattr.  For devices, it also
 // needs the major and minor numbers.
 func FormatContainersOverrideXattrDevice(uid, gid int, mode fs.FileMode, major, minor int) string {
-	typ := ""
+	var typ string
 	switch mode & os.ModeType {
 	case os.ModeDir:
 		typ = "dir"

@@ -185,7 +185,7 @@ func execAAParser(apparmorParserPath, dir string, args ...string) (string, error
 
 	output, err := c.Output()
 	if err != nil {
-		return "", fmt.Errorf("running `%s %s` failed with output: %s\nerror: %v", c.Path, strings.Join(c.Args, " "), output, err)
+		return "", fmt.Errorf("running `%s %s` failed with output: %s\nerror: %w", c.Path, strings.Join(c.Args, " "), output, err)
 	}
 
 	return string(output), nil

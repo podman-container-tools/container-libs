@@ -183,9 +183,9 @@ func (w *walker) walk(fsPath string, fsBasename string, parentRoot1, parentRoot2
 
 	sameDevice := false
 	if i1 != nil && i2 != nil {
-		si1 := i1.Sys().(*syscall.Stat_t)
-		si2 := i2.Sys().(*syscall.Stat_t)
-		if si1.Dev == si2.Dev {
+		si1, ok1 := i1.Sys().(*syscall.Stat_t)
+		si2, ok2 := i2.Sys().(*syscall.Stat_t)
+		if ok1 && ok2 && si1.Dev == si2.Dev {
 			sameDevice = true
 		}
 	}

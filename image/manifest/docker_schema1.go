@@ -111,8 +111,8 @@ func Schema1FromComponents(ref reference.Named, fsLayers []Schema1FSLayers, hist
 
 // Schema1Clone creates a copy of the supplied Schema1 manifest.
 func Schema1Clone(src *Schema1) *Schema1 {
-	copy := *src
-	return &copy
+	copied := *src
+	return &copied
 }
 
 // initialize initializes ExtractedV1Compatibility and verifies invariants, so that the rest of this code can assume a minimally healthy manifest.

@@ -163,7 +163,11 @@ func WriteFileFlagsFromTarHeader(path string, hdr *tar.Header) error {
 func resetImmutable(path string, fi *os.FileInfo) error {
 	var flags uint32
 	if fi != nil {
-		flags = (*fi).Sys().(*syscall.Stat_t).Flags
+		st, ok := (*fi).Sys().(*syscall.Stat_t)
+		if !ok {
+			return fmt.Errorf("expected *syscall.Stat_t, got %T", (*fi).Sys())
+		}
+		flags = st.Flags
 	} else {
 		st, err := system.Lstat(path)
 		if err != nil {

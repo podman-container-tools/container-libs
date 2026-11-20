@@ -45,10 +45,7 @@ func initCache(sizeCache int) (*cacheFile, string, string, *bloomFilter) {
 		d := digester.Digest().String()
 		digestLen = len(d)
 		presentDigest = d
-		tag, err := appendTag([]byte(d), 0, 0)
-		if err != nil {
-			panic(err)
-		}
+		tag := appendTag([]byte(d), 0, 0)
 		tagLen = len(tag)
 		tags = append(tags, tag)
 		bd, err := makeBinaryDigest(d)

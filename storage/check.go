@@ -686,11 +686,19 @@ func (s *store) Check(options *CheckOptions) (CheckReport, error) {
 }
 
 func roLayerStoreIsReallyReadWrite(store roLayerStore) bool {
-	return store.(*layerStore).lockfile.IsReadWrite()
+	ls, ok := store.(*layerStore)
+	if !ok {
+		return false
+	}
+	return ls.lockfile.IsReadWrite()
 }
 
 func roImageStoreIsReallyReadWrite(store roImageStore) bool {
-	return store.(*imageStore).lockfile.IsReadWrite()
+	is, ok := store.(*imageStore)
+	if !ok {
+		return false
+	}
+	return is.lockfile.IsReadWrite()
 }
 
 // Repair removes items which are themselves damaged, or which depend on items which are damaged.
@@ -776,7 +784,7 @@ func (s *store) Repair(report CheckReport, options *RepairOptions) []error {
 			// logic worry about telling the storage driver to delete the layer.
 			if errors.Is(reportedErr, ErrLayerUnaccounted) {
 				if err = s.graphDriver.Remove(id); err != nil {
-					err = fmt.Errorf("deleting storage layer %s: %v", id, err)
+					err = fmt.Errorf("deleting storage layer %s: %w", id, err)
 				} else {
 					logrus.Debugf("deleted storage layer %s", id)
 				}

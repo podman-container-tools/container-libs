@@ -152,7 +152,7 @@ func handleErrorResponse(resp *http.Response) error {
 		fallthrough
 	case resp.StatusCode >= 400 && resp.StatusCode < 500:
 		err := parseHTTPErrorResponse(resp.StatusCode, resp.Body)
-		if uErr, ok := err.(*unexpectedHTTPResponseError); ok && resp.StatusCode == 401 {
+		if uErr, ok := err.(*unexpectedHTTPResponseError); ok && resp.StatusCode == http.StatusUnauthorized {
 			return errcode.ErrorCodeUnauthorized.WithDetail(uErr.Response)
 		}
 		return err

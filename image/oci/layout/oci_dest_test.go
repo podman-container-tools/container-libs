@@ -85,7 +85,9 @@ func TestPutManifestAppendsToExistingManifest(t *testing.T) {
 	ociRef2, err := NewReference(tmpDir, "new-image")
 	assert.NoError(t, err)
 
-	putTestManifest(t, ociRef2.(ociReference), tmpDir)
+	ociRef2Typed, ok := ociRef2.(ociReference)
+	require.True(t, ok)
+	putTestManifest(t, ociRef2Typed, tmpDir)
 
 	index, err = destGetIndex(ociRef)
 	assert.NoError(t, err)

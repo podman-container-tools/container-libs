@@ -17,7 +17,10 @@ func atime(t *testing.T, file string) time.Time {
 		t.Fatal(err)
 	}
 
-	stat := fi.Sys().(*syscall.Stat_t)
+	stat, ok := fi.Sys().(*syscall.Stat_t)
+	if !ok {
+		t.Fatalf("expected *syscall.Stat_t, got %T", fi.Sys())
+	}
 	return time.Unix(stat.Atim.Unix())
 }
 

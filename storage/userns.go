@@ -24,7 +24,7 @@ import (
 // possible to use an arbitrary entry in /etc/sub*id.
 // Differently, if the username is not specified for root users, a
 // default name is used.
-func getAdditionalSubIDs(username string) (*idSet, *idSet, error) {
+func getAdditionalSubIDs(username string) (*idSet, *idSet) {
 	var uids, gids *idSet
 
 	if unshare.IsRootless() {
@@ -51,26 +51,23 @@ func getAdditionalSubIDs(username string) (*idSet, *idSet, error) {
 		uids = getHostIDs(mappings.UIDs())
 		gids = getHostIDs(mappings.GIDs())
 	}
-	return uids, gids, nil
+	return uids, gids
 }
 
 // getAvailableIDs returns the list of ranges that are usable by the current user.
 // When running as root, it looks up the additional IDs assigned to the specified user.
 // When running as rootless, the mappings assigned to the unprivileged user are converted
 // to the IDs inside of the initial rootless user namespace.
-func (s *store) getAvailableIDs() (*idSet, *idSet, error) {
+func (s *store) getAvailableIDs() (*idSet, *idSet) {
 	if s.additionalUIDs == nil {
-		uids, gids, err := getAdditionalSubIDs(s.autoUsernsUser)
-		if err != nil {
-			return nil, nil, err
-		}
+		uids, gids := getAdditionalSubIDs(s.autoUsernsUser)
 		// Store the result so we don't need to look it up again next time
 		s.additionalUIDs, s.additionalGIDs = uids, gids
 	}
 
 	if !unshare.IsRootless() {
 		// No mapping to inner namespace needed
-		return s.additionalUIDs, s.additionalGIDs, nil
+		return s.additionalUIDs, s.additionalGIDs
 	}
 
 	// We are already inside of the rootless user namespace.
@@ -78,7 +75,7 @@ func (s *store) getAvailableIDs() (*idSet, *idSet, error) {
 	// inside of the rootless userns.
 	u := newIDSet([]interval{{start: 1, end: s.additionalUIDs.size() + 1}})
 	g := newIDSet([]interval{{start: 1, end: s.additionalGIDs.size() + 1}})
-	return u, g, nil
+	return u, g
 }
 
 // nobodyUser returns the UID and GID of the "nobody" user.  Hardcode its value
@@ -252,10 +249,7 @@ func (s *store) getAutoUserNS(options *types.AutoUserNsOptions, image *Image, rl
 		initialSize = options.InitialSize
 	}
 
-	availableUIDs, availableGIDs, err := s.getAvailableIDs()
-	if err != nil {
-		return nil, nil, fmt.Errorf("cannot read mappings: %w", err)
-	}
+	availableUIDs, availableGIDs := s.getAvailableIDs()
 
 	// Look at every container that is using a user namespace and store
 	// the intervals that are already used.

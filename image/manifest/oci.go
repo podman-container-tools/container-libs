@@ -44,7 +44,8 @@ func SupportedOCI1MediaType(m string) error {
 	switch m {
 	case imgspecv1.MediaTypeDescriptor, imgspecv1.MediaTypeImageConfig,
 		imgspecv1.MediaTypeImageLayer, imgspecv1.MediaTypeImageLayerGzip, imgspecv1.MediaTypeImageLayerZstd,
-		imgspecv1.MediaTypeImageLayerNonDistributable, imgspecv1.MediaTypeImageLayerNonDistributableGzip, imgspecv1.MediaTypeImageLayerNonDistributableZstd, //nolint:staticcheck // NonDistributable layers are deprecated, but we want to continue to support manipulating pre-existing images.
+		// NonDistributable layers are deprecated, but we want to continue to support manipulating pre-existing images.
+		imgspecv1.MediaTypeImageLayerNonDistributable, imgspecv1.MediaTypeImageLayerNonDistributableGzip, imgspecv1.MediaTypeImageLayerNonDistributableZstd,
 		imgspecv1.MediaTypeImageManifest,
 		imgspecv1.MediaTypeLayoutHeader,
 		ociencspec.MediaTypeLayerEnc, ociencspec.MediaTypeLayerGzipEnc:

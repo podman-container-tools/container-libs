@@ -116,14 +116,14 @@ func (r *Runtime) Load(ctx context.Context, path string, options *LoadOptions) (
 			return nil, fmt.Errorf("no space left on device%.0w", err)
 		}
 
-		loadErrors = append(loadErrors, fmt.Errorf("%s: %v", transportName, err))
+		loadErrors = append(loadErrors, fmt.Errorf("%s: %w", transportName, err))
 	}
 
 	// Give a decent error message if nothing above worked.
 	//nolint:staticcheck // We want the colon here for the multiline error.
 	loadError := errors.New("payload does not match any of the supported image formats:")
 	for _, err := range loadErrors {
-		loadError = fmt.Errorf("%v\n * %v", loadError, err)
+		loadError = errors.Join(loadError, fmt.Errorf(" * %w", err))
 	}
 
 	return nil, loadError

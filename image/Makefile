@@ -75,11 +75,11 @@ test:
 
 .PHONY: fmt
 fmt:
-	golangci-lint fmt
+	golangci-lint fmt --config ../.golangci.yml
 
 .PHONY: lint
 lint:
-	golangci-lint run --build-tags "$(BUILDTAGS)"
+	golangci-lint run --config ../.golangci.yml --build-tags "$(BUILDTAGS)"
 
 .PHONY: tidy-in-container
 tidy-in-container:

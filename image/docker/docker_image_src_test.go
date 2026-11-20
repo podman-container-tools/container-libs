@@ -321,7 +321,7 @@ func TestBufferedNetworkReader(t *testing.T) {
 	reader := makeBufferedNetworkReader(&readerWithDataAndError{
 		data: bytes.Repeat([]byte("x"), 16*1024),
 		err:  readErr,
-	}, 1, 16*1024)
+	}, 1)
 	defer reader.Close()
 
 	buf := make([]byte, 4*1024)
@@ -352,7 +352,7 @@ func TestBufferedNetworkReaderMultipart(t *testing.T) {
 	reader := makeBufferedNetworkReader(&readerWithDataAndError{
 		data: body,
 		err:  errors.New("read error"),
-	}, 1, 16*1024)
+	}, 1)
 	defer reader.Close()
 
 	mr := multipart.NewReader(bufio.NewReaderSize(reader, 4*1024), boundary)

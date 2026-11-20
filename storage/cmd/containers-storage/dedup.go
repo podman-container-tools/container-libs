@@ -31,7 +31,7 @@ func dedupCmd(flags *mflag.FlagSet, action string, m storage.Store, args []strin
 			_, err2 := outputJSON(err)
 			return 1, err2 // Note that err2 is usually nil
 		}
-		return 1, fmt.Errorf("%s: %+v", action, err)
+		return 1, fmt.Errorf("%s: %w", action, err)
 	}
 	if jsonOutput {
 		return outputJSON(res)

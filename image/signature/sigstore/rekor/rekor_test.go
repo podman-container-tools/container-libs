@@ -19,8 +19,8 @@ import (
 )
 
 func Test_rekorUploadKeyOrCert(t *testing.T) {
-	REKOR_SERVER := os.Getenv("REKOR_SERVER_URL")
-	if REKOR_SERVER == "" {
+	rekorServer := os.Getenv("REKOR_SERVER_URL")
+	if rekorServer == "" {
 		t.Skip("REKOR_SERVER_URL not set or empty. This test requires a proper rekor server to run against, use signature/sigstore/rekor/scripts/start-rekor.sh to set one up quickly")
 	}
 
@@ -32,7 +32,7 @@ func Test_rekorUploadKeyOrCert(t *testing.T) {
 	require.NoError(t, err)
 
 	// server needs a moment to set to retry a bit
-	resp, err := retryablehttp.Get(REKOR_SERVER + "/api/v1/log/publicKey")
+	resp, err := retryablehttp.Get(rekorServer + "/api/v1/log/publicKey")
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, resp.StatusCode, "unexpected status code from rekor server")
 
@@ -92,7 +92,7 @@ func Test_rekorUploadKeyOrCert(t *testing.T) {
 			wantErr: "Rekor /api/v1/log/entries failed: bad request (400), {Code:400 Message:error processing entry: verifying signature: invalid signature when validating ASN.1 encoded signature}",
 		},
 	}
-	u, err := url.Parse(REKOR_SERVER)
+	u, err := url.Parse(rekorServer)
 	require.NoError(t, err)
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

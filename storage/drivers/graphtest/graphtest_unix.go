@@ -59,9 +59,10 @@ func newGraphDriver(t testing.TB, name string, options []string, root string, ru
 }
 
 func newDriver(t testing.TB, name string, options []string) *Driver {
-	root, err := os.MkdirTemp("", "storage-graphtest-")
+	// Intentionally not t.TempDir(): the driver may persist across test functions.
+	root, err := os.MkdirTemp("", "storage-graphtest-") //nolint:usetesting
 	require.NoError(t, err)
-	runRoot, err := os.MkdirTemp("", "storage-graphtest-")
+	runRoot, err := os.MkdirTemp("", "storage-graphtest-") //nolint:usetesting
 	require.NoError(t, err)
 
 	defer func() {

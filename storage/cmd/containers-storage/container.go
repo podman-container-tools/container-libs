@@ -182,7 +182,7 @@ func containerParentOwners(flags *mflag.FlagSet, action string, m storage.Store,
 	for _, container := range matched {
 		uids, gids, err := m.ContainerParentOwners(container.ID)
 		if err != nil {
-			return 1, fmt.Errorf("ContainerParentOwner: %+v", err)
+			return 1, fmt.Errorf("ContainerParentOwner: %w", err)
 		}
 		if jsonOutput {
 			mappings := struct {

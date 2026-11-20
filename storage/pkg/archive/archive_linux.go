@@ -237,7 +237,10 @@ func (o overlayWhiteoutConverter) ConvertRead(hdr *tar.Header, path string) (boo
 }
 
 func isWhiteOut(stat os.FileInfo) bool {
-	s := stat.Sys().(*syscall.Stat_t)
+	s, ok := stat.Sys().(*syscall.Stat_t)
+	if !ok {
+		return false
+	}
 	return major(uint64(s.Rdev)) == 0 && minor(uint64(s.Rdev)) == 0 //nolint:unconvert
 }
 

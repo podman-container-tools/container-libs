@@ -4,6 +4,7 @@ package directory
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"syscall"
@@ -57,7 +58,11 @@ func Usage(dir string) (*DiskUsage, error) {
 		}
 
 		// Check inode to only count the sizes of files with multiple hard links once.
-		inode := fileInfo.Sys().(*syscall.Stat_t).Ino
+		stat, ok := fileInfo.Sys().(*syscall.Stat_t)
+		if !ok {
+			return fmt.Errorf("expected *syscall.Stat_t, got %T", fileInfo.Sys())
+		}
+		inode := stat.Ino
 		if _, exists := data[inode]; exists {
 			return nil
 		}

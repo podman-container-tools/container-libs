@@ -452,8 +452,8 @@ func modifiedLayerInfos(t *testing.T, input []types.BlobInfo) ([]types.BlobInfo,
 		modified = append(modified, b2)
 	}
 
-	copy := slices.Clone(modified)
-	return modified, copy
+	cloned := slices.Clone(modified)
+	return modified, cloned
 }
 
 func TestManifestSchema2UpdatedImage(t *testing.T) {

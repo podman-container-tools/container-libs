@@ -137,7 +137,7 @@ func BenchmarkCached(b *testing.B) {
 }
 
 // walkDir recursively descends fullPath == parentRoot/basename, calling walkDirFn.
-// This is an internal implementatino detail of rootedWalkDir.
+// This is an internal implementation detail of rootedWalkDir.
 func rootedWalkDirFn(cache *Cache, fullPath string, parentRoot *os.Root, basename string, d fs.DirEntry, walkDirFn func(fsPath string, parentRoot *os.Root, basename string, d fs.DirEntry, err error) error) error {
 	if err := walkDirFn(fullPath, parentRoot, basename, d, nil); err != nil || !d.IsDir() {
 		if err == fs.SkipDir && d.IsDir() {

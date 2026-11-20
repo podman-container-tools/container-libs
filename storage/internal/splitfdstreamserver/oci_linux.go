@@ -117,7 +117,7 @@ func (i *ociInterface) getLayer(ctx context.Context, call varlink.Call) error {
 
 	layer, err := i.backend.OpenLayer(layerID)
 	if err != nil {
-		return replyOciError(ctx, call, "InternalError", err.Error())
+		return replyOciInternalError(ctx, call, err.Error())
 	}
 	// The lease takes over layer once it has started; until then closing it
 	// is up to us.
@@ -133,20 +133,20 @@ func (i *ociInterface) getLayer(ctx context.Context, call varlink.Call) error {
 	onlyWorldReadable := params.Params.ConsumerHasCapDACOverride == nil || !*params.Params.ConsumerHasCapDACOverride
 	streamFile, err := i.buildStream(layerID, layer, onlyWorldReadable)
 	if err != nil {
-		return replyOciError(ctx, call, "InternalError", err.Error())
+		return replyOciInternalError(ctx, call, err.Error())
 	}
 	defer streamFile.Close()
 
 	l, keepW, err := newLease(layer)
 	if err != nil {
-		return replyOciError(ctx, call, "InternalError", err.Error())
+		return replyOciInternalError(ctx, call, err.Error())
 	}
 	// The lease ends once every copy of keepW is closed: ours on the way
 	// out of here, and the consumer's when it is done with the layer, or
 	// right away if the reply never reaches it.
 	defer keepW.Close()
 	if !i.server.startLease(l) {
-		return replyOciError(ctx, call, "InternalError", "the store is no longer serving layers")
+		return replyOciInternalError(ctx, call, "the store is no longer serving layers")
 	}
 	leaseStarted = true
 
@@ -206,9 +206,9 @@ func replyNoSuchLayerIndex(ctx context.Context, call varlink.Call, index int) er
 	return call.ReplyError(ctx, interfaceName+".NoSuchLayerIndex", &errorParams{LayerIndex: index})
 }
 
-func replyOciError(ctx context.Context, call varlink.Call, name, message string) error {
+func replyOciInternalError(ctx context.Context, call varlink.Call, message string) error {
 	type errorParams struct {
 		Message string `json:"message"`
 	}
-	return call.ReplyError(ctx, interfaceName+"."+name, &errorParams{Message: message})
+	return call.ReplyError(ctx, interfaceName+".InternalError", &errorParams{Message: message})
 }

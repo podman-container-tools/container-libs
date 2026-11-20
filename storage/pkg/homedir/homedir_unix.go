@@ -120,7 +120,7 @@ func GetConfigHome() (string, error) {
 			if err != nil {
 				rootlessConfigHomeDirError = err
 				return
-			} else if int(st.Sys().(*syscall.Stat_t).Uid) == os.Geteuid() {
+			} else if stat, ok := st.Sys().(*syscall.Stat_t); ok && int(stat.Uid) == os.Geteuid() {
 				cfgHomeDir = tmpDir
 			} else {
 				rootlessConfigHomeDirError = fmt.Errorf("path %q exists and it is not owned by the current user", tmpDir)
@@ -158,8 +158,10 @@ func GetRuntimeDir() (string, error) {
 				logrus.Debug(err)
 			}
 			st, err := os.Lstat(tmpDir)
-			if err == nil && int(st.Sys().(*syscall.Stat_t).Uid) == os.Geteuid() && isWriteableOnlyByOwner(st.Mode().Perm()) {
-				runtimeDir = tmpDir
+			if err == nil {
+				if stat, ok := st.Sys().(*syscall.Stat_t); ok && int(stat.Uid) == os.Geteuid() && isWriteableOnlyByOwner(st.Mode().Perm()) {
+					runtimeDir = tmpDir
+				}
 			}
 		}
 		if runtimeDir == "" {
@@ -168,8 +170,13 @@ func GetRuntimeDir() (string, error) {
 				logrus.Debug(err)
 			}
 			st, err := os.Lstat(tmpDir)
-			if err == nil && int(st.Sys().(*syscall.Stat_t).Uid) == os.Geteuid() && isWriteableOnlyByOwner(st.Mode().Perm()) {
-				runtimeDir = tmpDir
+			if err == nil {
+				if stat, ok := st.Sys().(*syscall.Stat_t); ok && int(stat.Uid) == os.Geteuid() && isWriteableOnlyByOwner(st.Mode().Perm()) {
+					runtimeDir = tmpDir
+				} else {
+					rootlessRuntimeDirError = fmt.Errorf("path %q exists and it is not writeable only by the current user", tmpDir)
+					return
+				}
 			} else {
 				rootlessRuntimeDirError = fmt.Errorf("path %q exists and it is not writeable only by the current user", tmpDir)
 				return

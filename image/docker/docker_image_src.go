@@ -227,10 +227,10 @@ func newPullClient(sys *types.SystemContext, logicalRef dockerReference, pullSou
 	endpointSys := sys
 	// sys.DockerAuthConfig does not explicitly specify a registry; we must not blindly send the credentials intended for the primary endpoint to mirrors.
 	if endpointSys != nil && endpointSys.DockerAuthConfig != nil && reference.Domain(physicalRef.ref) != reference.Domain(logicalRef.ref) {
-		copy := *endpointSys
-		copy.DockerAuthConfig = nil
-		copy.DockerBearerRegistryToken = ""
-		endpointSys = &copy
+		copied := *endpointSys
+		copied.DockerAuthConfig = nil
+		copied.DockerBearerRegistryToken = ""
+		endpointSys = &copied
 	}
 
 	client, err := newDockerClientFromRef(endpointSys, physicalRef, registryConfig, false, "pull")
@@ -336,7 +336,7 @@ func splitHTTP200ResponseToPartial(streams chan io.ReadCloser, errs chan error, 
 	defer close(errs)
 	currentOffset := uint64(0)
 
-	body = makeBufferedNetworkReader(body, 64, 16384)
+	body = makeBufferedNetworkReader(body, 64)
 	defer body.Close()
 	for _, c := range chunks {
 		if c.Offset != currentOffset {
@@ -384,7 +384,7 @@ func handle206Response(streams chan io.ReadCloser, errs chan error, body io.Read
 		body.Close()
 		return
 	}
-	buffered := makeBufferedNetworkReader(body, 64, 16384)
+	buffered := makeBufferedNetworkReader(body, 64)
 	defer buffered.Close()
 	mr := multipart.NewReader(buffered, boundary)
 	parts := 0
@@ -1020,13 +1020,13 @@ func deleteImage(ctx context.Context, sys *types.SystemContext, ref dockerRefere
 
 	// When retrieving the digest from a registry >= 2.3 use the following header:
 	//   "Accept": "application/vnd.docker.distribution.manifest.v2+json"
-	delete, err := c.makeRequest(ctx, http.MethodDelete, deletePath, headers, nil, v2Auth, nil)
+	deleteResp, err := c.makeRequest(ctx, http.MethodDelete, deletePath, headers, nil, v2Auth, nil)
 	if err != nil {
 		return err
 	}
-	defer delete.Body.Close()
-	if delete.StatusCode != http.StatusAccepted {
-		return fmt.Errorf("deleting %v: %w", ref.ref, registryHTTPResponseToError(delete))
+	defer deleteResp.Body.Close()
+	if deleteResp.StatusCode != http.StatusAccepted {
+		return fmt.Errorf("deleting %v: %w", ref.ref, registryHTTPResponseToError(deleteResp))
 	}
 
 	for i := 0; ; i++ {
@@ -1136,7 +1136,9 @@ func (n *bufferedNetworkReader) Read(p []byte) (int, error) {
 	return n.read(p)
 }
 
-func makeBufferedNetworkReader(stream io.ReadCloser, nBuffers, bufferSize uint) *bufferedNetworkReader {
+const bufferedNetworkReaderBufferSize = 16384
+
+func makeBufferedNetworkReader(stream io.ReadCloser, nBuffers uint) *bufferedNetworkReader {
 	br := bufferedNetworkReader{
 		stream:      stream,
 		emptyBuffer: make(chan *bufferedNetworkReaderBuffer, nBuffers),
@@ -1150,7 +1152,7 @@ func makeBufferedNetworkReader(stream io.ReadCloser, nBuffers, bufferSize uint) 
 
 	for range nBuffers {
 		b := bufferedNetworkReaderBuffer{
-			data: make([]byte, bufferSize),
+			data: make([]byte, bufferedNetworkReaderBufferSize),
 		}
 		br.emptyBuffer <- &b
 	}

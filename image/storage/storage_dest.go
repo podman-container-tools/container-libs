@@ -255,7 +255,7 @@ func (s *storageImageDestination) PutBlobWithOptions(ctx context.Context, stream
 		return info, nil
 	}
 
-	return info, s.queueOrCommit(*options.LayerIndex, addedLayerInfo{
+	return info, s.queueOrCommit(ctx, *options.LayerIndex, addedLayerInfo{
 		digest:     info.Digest,
 		emptyLayer: options.EmptyLayer,
 	})
@@ -333,6 +333,10 @@ func (s *storageImageDestination) putBlobToPendingFile(stream io.Reader, blobinf
 	}, nil
 }
 
+// zstdFetcher adapts BlobChunkAccessor to chunked.GetBlobAt, which has no context
+// parameter, so the pull context must be stored on the adapter.
+//
+//nolint:containedctx
 type zstdFetcher struct {
 	chunkAccessor private.BlobChunkAccessor
 	ctx           context.Context
@@ -393,7 +397,7 @@ func (s *storageImageDestination) PutBlobPartial(ctx context.Context, chunkAcces
 	// but we will still trigger the fall back here, and we will still enforce a DiffID match, so that the set of accepted images
 	// is the same in both cases, and so that users are not tempted to set the c/storage option to allow accepting some invalid images.)
 	var untrustedDiffID digest.Digest // "" if unknown
-	udid, err := s.untrustedLayerDiffID(options.LayerIndex)
+	udid, err := s.untrustedLayerDiffID(ctx, options.LayerIndex)
 	if err != nil {
 		if errors.Is(err, errUntrustedLayerDiffIDNotYetAvailable) {
 			// PutBlobPartial is a private API, so all callers are within c/image, and should have called
@@ -499,13 +503,14 @@ func (s *storageImageDestination) PutBlobPartial(ctx context.Context, chunkAcces
 	}
 
 	succeeded = true
-	return private.UploadedBlob{
-		Digest: blobDigest,
-		Size:   srcInfo.Size,
-	}, s.queueOrCommit(options.LayerIndex, addedLayerInfo{
+	err = s.queueOrCommit(ctx, options.LayerIndex, addedLayerInfo{
 		digest:     blobDigest,
 		emptyLayer: options.EmptyLayer,
 	})
+	return private.UploadedBlob{
+		Digest: blobDigest,
+		Size:   srcInfo.Size,
+	}, err
 }
 
 // TryReusingBlobWithOptions checks whether the transport already contains, or can efficiently reuse, a blob, and if so, applies it to the current destination
@@ -517,12 +522,12 @@ func (s *storageImageDestination) TryReusingBlobWithOptions(ctx context.Context,
 	if !impl.OriginalCandidateMatchesTryReusingBlobOptions(options) {
 		return false, private.ReusedBlob{}, nil
 	}
-	reused, info, err := s.tryReusingBlobAsPending(blobinfo.Digest, blobinfo.Size, &options)
+	reused, info, err := s.tryReusingBlobAsPending(ctx, blobinfo.Digest, blobinfo.Size, &options)
 	if err != nil || !reused || options.LayerIndex == nil {
 		return reused, info, err
 	}
 
-	return reused, info, s.queueOrCommit(*options.LayerIndex, addedLayerInfo{
+	return reused, info, s.queueOrCommit(ctx, *options.LayerIndex, addedLayerInfo{
 		digest:     info.Digest,
 		emptyLayer: options.EmptyLayer,
 	})
@@ -530,7 +535,7 @@ func (s *storageImageDestination) TryReusingBlobWithOptions(ctx context.Context,
 
 // tryReusingBlobAsPending implements TryReusingBlobWithOptions for (blobDigest, size or -1), filling s.blobDiffIDs and other metadata.
 // The caller must arrange the blob to be eventually committed using s.commitLayer().
-func (s *storageImageDestination) tryReusingBlobAsPending(blobDigest digest.Digest, size int64, options *private.TryReusingBlobOptions) (bool, private.ReusedBlob, error) {
+func (s *storageImageDestination) tryReusingBlobAsPending(ctx context.Context, blobDigest digest.Digest, size int64, options *private.TryReusingBlobOptions) (bool, private.ReusedBlob, error) {
 	if blobDigest == "" {
 		return false, private.ReusedBlob{}, errors.New(`Can not check for a blob with unknown digest`)
 	}
@@ -543,7 +548,7 @@ func (s *storageImageDestination) tryReusingBlobAsPending(blobDigest digest.Dige
 			return false, private.ReusedBlob{}, fmt.Errorf("Can not check for a blob with invalid digest: %w", err)
 		}
 		// Only consider using TOCDigest if we can avoid ambiguous image “views”, see the detailed comment in PutBlobPartial.
-		_, err := s.untrustedLayerDiffID(*options.LayerIndex)
+		_, err := s.untrustedLayerDiffID(ctx, *options.LayerIndex)
 		if err != nil {
 			if errors.Is(err, errUntrustedLayerDiffIDNotYetAvailable) {
 				// options.TOCDigest is a private API, so all callers are within c/image, and should have called
@@ -893,7 +898,7 @@ func (s *storageImageDestination) getConfigBlob(info types.BlobInfo) ([]byte, er
 // queueOrCommit queues the specified layer to be committed to the storage.
 // If no other goroutine is already committing layers, the layer and all
 // subsequent layers (if already queued) will be committed to the storage.
-func (s *storageImageDestination) queueOrCommit(index int, info addedLayerInfo) error {
+func (s *storageImageDestination) queueOrCommit(ctx context.Context, index int, info addedLayerInfo) error {
 	// NOTE: whenever the code below is touched, make sure that all code
 	// paths unlock the lock and to unlock it exactly once.
 	//
@@ -929,7 +934,7 @@ func (s *storageImageDestination) queueOrCommit(index int, info addedLayerInfo) 
 		}
 		s.lock.Unlock()
 		// Note: commitLayer locks on-demand.
-		if stopQueue, err := s.commitLayer(index, info, -1); stopQueue || err != nil {
+		if stopQueue, err := s.commitLayer(ctx, index, info, -1); stopQueue || err != nil {
 			return err
 		}
 		s.lock.Lock()
@@ -953,7 +958,7 @@ func (s *storageImageDestination) queueOrCommit(index int, info addedLayerInfo) 
 // Caution: this function must be called without holding `s.lock`.  Callers
 // must guarantee that, at any given time, at most one goroutine may execute
 // `commitLayer()`.
-func (s *storageImageDestination) commitLayer(index int, info addedLayerInfo, size int64) (bool, error) {
+func (s *storageImageDestination) commitLayer(ctx context.Context, index int, info addedLayerInfo, size int64) (bool, error) {
 	if _, alreadyCommitted := s.indexToStorageID[index]; alreadyCommitted {
 		return false, nil
 	}
@@ -993,7 +998,7 @@ func (s *storageImageDestination) commitLayer(index int, info addedLayerInfo, si
 		logrus.Debugf("looking for diffID for blob=%+v", info.digest)
 
 		// Use tryReusingBlobAsPending, not the top-level TryReusingBlobWithOptions, to prevent recursion via queueOrCommit.
-		has, _, err := s.tryReusingBlobAsPending(info.digest, size, &private.TryReusingBlobOptions{
+		has, _, err := s.tryReusingBlobAsPending(ctx, info.digest, size, &private.TryReusingBlobOptions{
 			Cache:         none.NoCache,
 			CanSubstitute: false,
 		})
@@ -1015,7 +1020,7 @@ func (s *storageImageDestination) commitLayer(index int, info addedLayerInfo, si
 	// Ensure that we always see the same “view” of a layer, as identified by the layer’s uncompressed digest,
 	// unless the user has explicitly opted out of this in storage.conf: see the more detailed explanation in PutBlobPartial.
 	if trusted.diffID != "" {
-		untrustedDiffID, err := s.untrustedLayerDiffID(index)
+		untrustedDiffID, err := s.untrustedLayerDiffID(ctx, index)
 		if err != nil {
 			if errors.Is(err, errUntrustedLayerDiffIDNotYetAvailable) {
 				logrus.Debugf("Skipping commit for layer %d, manifest not yet available for DiffID check", index)
@@ -1050,7 +1055,7 @@ func (s *storageImageDestination) commitLayer(index int, info addedLayerInfo, si
 		return false, nil
 	}
 
-	layer, err := s.createNewLayer(index, trusted, parentLayer, id)
+	layer, err := s.createNewLayer(ctx, index, trusted, parentLayer, id)
 	if err != nil {
 		return false, err
 	}
@@ -1082,7 +1087,7 @@ func layerID(parentID string, trusted trustedLayerIdentityData) string {
 
 // createNewLayer creates a new layer newLayerID for (index, trusted) on top of parentLayer (which may be "").
 // If the layer cannot be committed yet, the function returns (nil, nil).
-func (s *storageImageDestination) createNewLayer(index int, trusted trustedLayerIdentityData, parentLayer, newLayerID string) (*storage.Layer, error) {
+func (s *storageImageDestination) createNewLayer(ctx context.Context, index int, trusted trustedLayerIdentityData, parentLayer, newLayerID string) (*storage.Layer, error) {
 	s.lock.Lock()
 	diffOutput, ok := s.lockProtected.diffOutputs[index]
 	s.lock.Unlock()
@@ -1098,7 +1103,7 @@ func (s *storageImageDestination) createNewLayer(index int, trusted trustedLayer
 
 		var untrustedUncompressedDigest digest.Digest
 		if diffOutput.UncompressedDigest == "" {
-			d, err := s.untrustedLayerDiffID(index)
+			d, err := s.untrustedLayerDiffID(ctx, index)
 			if err != nil {
 				if errors.Is(err, errUntrustedLayerDiffIDNotYetAvailable) {
 					logrus.Debugf("Skipping commit for layer %q, manifest not yet available", newLayerID)
@@ -1354,7 +1359,7 @@ func (e untrustedLayerDiffIDUnknownError) Error() string {
 //
 // WARNING: This function does not even validate that the returned digest has a valid format.
 // WARNING: We don’t _always_ validate this DiffID value against the layer contents; it must not be used for any deduplication.
-func (s *storageImageDestination) untrustedLayerDiffID(layerIndex int) (digest.Digest, error) {
+func (s *storageImageDestination) untrustedLayerDiffID(ctx context.Context, layerIndex int) (digest.Digest, error) {
 	// At this point, we are either inside the multi-threaded scope of HasThreadSafePutBlob,
 	// nothing is writing to s.manifest yet, and s.untrustedDiffIDValues might have been set
 	// by NoteOriginalOCIConfig and are not being updated any more;
@@ -1369,7 +1374,6 @@ func (s *storageImageDestination) untrustedLayerDiffID(layerIndex int) (digest.D
 			return "", errUntrustedLayerDiffIDNotYetAvailable
 		}
 
-		ctx := context.Background() // This is all happening in memory, no need to worry about cancellation.
 		unparsed := image.UnparsedInstance(newUncommittedImageSource(s), nil)
 		sourced, err := image.FromUnparsedImage(ctx, nil, unparsed)
 		if err != nil {
@@ -1458,7 +1462,7 @@ func (s *storageImageDestination) CommitWithOptions(ctx context.Context, options
 
 	// Extract, commit, or find the layers.
 	for i, blob := range layerBlobs {
-		if stopQueue, err := s.commitLayer(i, addedLayerInfo{
+		if stopQueue, err := s.commitLayer(ctx, i, addedLayerInfo{
 			digest:     blob.Digest,
 			emptyLayer: blob.EmptyLayer,
 		}, blob.Size); err != nil {

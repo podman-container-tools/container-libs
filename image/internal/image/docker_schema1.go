@@ -107,14 +107,14 @@ func (m *manifestSchema1) UpdatedImageNeedsLayerDiffIDs(options types.ManifestUp
 // UpdatedImage returns a types.Image modified according to options.
 // This does not change the state of the original Image object.
 func (m *manifestSchema1) UpdatedImage(ctx context.Context, options types.ManifestUpdateOptions) (types.Image, error) {
-	copy := manifestSchema1{m: manifest.Schema1Clone(m.m)}
+	copied := manifestSchema1{m: manifest.Schema1Clone(m.m)}
 
 	// We have 2 MIME types for schema 1, which are basically equivalent (even the un-"Signed" MIME type will be rejected if there isn’t a signature; so,
 	// handle conversions between them by doing nothing.
 	if options.ManifestMIMEType != manifest.DockerV2Schema1MediaType && options.ManifestMIMEType != manifest.DockerV2Schema1SignedMediaType {
 		converted, err := convertManifestIfRequiredWithUpdate(ctx, options, map[string]manifestConvertFn{
-			imgspecv1.MediaTypeImageManifest:  copy.convertToManifestOCI1,
-			manifest.DockerV2Schema2MediaType: copy.convertToManifestSchema2Generic,
+			imgspecv1.MediaTypeImageManifest:  copied.convertToManifestOCI1,
+			manifest.DockerV2Schema2MediaType: copied.convertToManifestSchema2Generic,
 		})
 		if err != nil {
 			return nil, err
@@ -127,20 +127,20 @@ func (m *manifestSchema1) UpdatedImage(ctx context.Context, options types.Manife
 
 	// No conversion required, update manifest
 	if options.LayerInfos != nil {
-		if err := copy.m.UpdateLayerInfos(options.LayerInfos); err != nil {
+		if err := copied.m.UpdateLayerInfos(options.LayerInfos); err != nil {
 			return nil, err
 		}
 	}
 	if options.EmbeddedDockerReference != nil {
-		copy.m.Name = reference.Path(options.EmbeddedDockerReference)
+		copied.m.Name = reference.Path(options.EmbeddedDockerReference)
 		if tagged, isTagged := options.EmbeddedDockerReference.(reference.NamedTagged); isTagged {
-			copy.m.Tag = tagged.Tag()
+			copied.m.Tag = tagged.Tag()
 		} else {
-			copy.m.Tag = ""
+			copied.m.Tag = ""
 		}
 	}
 
-	return memoryImageFromManifest(&copy), nil
+	return memoryImageFromManifest(&copied), nil
 }
 
 // convertToManifestSchema2Generic returns a genericManifest implementation converted to manifest.DockerV2Schema2MediaType.

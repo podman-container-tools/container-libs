@@ -49,18 +49,18 @@ func ParseUintList(val string) (map[int]bool, error) {
 			}
 			availableInts[v] = true
 		} else {
-			min, err := strconv.Atoi(minS)
+			minVal, err := strconv.Atoi(minS)
 			if err != nil {
 				return nil, errInvalidFormat
 			}
-			max, err := strconv.Atoi(maxS)
+			maxVal, err := strconv.Atoi(maxS)
 			if err != nil {
 				return nil, errInvalidFormat
 			}
-			if max < min {
+			if maxVal < minVal {
 				return nil, errInvalidFormat
 			}
-			for i := min; i <= max; i++ {
+			for i := minVal; i <= maxVal; i++ {
 				availableInts[i] = true
 			}
 		}
