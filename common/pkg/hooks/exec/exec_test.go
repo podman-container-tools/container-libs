@@ -166,14 +166,14 @@ func TestRunCancel(t *testing.T) {
 			name:               "context timeout",
 			contextTimeout:     time.Duration(1) * time.Second,
 			expectedStdout:     "waiting\n",
-			expectedHookString: "executing [sh -c echo waiting; sleep 2; echo done]: signal: killed, context deadline exceeded",
+			expectedHookString: "executing [sh -c echo waiting; sleep 2; echo done]: signal: killed\ncontext deadline exceeded",
 			expectedErrorIs:    context.DeadlineExceeded,
 		},
 		{
 			name:               "hook timeout",
 			hookTimeout:        new(1),
 			expectedStdout:     "waiting\n",
-			expectedHookString: "executing [sh -c echo waiting; sleep 2; echo done]: signal: killed, context deadline exceeded",
+			expectedHookString: "executing [sh -c echo waiting; sleep 2; echo done]: signal: killed\ncontext deadline exceeded",
 			expectedErrorIs:    context.DeadlineExceeded,
 		},
 	} {
@@ -213,7 +213,7 @@ func TestRunKillTimeout(t *testing.T) {
 	}
 	err := RunWithOptions(ctx, RunOptions{Hook: hook, State: []byte("{}"), PostKillTimeout: time.Duration(0)})
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
-	assert.Regexp(t, "^(failed to reap process within 0s of the kill signal|executing \\[sh -c sleep 1]: signal: killed), context deadline exceeded$", err)
+	assert.Regexp(t, "^(failed to reap process within 0s of the kill signal|executing \\[sh -c sleep 1]: signal: killed)\ncontext deadline exceeded$", err)
 }
 
 func init() {
