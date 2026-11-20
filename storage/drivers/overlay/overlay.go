@@ -2385,6 +2385,13 @@ func (d *Driver) CommitStagedLayer(id string, sa *tempdir.StagedAddition) error 
 	return sa.Commit(applyDir)
 }
 
+// CompressedBlobPath returns the full file path for storing a preserved
+// compressed blob alongside the extracted layer content.
+// Implements the compressedBlobPathProvider interface in storage/layers.go.
+func (d *Driver) CompressedBlobPath(id string) string {
+	return filepath.Join(d.dir(id), "compressed-blob")
+}
+
 // ApplyDiff applies the new layer into a root
 func (d *Driver) ApplyDiff(id string, options graphdriver.ApplyDiffOpts) (size int64, err error) {
 	applyDir, err := d.getDiffPath(id)
