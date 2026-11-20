@@ -222,6 +222,7 @@ func defaultConfig() (*Config, error) {
 			EnableLabeling:      selinux.GetEnabled(),
 			Env:                 configfile.NewSlice(defaultContainerEnv),
 			EnvHost:             false,
+			EnvMerge:            configfile.Slice{},
 			HTTPProxy:           true,
 			IPCNS:               "shareable",
 			Init:                false,
