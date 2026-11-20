@@ -194,6 +194,9 @@ func (c *chunkedDiffer) convertTarToZstdChunked(destDirectory string, payload *o
 }
 
 func (c *chunkedDiffer) Close() error {
+	if f, ok := c.stream.(*fullBlobFallback); ok {
+		_ = f.Close()
+	}
 	if c.tarSplit != nil {
 		err := c.tarSplit.Close()
 		c.tarSplit = nil
@@ -206,7 +209,7 @@ func (c *chunkedDiffer) Close() error {
 // If it returns an error that matches ErrFallbackToOrdinaryLayerDownload, the caller can
 // retry the operation with a different method.
 // The caller must call Close() on the returned Differ.
-func NewDiffer(ctx context.Context, store storage.Store, blobDigest digest.Digest, blobSize int64, annotations map[string]string, iss ImageSourceSeekable) (graphdriver.Differ, error) {
+func NewDiffer(ctx context.Context, store storage.Store, blobDigest digest.Digest, blobSize int64, annotations map[string]string, iss ImageSourceSeekable) (_ graphdriver.Differ, retErr error) {
 	pullOptions := parsePullOptions(store)
 
 	if !pullOptions.enablePartialImages {
@@ -226,6 +229,15 @@ func NewDiffer(ctx context.Context, store storage.Store, blobDigest digest.Diges
 		}
 		return nil, newErrFallbackToOrdinaryLayerDownload(fmt.Errorf("graph driver %s does not support partial pull", graphDriver.String()))
 	}
+
+	// If the source can't serve partial requests, keep a local copy of the blob (convert_images reuses it if it was already downloaded).
+	fallback := &fullBlobFallback{source: iss, tmpDir: store.GraphRoot(), blobSize: blobSize}
+	iss = fallback
+	defer func() {
+		if retErr != nil {
+			_ = fallback.Close()
+		}
+	}()
 
 	differ, err := getProperDiffer(store, blobDigest, blobSize, annotations, iss, pullOptions)
 	if err != nil {
