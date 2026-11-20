@@ -238,6 +238,17 @@ func (e BadPartialRequestError) Error() string {
 
 var _ error = BadPartialRequestError{} // Disambiguate whether *BadPartialRequestError or BadPartialRequestError is expected to be used, for the ptrtoerror linter.
 
+// FullBlobResponseError is returned by BlobChunkAccessor.GetBlobAt if the server replied to a request
+// for part of a blob (not just a single range starting at offset 0) with the whole blob.
+// The caller can fetch the blob once, and serve the chunks locally.
+type FullBlobResponseError struct{}
+
+func (e FullBlobResponseError) Error() string {
+	return "server returned the full blob for a partial request"
+}
+
+var _ error = FullBlobResponseError{} // Disambiguate whether *FullBlobResponseError or FullBlobResponseError is expected to be used, for the ptrtoerror linter.
+
 // UnparsedImage is an internal extension to the types.UnparsedImage interface.
 type UnparsedImage interface {
 	types.UnparsedImage
