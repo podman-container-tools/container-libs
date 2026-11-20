@@ -2,6 +2,8 @@ version: "2"
 
 run:
   timeout: 5m
+  # gitroot so exclusion paths can target common/image/storage modules.
+  relative-path-mode: gitroot
   build-tags:
     - apparmor
     - seccomp
@@ -15,60 +17,43 @@ formatters:
     - gofumpt
 
 linters:
+  default: standard
   enable:
     - asasalint
-    - asciicheck
     - bidichk
     - bodyclose
-    - canonicalheader
     - containedctx
     - contextcheck
     - copyloopvar
-    - decorder
-    - dupl
-    - dupword
     - durationcheck
+    - errorlint
     - exptostd
     - fatcontext
-    - forbidigo
-    - ginkgolinter
     - gocheckcompilerdirectives
     - gochecksumtype
-    - gocritic
-    - godot
-    - goprintffuncname
-    - gosmopolitan
-    - iface
-    - intrange
     - makezero
-    - mirror
     - misspell
     - modernize
     - nilnesserr
     - nolintlint
     - nosprintfhostport
-    - perfsprint
-    - prealloc
     - predeclared
     - reassign
     - recvcheck
-    - revive
-    - staticcheck
     - unconvert
     - unparam
     - usestdlibvars
     - usetesting
     - wastedassign
-    - whitespace
   settings:
     errcheck:
       check-type-assertions: true
-    gocyclo:
-      min-complexity: 35
-    revive:
-      rules:
-        - name: dot-imports
-          disabled: true
+    errorlint:
+      # See https://golangci-lint.run/usage/linters/#errorlint.
+      # Only allow warnings about not using %w.
+      errorf-multi: false
+      asserts: false
+      comparison: false
     staticcheck:
       checks:
         - all
@@ -81,14 +66,18 @@ linters:
       - std-error-handling
     rules:
       - linters:
-          - dupl
-          - perfsprint
-          - prealloc
-        path: _test\.go
-      - linters:
           - contextcheck
-        path: libimage
+        path: ^common/libimage
         text: LookupImage
+      # c/image uses capitalized error strings by convention.
+      - linters:
+          - staticcheck
+        path: ^image/
+        text: "ST1005:"
+      # go.podman.io/image/v5/copy is a stable public package name; cannot rename.
+      - linters:
+          - predeclared
+        path: ^image/copy/
 
 issues:
   max-issues-per-linter: 0

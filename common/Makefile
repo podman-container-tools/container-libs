@@ -68,11 +68,11 @@ docs:
 
 .PHONY: lint
 lint:
-	golangci-lint run
+	golangci-lint run --config ../.golangci.yml
 
 .PHONY: fmt
 fmt:
-	golangci-lint fmt
+	golangci-lint fmt --config ../.golangci.yml
 
 .PHONY: validate
 validate: lint
