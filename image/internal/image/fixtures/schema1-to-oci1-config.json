@@ -10,6 +10,12 @@
             "KOLLA_INSTALL_METATYPE=rhos",
             "PS1=$(tput bold)($(printenv KOLLA_SERVICE_NAME))$(tput sgr0)[$(id -un)@$(hostname -s) $(pwd)]$ "
         ],
+        "Healthcheck": {
+          "Test": [
+            "CMD-SHELL",
+            "/openstack/healthcheck"
+          ]
+        },
         "Cmd": [
             "kolla_start"
         ],
