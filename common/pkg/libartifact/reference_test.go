@@ -3,6 +3,7 @@ package libartifact
 import (
 	"testing"
 
+	"github.com/opencontainers/go-digest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.podman.io/common/pkg/libartifact/types"
@@ -98,4 +99,14 @@ func TestNewArtifactReference(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestArtifactReference_digestReference(t *testing.T) {
+	ar, err := NewArtifactReference("quay.io/myrepo/myart:latest")
+	require.NoError(t, err)
+
+	d := digest.FromString("artifact-a")
+	s, err := ar.digestReference(d)
+	require.NoError(t, err)
+	assert.Equal(t, "quay.io/myrepo/myart@"+d.String(), s)
 }

@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -57,6 +58,30 @@ func setupTestStore(t *testing.T) (*ArtifactStore, context.Context) {
 	require.NotNil(t, as)
 
 	return as, ctx
+}
+
+func setupRetagTestStore(t *testing.T) *ArtifactStore {
+	t.Helper()
+	storePath := t.TempDir()
+	store, err := NewArtifactStore(storePath, nil)
+	require.NoError(t, err)
+	return store
+}
+
+func writeIndex(t *testing.T, store *ArtifactStore, index specV1.Index) {
+	t.Helper()
+	data, err := json.Marshal(&index)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(store.indexPath(), data, 0o644))
+}
+
+func readIndex(t *testing.T, store *ArtifactStore) specV1.Index {
+	t.Helper()
+	data, err := os.ReadFile(store.indexPath())
+	require.NoError(t, err)
+	var index specV1.Index
+	require.NoError(t, json.Unmarshal(data, &index))
+	return index
 }
 
 // createTestBlob creates a temporary file with random content and returns an ArtifactBlob.
@@ -916,6 +941,319 @@ func TestArtifactStore_copyArtifact(t *testing.T) {
 	assert.Equal(t, originalDigest.String(), copiedArtifact.Digest.String())
 	assert.Len(t, copiedArtifact.Manifest.Layers, 1)
 	assert.Equal(t, "file1.txt", copiedArtifact.Manifest.Layers[0].Annotations[specV1.AnnotationTitle])
+}
+
+func TestNewArtifactStore_removesUnnamedOrphans(t *testing.T) {
+	ctx := t.Context()
+	sc := &types.SystemContext{}
+	storePath := filepath.Join(t.TempDir(), "store")
+
+	as, err := NewArtifactStore(storePath, sc)
+	require.NoError(t, err)
+
+	namedRef := "quay.io/test/named:v1"
+	orphanRef := "quay.io/test/orphan:v1"
+	_, _ = helperAddArtifact(t, as, namedRef, map[string]int{"named.txt": 64}, nil)
+	_, _ = helperAddArtifact(t, as, orphanRef, map[string]int{"orphan.txt": 64}, nil)
+
+	lrs, err := layout.List(storePath)
+	require.NoError(t, err)
+	require.Len(t, lrs, 2)
+
+	manifests := make([]specV1.Descriptor, 0, len(lrs))
+	for _, lr := range lrs {
+		desc := lr.ManifestDescriptor
+		if desc.Annotations[specV1.AnnotationRefName] == orphanRef {
+			delete(desc.Annotations, specV1.AnnotationRefName)
+		}
+		manifests = append(manifests, desc)
+	}
+	writeIndex(t, as, specV1.Index{Manifests: manifests})
+
+	as2, err := NewArtifactStore(storePath, sc)
+	require.NoError(t, err)
+
+	artifacts, err := as2.List(ctx)
+	require.NoError(t, err)
+	require.Len(t, artifacts, 1)
+	assert.Equal(t, namedRef, artifacts[0].Name)
+}
+
+// TestPull_releaseThenCopyKeepsOldDigestNamed exercises Pull's release-before-copy sequence
+// without a registry: release the tag to repo@digest, then layout->layout copy of new content
+// onto the same tag (what c/image does during pull).
+func TestPull_releaseThenCopyKeepsOldDigestNamed(t *testing.T) {
+	ctx := t.Context()
+	asSrc, _ := setupTestStore(t)
+	asDest, _ := setupTestStore(t)
+
+	tagName := "quay.io/test/release-pull:latest"
+	digestA, _ := helperAddArtifact(t, asDest, tagName, map[string]int{"old.txt": 64}, nil)
+	digestB, _ := helperAddArtifact(t, asSrc, tagName, map[string]int{"new.txt": 128}, nil)
+	require.NotEqual(t, digestA.String(), digestB.String(), "digests must differ to simulate a re-tagged pull")
+
+	ref, err := NewArtifactReference(tagName)
+	require.NoError(t, err)
+
+	srcRef, err := layout.NewReference(asSrc.storePath, tagName)
+	require.NoError(t, err)
+	destRef, err := layout.NewReference(asDest.storePath, tagName)
+	require.NoError(t, err)
+
+	asDest.lock.Lock()
+	previous := asDest.getManifestDigestForTag(tagName)
+	require.Equal(t, *digestA, previous)
+
+	require.NoError(t, asDest.releaseTaggedManifestForPull(ref, previous))
+
+	copiedDigest, err := asDest.copyArtifact(ctx, srcRef, destRef, libimage.CopyOptions{})
+	asDest.lock.Unlock()
+	require.NoError(t, err)
+	assert.Equal(t, digestB.String(), copiedDigest.String())
+
+	artifacts, err := asDest.List(ctx)
+	require.NoError(t, err)
+	require.Len(t, artifacts, 2, "old and new digests should both remain listable")
+
+	byDigest := make(map[string]string, len(artifacts))
+	for _, a := range artifacts {
+		require.NotEmpty(t, a.Name, "no unnamed orphans after release+copy")
+		byDigest[a.Digest.String()] = a.Name
+	}
+
+	wantOldName, err := ref.digestReference(*digestA)
+	require.NoError(t, err)
+	assert.Equal(t, wantOldName, byDigest[digestA.String()], "previous digest should keep repo@sha256 name")
+	assert.Equal(t, tagName, byDigest[digestB.String()], "new digest should hold the pull tag")
+}
+
+func TestReleaseTaggedManifestForPull(t *testing.T) {
+	store := setupRetagTestStore(t)
+
+	digestA := digest.FromString("artifact-a")
+	digestB := digest.FromString("artifact-b")
+
+	writeIndex(t, store, specV1.Index{
+		Manifests: []specV1.Descriptor{
+			{
+				Digest: digestA,
+				Annotations: map[string]string{
+					specV1.AnnotationRefName: "quay.io/myrepo/myart:latest",
+				},
+			},
+			{
+				Digest: digestB,
+			},
+		},
+	})
+
+	ref, err := NewArtifactReference("quay.io/myrepo/myart:latest")
+	require.NoError(t, err)
+
+	store.lock.Lock()
+	require.NoError(t, store.releaseTaggedManifestForPull(ref, digestA))
+	store.lock.Unlock()
+
+	index := readIndex(t, store)
+	assert.Equal(t, "quay.io/myrepo/myart@"+digestA.String(), index.Manifests[0].Annotations[specV1.AnnotationRefName])
+	_, hasB := index.Manifests[1].Annotations[specV1.AnnotationRefName]
+	assert.False(t, hasB)
+}
+
+func TestReleaseTaggedManifestForPull_skipsWhenTagMismatch(t *testing.T) {
+	store := setupRetagTestStore(t)
+
+	digestA := digest.FromString("artifact-a")
+	writeIndex(t, store, specV1.Index{
+		Manifests: []specV1.Descriptor{
+			{
+				Digest: digestA,
+				Annotations: map[string]string{
+					specV1.AnnotationRefName: "quay.io/myrepo/myart:v1",
+				},
+			},
+		},
+	})
+
+	ref, err := NewArtifactReference("quay.io/myrepo/myart:latest")
+	require.NoError(t, err)
+
+	store.lock.Lock()
+	require.NoError(t, store.releaseTaggedManifestForPull(ref, digestA))
+	store.lock.Unlock()
+
+	index := readIndex(t, store)
+	assert.Equal(t, "quay.io/myrepo/myart:v1", index.Manifests[0].Annotations[specV1.AnnotationRefName])
+}
+
+func TestReleaseTaggedManifestForPull_sameDigestMultipleNames(t *testing.T) {
+	store := setupRetagTestStore(t)
+
+	digestA := digest.FromString("artifact-shared")
+	tagA := "quay.io/repo-a/myart:latest"
+	tagB := "quay.io/repo-b/myart:v1"
+	writeIndex(t, store, specV1.Index{
+		Manifests: []specV1.Descriptor{
+			{
+				Digest: digestA,
+				Annotations: map[string]string{
+					specV1.AnnotationRefName: tagB,
+				},
+			},
+			{
+				Digest: digestA,
+				Annotations: map[string]string{
+					specV1.AnnotationRefName: tagA,
+				},
+			},
+		},
+	})
+
+	ref, err := NewArtifactReference(tagA)
+	require.NoError(t, err)
+
+	store.lock.Lock()
+	require.NoError(t, store.releaseTaggedManifestForPull(ref, digestA))
+	store.lock.Unlock()
+
+	index := readIndex(t, store)
+	wantDigestName, err := ref.digestReference(digestA)
+	require.NoError(t, err)
+	assert.Equal(t, tagB, index.Manifests[0].Annotations[specV1.AnnotationRefName])
+	assert.Equal(t, wantDigestName, index.Manifests[1].Annotations[specV1.AnnotationRefName])
+}
+
+func TestReleaseTaggedManifestForPull_digestNameAlreadyInIndex(t *testing.T) {
+	store := setupRetagTestStore(t)
+
+	digestA := digest.FromString("artifact-shared")
+	tagName := "quay.io/myrepo/myart:latest"
+	ref, err := NewArtifactReference(tagName)
+	require.NoError(t, err)
+	digestName, err := ref.digestReference(digestA)
+	require.NoError(t, err)
+
+	writeIndex(t, store, specV1.Index{
+		Manifests: []specV1.Descriptor{
+			{
+				Digest: digestA,
+				Annotations: map[string]string{
+					specV1.AnnotationRefName: digestName,
+				},
+			},
+			{
+				Digest: digestA,
+				Annotations: map[string]string{
+					specV1.AnnotationRefName: tagName,
+				},
+			},
+		},
+	})
+
+	store.lock.Lock()
+	require.NoError(t, store.releaseTaggedManifestForPull(ref, digestA))
+	store.lock.Unlock()
+
+	index := readIndex(t, store)
+	assert.Equal(t, digestName, index.Manifests[0].Annotations[specV1.AnnotationRefName])
+	_, hasTagged := index.Manifests[1].Annotations[specV1.AnnotationRefName]
+	assert.False(t, hasTagged, "must not duplicate digestName on another index entry")
+}
+
+func TestReleaseTaggedManifestForPull_idempotentWhenRefIsDigest(t *testing.T) {
+	store := setupRetagTestStore(t)
+
+	digestA := digest.FromString("artifact-a")
+	ref, err := NewArtifactReference("quay.io/myrepo/myart:latest")
+	require.NoError(t, err)
+	digestName, err := ref.digestReference(digestA)
+	require.NoError(t, err)
+
+	writeIndex(t, store, specV1.Index{
+		Manifests: []specV1.Descriptor{
+			{
+				Digest: digestA,
+				Annotations: map[string]string{
+					specV1.AnnotationRefName: digestName,
+				},
+			},
+		},
+	})
+
+	digestRef, err := NewArtifactReference(digestName)
+	require.NoError(t, err)
+
+	store.lock.Lock()
+	require.NoError(t, store.releaseTaggedManifestForPull(digestRef, digestA))
+	store.lock.Unlock()
+
+	index := readIndex(t, store)
+	assert.Equal(t, digestName, index.Manifests[0].Annotations[specV1.AnnotationRefName])
+}
+
+func TestRestoreTaggedManifestForPull_afterDigestNameCollisionClear(t *testing.T) {
+	store := setupRetagTestStore(t)
+
+	digestA := digest.FromString("artifact-shared")
+	tagName := "quay.io/myrepo/myart:latest"
+	ref, err := NewArtifactReference(tagName)
+	require.NoError(t, err)
+	digestName, err := ref.digestReference(digestA)
+	require.NoError(t, err)
+
+	writeIndex(t, store, specV1.Index{
+		Manifests: []specV1.Descriptor{
+			{
+				Digest: digestA,
+				Annotations: map[string]string{
+					specV1.AnnotationRefName: digestName,
+				},
+			},
+			{
+				Digest: digestA,
+				Annotations: map[string]string{
+					specV1.AnnotationRefName: tagName,
+				},
+			},
+		},
+	})
+
+	store.lock.Lock()
+	require.NoError(t, store.releaseTaggedManifestForPull(ref, digestA))
+	require.NoError(t, store.restoreTaggedManifestForPull(ref, digestA))
+	store.lock.Unlock()
+
+	index := readIndex(t, store)
+	assert.Equal(t, digestName, index.Manifests[0].Annotations[specV1.AnnotationRefName])
+	assert.Equal(t, tagName, index.Manifests[1].Annotations[specV1.AnnotationRefName])
+}
+
+func TestRestoreTaggedManifestForPull(t *testing.T) {
+	store := setupRetagTestStore(t)
+
+	digestA := digest.FromString("artifact-a")
+	tagName := "quay.io/myrepo/myart:latest"
+	writeIndex(t, store, specV1.Index{
+		Manifests: []specV1.Descriptor{
+			{
+				Digest: digestA,
+				Annotations: map[string]string{
+					specV1.AnnotationRefName: tagName,
+				},
+			},
+		},
+	})
+
+	ref, err := NewArtifactReference(tagName)
+	require.NoError(t, err)
+
+	store.lock.Lock()
+	require.NoError(t, store.releaseTaggedManifestForPull(ref, digestA))
+	require.NoError(t, store.restoreTaggedManifestForPull(ref, digestA))
+	store.lock.Unlock()
+
+	index := readIndex(t, store)
+	assert.Equal(t, tagName, index.Manifests[0].Annotations[specV1.AnnotationRefName])
 }
 
 func TestArtifactStore_withLockedLayout(t *testing.T) {
