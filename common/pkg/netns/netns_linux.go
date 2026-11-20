@@ -105,7 +105,7 @@ func IsNSorErr(nspath string) error {
 		if os.IsNotExist(err) {
 			err = NSPathNotExistErr{msg: fmt.Sprintf("failed to Statfs %q: %v", nspath, err)}
 		} else {
-			err = fmt.Errorf("failed to Statfs %q: %v", nspath, err)
+			err = fmt.Errorf("failed to Statfs %q: %w", nspath, err)
 		}
 		return err
 	}
@@ -172,7 +172,7 @@ func (ns *netNS) Close() error {
 	}
 
 	if err := ns.file.Close(); err != nil {
-		return fmt.Errorf("failed to close %q: %v", ns.file.Name(), err)
+		return fmt.Errorf("failed to close %q: %w", ns.file.Name(), err)
 	}
 	ns.closed = true
 
@@ -185,7 +185,7 @@ func (ns *netNS) Set() error {
 	}
 
 	if err := unix.Setns(int(ns.Fd()), unix.CLONE_NEWNET); err != nil {
-		return fmt.Errorf("error switching to ns %v: %v", ns.file.Name(), err)
+		return fmt.Errorf("error switching to ns %v: %w", ns.file.Name(), err)
 	}
 
 	return nil
@@ -199,13 +199,13 @@ func (ns *netNS) Do(toRun func(NetNS) error) error {
 	containedCall := func(hostNS NetNS) error {
 		threadNS, err := GetNS(threadNsPath)
 		if err != nil {
-			return fmt.Errorf("failed to open current netns: %v", err)
+			return fmt.Errorf("failed to open current netns: %w", err)
 		}
 		defer threadNS.Close()
 
 		// switch to target namespace
 		if err = ns.Set(); err != nil {
-			return fmt.Errorf("error switching to ns %v: %v", ns.file.Name(), err)
+			return fmt.Errorf("error switching to ns %v: %w", ns.file.Name(), err)
 		}
 		defer func() {
 			err := threadNS.Set() // switch back
@@ -224,7 +224,7 @@ func (ns *netNS) Do(toRun func(NetNS) error) error {
 	// save a handle to current network namespace
 	hostNS, err := GetCurrentNS()
 	if err != nil {
-		return fmt.Errorf("failed to open current namespace: %v", err)
+		return fmt.Errorf("failed to open current namespace: %w", err)
 	}
 	defer hostNS.Close()
 
@@ -333,7 +333,7 @@ func NewNSFrom(fromNetns string) (string, error) {
 		if err != nil {
 			// Do not leak the ns on errors
 			_ = os.RemoveAll(nsPath)
-			return "", fmt.Errorf("failed to bind mount ns at %s: %v", nsPath, err)
+			return "", fmt.Errorf("failed to bind mount ns at %s: %w", nsPath, err)
 		}
 		return nsPath, nil
 	}
@@ -345,7 +345,7 @@ func getRandomNetnsName() (string, error) {
 	b := make([]byte, 16)
 	_, err := rand.Reader.Read(b)
 	if err != nil {
-		return "", fmt.Errorf("failed to generate random netns name: %v", err)
+		return "", fmt.Errorf("failed to generate random netns name: %w", err)
 	}
 	return fmt.Sprintf("netns-%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:]), nil
 }
@@ -382,20 +382,20 @@ func makeNetnsDir(nsRunDir string) error {
 		return nil
 	}
 	if err != unix.EINVAL {
-		return fmt.Errorf("mount --make-rshared %s failed: %q", nsRunDir, err)
+		return fmt.Errorf("mount --make-rshared %s failed: %w", nsRunDir, err)
 	}
 
 	// Recursively remount /run/netns on itself. The recursive flag is
 	// so that any existing netns bindmounts are carried over.
 	err = unix.Mount(nsRunDir, nsRunDir, "none", unix.MS_BIND|unix.MS_REC, "")
 	if err != nil {
-		return fmt.Errorf("mount --rbind %s %s failed: %q", nsRunDir, nsRunDir, err)
+		return fmt.Errorf("mount --rbind %s %s failed: %w", nsRunDir, nsRunDir, err)
 	}
 
 	// Now we can make it shared
 	err = unix.Mount("", nsRunDir, "none", unix.MS_SHARED|unix.MS_REC, "")
 	if err != nil {
-		return fmt.Errorf("mount --make-rshared %s failed: %q", nsRunDir, err)
+		return fmt.Errorf("mount --make-rshared %s failed: %w", nsRunDir, err)
 	}
 
 	return nil
@@ -447,13 +447,13 @@ func newNSPath(nsPath string) (NetNS, error) {
 		// back-propagated to the host
 		err = unix.Mount(threadNsPath, nsPath, "none", unix.MS_BIND|unix.MS_SHARED|unix.MS_REC, "")
 		if err != nil {
-			err = fmt.Errorf("failed to bind mount ns at %s: %v", nsPath, err)
+			err = fmt.Errorf("failed to bind mount ns at %s: %w", nsPath, err)
 		}
 	})
 	wg.Wait()
 
 	if err != nil {
-		return nil, fmt.Errorf("failed to create namespace: %v", err)
+		return nil, fmt.Errorf("failed to create namespace: %w", err)
 	}
 
 	return GetNS(nsPath)

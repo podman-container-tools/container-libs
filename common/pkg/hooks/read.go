@@ -54,7 +54,7 @@ func read(content []byte) (hook *current.Hook, err error) {
 
 	hook, err = reader(content)
 	if err != nil {
-		return hook, fmt.Errorf("%s: %v", ver.Version, err)
+		return hook, fmt.Errorf("%s: %w", ver.Version, err)
 	}
 	return hook, err
 }
@@ -83,7 +83,7 @@ func ReadDir(path string, extensionStages []string, hooks map[string]*current.Ho
 			if res == nil {
 				res = err
 			} else {
-				res = fmt.Errorf("%v: %w", err, res)
+				res = fmt.Errorf("%v: %w", err, res) //nolint:errorlint // keep both errors on one line
 			}
 			continue
 		}

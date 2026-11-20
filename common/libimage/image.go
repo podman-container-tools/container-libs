@@ -252,7 +252,7 @@ func (i *Image) Labels(ctx context.Context) (map[string]string, error) {
 	if err != nil {
 		isManifestList, listErr := i.IsManifestList(ctx)
 		if listErr != nil {
-			err = fmt.Errorf("fallback error checking whether image is a manifest list: %v: %w", err, err)
+			err = fmt.Errorf("fallback error checking whether image is a manifest list: %v: %w", listErr, err) //nolint:errorlint // keep both errors on one line
 		} else if isManifestList {
 			logrus.Debugf("Ignoring error: cannot return labels for manifest list or image index %s", i.ID())
 			return nil, nil
@@ -1071,11 +1071,11 @@ func (i *Image) matchesPlatform(ctx context.Context, os, arch, variant string) (
 
 	expected, err := platforms.Parse(platform.ToString(os, arch, variant))
 	if err != nil {
-		return nil, false, fmt.Errorf("parsing host platform: %v", err)
+		return nil, false, fmt.Errorf("parsing host platform: %w", err)
 	}
 	fromImage, err := platforms.Parse(platform.ToString(inspectInfo.Os, inspectInfo.Architecture, inspectInfo.Variant))
 	if err != nil {
-		return nil, false, fmt.Errorf("parsing image platform: %v", err)
+		return nil, false, fmt.Errorf("parsing image platform: %w", err)
 	}
 
 	if platforms.NewMatcher(expected).Match(fromImage) {

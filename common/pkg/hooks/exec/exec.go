@@ -80,7 +80,7 @@ func RunWithOptions(ctx context.Context, options RunOptions) error {
 		case err = <-exit:
 		}
 		if err != nil {
-			return fmt.Errorf("%w, %w", err, ctx.Err())
+			return fmt.Errorf("%w, %w", err, ctx.Err()) //nolint:errorlint // keep both errors on one line for user-facing messages
 		}
 		// Process must have completed successfully before the kill signal was delivered, we consider that success.
 		return nil

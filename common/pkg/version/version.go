@@ -139,7 +139,7 @@ func program(program string, dnsname bool) (string, error) {
 
 	err := cmd.Run()
 	if err != nil {
-		return "", fmt.Errorf("`%v --version` failed: %v %v (%v)", program, stderr.String(), stdout.String(), err)
+		return "", fmt.Errorf("`%v --version` failed: %v %v (%w)", program, stderr.String(), stdout.String(), err)
 	}
 
 	output := strings.TrimSuffix(stdout.String(), "\n")

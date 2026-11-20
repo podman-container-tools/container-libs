@@ -77,7 +77,7 @@ func (m *manager) Serve(ctx context.Context, sockfd int) error {
 			if errors.Is(err, io.EOF) {
 				return nil
 			}
-			return fmt.Errorf("reading socket: %v", err)
+			return fmt.Errorf("reading socket: %w", err)
 		}
 		readbuf := buf[0:n]
 
