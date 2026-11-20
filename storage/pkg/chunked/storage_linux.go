@@ -1486,8 +1486,8 @@ func getBlobAt(is ImageSourceSeekable, chunksToRequest ...ImageSourceChunk) (cha
 	return stream, nil
 }
 
-func (c *chunkedDiffer) copyAllBlobToFile(destination *os.File) (digest.Digest, error) {
-	streamsOrErrors, err := getBlobAt(c.stream, ImageSourceChunk{Offset: 0, Length: uint64(c.blobSize)})
+func copyAllBlobToFile(stream ImageSourceSeekable, blobSize int64, destination *os.File, copyBuffer []byte) (digest.Digest, error) {
+	streamsOrErrors, err := getBlobAt(stream, ImageSourceChunk{Offset: 0, Length: uint64(blobSize)})
 	if err != nil {
 		return "", err
 	}
@@ -1498,7 +1498,7 @@ func (c *chunkedDiffer) copyAllBlobToFile(destination *os.File) (digest.Digest, 
 			r := io.TeeReader(soe.stream, originalRawDigester.Hash())
 
 			// copy the entire tarball and compute its digest
-			_, err = io.CopyBuffer(destination, r, c.copyBuffer)
+			_, err = io.CopyBuffer(destination, r, copyBuffer)
 			_ = soe.stream.Close()
 		}
 		if soe.err != nil && err == nil {
@@ -1560,7 +1560,7 @@ func (c *chunkedDiffer) ApplyDiff(dest string, options *archive.TarOptions, diff
 		}()
 
 		// calculate the checksum before accessing the file.
-		compressedDigest, err = c.copyAllBlobToFile(blobFile)
+		compressedDigest, err = copyAllBlobToFile(c.stream, c.blobSize, blobFile, c.copyBuffer)
 		if err != nil {
 			return graphdriver.DriverWithDifferOutput{}, err
 		}
