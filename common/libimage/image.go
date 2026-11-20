@@ -766,11 +766,47 @@ func (i *Image) referenceFuzzilyMatchingRepoAndTag(requiredRepo reference.Named,
 }
 
 // RepoDigests returns a string array of repodigests associated with the image.
+// A name with a record in NameDigests is paired with its recorded digests that
+// the image still has, also after the name moved to another image.  A name
+// without such a digest is paired with each digest of the image.
 func (i *Image) RepoDigests() ([]string, error) {
 	repoDigests := []string{}
 	added := make(map[string]struct{})
+	add := func(named reference.Named, imageDigest digest.Digest) error {
+		canonical, err := reference.WithDigest(reference.TrimNamed(named), imageDigest)
+		if err != nil {
+			return err
+		}
+		if _, alreadyInList := added[canonical.String()]; !alreadyInList {
+			repoDigests = append(repoDigests, canonical.String())
+			added[canonical.String()] = struct{}{}
+		}
+		return nil
+	}
+
+	recordedNames := make(map[string]struct{})
+	for name, recordedDigests := range i.storageImage.NameDigests {
+		named, err := reference.ParseNormalizedNamed(name)
+		if err != nil {
+			// Store.AddImageNameWithDigests does not validate the name.
+			logrus.Debugf("Ignoring digest record of image %s for unparseable name %q: %v", i.ID(), name, err)
+			continue
+		}
+		for _, recordedDigest := range recordedDigests {
+			if !slices.Contains(i.Digests(), recordedDigest) {
+				continue
+			}
+			if err := add(named, recordedDigest); err != nil {
+				return nil, err
+			}
+			recordedNames[name] = struct{}{}
+		}
+	}
 
 	for _, name := range i.Names() {
+		if _, isRecorded := recordedNames[name]; isRecorded {
+			continue
+		}
 		for _, imageDigest := range append(i.Digests(), i.Digest()) {
 			if imageDigest == "" {
 				continue
@@ -781,14 +817,8 @@ func (i *Image) RepoDigests() ([]string, error) {
 				return nil, err
 			}
 
-			canonical, err := reference.WithDigest(reference.TrimNamed(named), imageDigest)
-			if err != nil {
+			if err := add(named, imageDigest); err != nil {
 				return nil, err
-			}
-
-			if _, alreadyInList := added[canonical.String()]; !alreadyInList {
-				repoDigests = append(repoDigests, canonical.String())
-				added[canonical.String()] = struct{}{}
 			}
 		}
 	}

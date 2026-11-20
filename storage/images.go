@@ -55,6 +55,12 @@ type Image struct {
 	// is the first one.
 	NamesHistory []string `json:"names-history,omitempty"`
 
+	// NameDigests records, for each reference string committed to this image
+	// with AddImageNameWithDigests (a key like "repo:tag" or "repo@digest"),
+	// the manifest digests of the last such commit. A record can stay after
+	// its name moves to another image.
+	NameDigests map[string][]digest.Digest `json:"name-digests,omitempty"`
+
 	// TopLayer is the ID of the topmost layer of the image itself, if the
 	// image contains one or more layers.  Multiple images can refer to the
 	// same top layer.
@@ -145,8 +151,20 @@ type rwImageStore interface {
 
 	// updateNames modifies names associated with an image based on (op, names).
 	// The values are expected to be valid normalized
-	// named image references.
+	// named image references. NameDigests records for names newly added
+	// to the image are dropped.
 	updateNames(id string, names []string, op updateNameOperation) error
+
+	// addNamesKeepingRecords adds names to the image with the specified ID,
+	// like updateNames with addNames, but keeps the NameDigests records of
+	// the added names.
+	addNamesKeepingRecords(id string, names []string) error
+
+	// addNameWithDigests adds name to the image with the specified ID, moving
+	// it from another image if needed, and records that the name was
+	// committed with digests. Each digest must already be in the image's
+	// Digests.
+	addNameWithDigests(id, name string, digests []digest.Digest) error
 
 	// Delete removes the record of the image.
 	Delete(id string) error
@@ -178,6 +196,19 @@ type imageStore struct {
 	bydigest  map[digest.Digest][]*Image
 }
 
+// copyNameDigests returns a deep copy of m.
+// If m is empty, a nil is returned.
+func copyNameDigests(m map[string][]digest.Digest) map[string][]digest.Digest {
+	if len(m) == 0 {
+		return nil
+	}
+	cp := make(map[string][]digest.Digest, len(m))
+	for name, digests := range m {
+		cp[name] = slices.Clone(digests)
+	}
+	return cp
+}
+
 func copyImage(i *Image) *Image {
 	return &Image{
 		ID:              i.ID,
@@ -185,6 +216,7 @@ func copyImage(i *Image) *Image {
 		Digests:         copySlicePreferringNil(i.Digests),
 		Names:           copySlicePreferringNil(i.Names),
 		NamesHistory:    copySlicePreferringNil(i.NamesHistory),
+		NameDigests:     copyNameDigests(i.NameDigests),
 		TopLayer:        i.TopLayer,
 		MappedTopLayers: copySlicePreferringNil(i.MappedTopLayers),
 		Metadata:        i.Metadata,
@@ -718,6 +750,7 @@ func (r *imageStore) create(id string, names []string, layer string, options Ima
 		Digests:        dedupeDigests(options.Digests),
 		Names:          names,
 		NamesHistory:   copySlicePreferringNil(options.NamesHistory),
+		NameDigests:    copyNameDigests(options.nameDigests),
 		TopLayer:       layer,
 		Metadata:       options.Metadata,
 		BigDataNames:   []string{},
@@ -826,31 +859,100 @@ func (i *Image) addNameToHistory(name string) {
 	i.NamesHistory = dedupeStrings(append([]string{name}, i.NamesHistory...))
 }
 
-// Requires startWriting.
-func (r *imageStore) updateNames(id string, names []string, op updateNameOperation) error {
-	if !r.lockfile.IsReadWrite() {
-		return fmt.Errorf("not allowed to change image name assignments at %q: %w", r.imagespath(), ErrStoreIsReadOnly)
-	}
-	image, ok := r.lookup(id)
-	if !ok {
-		return fmt.Errorf("locating image with ID %q: %w", id, ErrImageUnknown)
-	}
+// applyNames sets image.Names to newNames and updates r.byname and NamesHistory.
+// A removed name loses its NameDigests record; a name moved to another image keeps
+// its record there.
+// The caller must hold r.inProcessLock for writing and must call r.Save().
+func (r *imageStore) applyNames(image *Image, newNames []string) {
 	oldNames := image.Names
-	names, err := applyNameOperation(oldNames, names, op)
-	if err != nil {
-		return err
-	}
 	for _, name := range oldNames {
 		delete(r.byname, name)
+		if !slices.Contains(newNames, name) {
+			delete(image.NameDigests, name)
+		}
 	}
-	for _, name := range names {
+	for _, name := range newNames {
 		if otherImage, ok := r.byname[name]; ok {
 			r.removeName(otherImage, name)
 		}
 		r.byname[name] = image
 		image.addNameToHistory(name)
 	}
-	image.Names = names
+	image.Names = newNames
+}
+
+// imageForNameChange returns the image with the specified ID, if the store allows name changes.
+// Requires startWriting.
+func (r *imageStore) imageForNameChange(id string) (*Image, error) {
+	if !r.lockfile.IsReadWrite() {
+		return nil, fmt.Errorf("not allowed to change image name assignments at %q: %w", r.imagespath(), ErrStoreIsReadOnly)
+	}
+	image, ok := r.lookup(id)
+	if !ok {
+		return nil, fmt.Errorf("locating image with ID %q: %w", id, ErrImageUnknown)
+	}
+	return image, nil
+}
+
+// Requires startWriting.
+func (r *imageStore) updateNames(id string, names []string, op updateNameOperation) error {
+	image, err := r.imageForNameChange(id)
+	if err != nil {
+		return err
+	}
+	oldNames := image.Names
+	names, err = applyNameOperation(oldNames, names, op)
+	if err != nil {
+		return err
+	}
+	r.applyNames(image, names)
+	for _, name := range names {
+		if !slices.Contains(oldNames, name) {
+			delete(image.NameDigests, name)
+		}
+	}
+	return r.Save()
+}
+
+// Requires startWriting.
+func (r *imageStore) addNamesKeepingRecords(id string, names []string) error {
+	image, err := r.imageForNameChange(id)
+	if err != nil {
+		return err
+	}
+	names, err = applyNameOperation(image.Names, names, addNames)
+	if err != nil {
+		return err
+	}
+	r.applyNames(image, names)
+	return r.Save()
+}
+
+// Requires startWriting.
+func (r *imageStore) addNameWithDigests(id, name string, digests []digest.Digest) error {
+	image, err := r.imageForNameChange(id)
+	if err != nil {
+		return err
+	}
+	if len(digests) == 0 {
+		return fmt.Errorf("no digests specified for name %q of image %q", name, id)
+	}
+	for _, d := range digests {
+		if !slices.Contains(image.Digests, d) {
+			return fmt.Errorf("digest %q is not one of the digests of image %q: %w", d, id, ErrDigestUnknown)
+		}
+	}
+	deduped := dedupeDigests(digests)
+
+	newNames, err := applyNameOperation(image.Names, []string{name}, addNames)
+	if err != nil {
+		return err
+	}
+	r.applyNames(image, newNames)
+	if image.NameDigests == nil {
+		image.NameDigests = make(map[string][]digest.Digest)
+	}
+	image.NameDigests[name] = deduped
 	return r.Save()
 }
 
