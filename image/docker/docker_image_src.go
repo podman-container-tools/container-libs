@@ -561,8 +561,14 @@ func fetchBlobAt(ctx context.Context, client *dockerClient, physRef dockerRefere
 
 	switch res.StatusCode {
 	case http.StatusOK:
-		// if the server replied with a 200 status code, convert the full body response to a series of
-		// streams as it would have been done with 206.
+		if len(chunks) != 1 || chunks[0].Offset != 0 {
+			// The server ignored the ranges; don't download most of the blob only to discard it.
+			// The caller can request the whole blob once, and use it for all the chunks.
+			res.Body.Close()
+			return nil, nil, private.FullBlobResponseError{}
+		}
+		// The caller asked for (a prefix of) the blob, so the full body response is as good as a 206:
+		// convert it to a series of streams as it would have been done with 206.
 		streams := make(chan io.ReadCloser)
 		errs := make(chan error)
 		go splitHTTP200ResponseToPartial(streams, errs, res.Body, chunks)
