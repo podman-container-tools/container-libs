@@ -630,7 +630,7 @@ func (d *Driver) Remove(id string) error {
 		}
 		// If quota is not enabled, fallback to rmdir syscall to delete subvolumes.
 		// This would allow unprivileged user to delete their owned subvolumes
-		// in kernel >= 4.18 without user_subvol_rm_alowed mount option.
+		// in kernel >= 4.18 without user_subvol_rm_allowed mount option.
 	}
 	if err := system.EnsureRemoveAll(dir); err != nil {
 		return err

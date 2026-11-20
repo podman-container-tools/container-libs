@@ -44,17 +44,17 @@ func copyContent(flags *mflag.FlagSet, action string, m storage.Store, args []st
 		}
 		targetLayer, err := m.Layer(layer)
 		if err != nil {
-			return 1, fmt.Errorf("error finding layer %q: %+v", layer, err)
+			return 1, fmt.Errorf("error finding layer %q: %w", layer, err)
 		}
 		untarIDMappings = idtools.NewIDMappingsFromMaps(targetLayer.UIDMap, targetLayer.GIDMap)
 		targetMount, err := m.Mount(targetLayer.ID, targetLayer.MountLabel)
 		if err != nil {
-			return 1, fmt.Errorf("error mounting layer %q: %+v", targetLayer.ID, err)
+			return 1, fmt.Errorf("error mounting layer %q: %w", targetLayer.ID, err)
 		}
 		target = filepath.Join(targetMount, targetRel)
 		defer func() {
 			if _, err := m.Unmount(targetLayer.ID, false); err != nil {
-				fmt.Fprintf(os.Stderr, "error unmounting layer %q: %+v\n", targetLayer.ID, err)
+				fmt.Fprintf(os.Stderr, "error unmounting layer %q: %v\n", targetLayer.ID, err)
 				// Does not change the exit code
 			}
 		}()
@@ -66,24 +66,24 @@ func copyContent(flags *mflag.FlagSet, action string, m storage.Store, args []st
 		if layer, sourceRel, ok := strings.Cut(source, ":"); ok {
 			sourceLayer, err := m.Layer(layer)
 			if err != nil {
-				return 1, fmt.Errorf("error finding layer %q: %+v", layer, err)
+				return 1, fmt.Errorf("error finding layer %q: %w", layer, err)
 			}
 			tarIDMappings = idtools.NewIDMappingsFromMaps(sourceLayer.UIDMap, sourceLayer.GIDMap)
 			sourceMount, err := m.Mount(sourceLayer.ID, sourceLayer.MountLabel)
 			if err != nil {
-				return 1, fmt.Errorf("error mounting layer %q: %+v", sourceLayer.ID, err)
+				return 1, fmt.Errorf("error mounting layer %q: %w", sourceLayer.ID, err)
 			}
 			source = filepath.Join(sourceMount, sourceRel)
 			defer func() {
 				if _, err := m.Unmount(sourceLayer.ID, false); err != nil {
-					fmt.Fprintf(os.Stderr, "error unmounting layer %q: %+v\n", sourceLayer.ID, err)
+					fmt.Fprintf(os.Stderr, "error unmounting layer %q: %v\n", sourceLayer.ID, err)
 					// Does not change the exit code
 				}
 			}()
 		}
 		archiver := chrootarchive.NewArchiverWithChown(tarIDMappings, chownOpts, untarIDMappings)
 		if err := archiver.CopyWithTar(source, target); err != nil {
-			return 1, fmt.Errorf("error copying %q to %q: %+v", source, target, err)
+			return 1, fmt.Errorf("error copying %q to %q: %w", source, target, err)
 		}
 	}
 	return 0, nil

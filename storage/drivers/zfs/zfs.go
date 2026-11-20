@@ -60,7 +60,7 @@ func Init(base string, opt graphdriver.Options) (graphdriver.Driver, error) {
 	file, err := unix.Open("/dev/zfs", unix.O_RDWR, 0o600)
 	if err != nil {
 		logger.Debugf("cannot open /dev/zfs: %v", err)
-		return nil, fmt.Errorf("could not open /dev/zfs: %v: %w", err, graphdriver.ErrPrerequisites)
+		return nil, fmt.Errorf("could not open /dev/zfs: %v: %w", err, graphdriver.ErrPrerequisites) //nolint:errorlint // keep both errors on one line
 	}
 	defer unix.Close(file)
 
