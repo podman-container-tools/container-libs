@@ -192,6 +192,87 @@ func golangConnectionScp(options ConnectionScpOptions) (*ConnectionScpReport, er
 	return &ConnectionScpReport{Response: remote.Name()}, nil
 }
 
+type golangExecOutputReader struct {
+	stdout io.Reader
+	sess   *ssh.Session
+	client *ssh.Client
+	stderr *bytes.Buffer
+	waitCh <-chan error
+}
+
+func (r *golangExecOutputReader) Read(p []byte) (int, error) {
+	return r.stdout.Read(p)
+}
+
+func (r *golangExecOutputReader) Close() error {
+	r.sess.Close()
+	err := <-r.waitCh
+	// safe to close the connection now that the session is done
+	// and the exit status has been received.
+	r.client.Close()
+	if err != nil {
+		return fmt.Errorf("%v: %w", r.stderr.String(), err)
+	}
+	return nil
+}
+
+func golangConnectionExecWithOutput(options ConnectionExecOptions, input io.Reader) (io.ReadCloser, error) {
+	if !strings.HasPrefix(options.Host, "ssh://") {
+		options.Host = "ssh://" + options.Host
+	}
+	_, uri, err := Validate(options.User, options.Host, options.Port, options.Identity)
+	if err != nil {
+		return nil, err
+	}
+
+	cfg, err := ValidateAndConfigure(uri, options.Identity, false)
+	if err != nil {
+		return nil, err
+	}
+	dialAdd, err := ssh.Dial("tcp", uri.Host, cfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect: %w", err)
+	}
+
+	sess, err := dialAdd.NewSession()
+	if err != nil {
+		dialAdd.Close()
+		return nil, err
+	}
+
+	stderr := &bytes.Buffer{}
+	sess.Stderr = stderr
+	if input != nil {
+		sess.Stdin = input
+	}
+
+	stdout, err := sess.StdoutPipe()
+	if err != nil {
+		sess.Close()
+		dialAdd.Close()
+		return nil, err
+	}
+
+	if err := sess.Start(strings.Join(options.Args, " ")); err != nil {
+		sess.Close()
+		dialAdd.Close()
+		return nil, err
+	}
+
+	waitCh := make(chan error, 1)
+	go func() {
+		waitCh <- sess.Wait()
+	}()
+
+	return &golangExecOutputReader{
+		stdout: stdout,
+		sess:   sess,
+		client: dialAdd,
+		stderr: stderr,
+		waitCh: waitCh,
+	}, nil
+}
+
 // ExecRemoteCommand takes a ssh client connection and a command to run and executes the
 // command on the specified client. The function returns the Stdout from the client or the Stderr.
 func ExecRemoteCommand(dial *ssh.Client, run string) ([]byte, error) {
