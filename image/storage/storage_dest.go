@@ -350,8 +350,11 @@ func (f *zstdFetcher) GetBlobAt(chunks []chunked.ImageSourceChunk) (chan io.Read
 		newChunks = append(newChunks, i)
 	}
 	rc, errs, err := f.chunkAccessor.GetBlobAt(f.ctx, f.blobInfo, newChunks)
-	if _, ok := err.(private.BadPartialRequestError); ok {
+	if _, ok := errors.AsType[private.BadPartialRequestError](err); ok {
 		err = chunked.ErrBadRequest{}
+	}
+	if _, ok := errors.AsType[private.FullBlobResponseError](err); ok {
+		err = chunked.ErrFullBlobResponse{}
 	}
 	return rc, errs, err
 }
