@@ -33,8 +33,11 @@ import (
 
 // imageCopier tracks state specific to a single image (possibly an item of a manifest list)
 type imageCopier struct {
-	c                             *copier
-	manifestUpdates               *types.ManifestUpdateOptions
+	c *copier
+	// WARNING: If you are adding new reasons to change manifestEdits, also update the
+	// OptimizeDestinationImageAlreadyExists short-circuit conditions.
+	manifestEdits                 image.EditedImageEdits
+	manifestEditInfo              image.EditedImageInfo
 	src                           *image.SourcedImage
 	manifestConversionPlan        manifestConversionPlan
 	diffIDsAreNeeded              bool
@@ -137,9 +140,13 @@ func (c *copier) copySingleImage(ctx context.Context, unparsedImage *image.Unpar
 	}
 
 	ic := imageCopier{
-		c:               c,
-		manifestUpdates: &types.ManifestUpdateOptions{InformationOnly: types.ManifestUpdateInformation{Destination: c.dest}},
-		src:             src,
+		c: c,
+		manifestEditInfo: image.EditedImageInfo{
+			Destination: c.dest,
+			Cache:       c.blobInfoCache,
+			Digests:     c.options.digestOptions,
+		},
+		src: src,
 		// manifestConversionPlan and diffIDsAreNeeded are computed later
 		cannotModifyManifestReason:    cannotModifyManifestReason,
 		requireCompressionFormatMatch: opts.requireCompressionFormatMatch,
@@ -201,24 +208,25 @@ func (c *copier) copySingleImage(ctx context.Context, unparsedImage *image.Unpar
 	if err != nil {
 		return copySingleImageResult{}, err
 	}
-	// We set up this part of ic.manifestUpdates quite early, not just around the
+	// We set up this part of ic.manifestEdits quite early, not just around the
 	// code that calls copyUpdatedConfigAndManifest, so that other parts of the copy code
-	// (e.g. the UpdatedImageNeedsLayerDiffIDs check just below) can make decisions based
+	// (e.g. the EditedImageNeedsLayerDiffIDs check just below) can make decisions based
 	// on the expected destination format.
 	if ic.manifestConversionPlan.preferredMIMETypeNeedsConversion {
-		ic.manifestUpdates.ManifestMIMEType = ic.manifestConversionPlan.preferredMIMEType
+		ic.manifestEdits.ManifestMIMEType = ic.manifestConversionPlan.preferredMIMEType
 	}
 
-	// If src.UpdatedImageNeedsLayerDiffIDs(ic.manifestUpdates) will be true, it needs to be true by the time we get here.
-	ic.diffIDsAreNeeded = src.UpdatedImageNeedsLayerDiffIDs(*ic.manifestUpdates)
+	// If src.EditedImageNeedsLayerDiffIDs(ic.manifestEdits) will be true, it needs to be true by the time we get here.
+	ic.diffIDsAreNeeded = src.EditedImageNeedsLayerDiffIDs(ic.manifestEdits)
 
 	// If enabled, fetch and compare the destination's manifest. And as an optimization skip updating the destination iff equal
 	if c.options.OptimizeDestinationImageAlreadyExists {
 		shouldUpdateSigs := len(sigs) > 0 || len(c.signers) != 0 // TODO: Consider allowing signatures updates only and skipping the image's layers/manifest copy if possible
-		noPendingManifestUpdates := ic.noPendingManifestUpdates()
+		noPendingManifestEdits := ic.noPendingManifestEdits()
+		// FIXME: handle digests.Options here
 
-		logrus.Debugf("Checking if we can skip copying: has signatures=%t, OCI encryption=%t, no manifest updates=%t, compression match required for reusing blobs=%t", shouldUpdateSigs, destRequiresOciEncryption, noPendingManifestUpdates, opts.requireCompressionFormatMatch)
-		if !shouldUpdateSigs && !destRequiresOciEncryption && noPendingManifestUpdates && !ic.requireCompressionFormatMatch {
+		logrus.Debugf("Checking if we can skip copying: has signatures=%t, OCI encryption=%t, no manifest edits=%t, compression match required for reusing blobs=%t", shouldUpdateSigs, destRequiresOciEncryption, noPendingManifestEdits, opts.requireCompressionFormatMatch)
+		if !shouldUpdateSigs && !destRequiresOciEncryption && noPendingManifestEdits && !ic.requireCompressionFormatMatch {
 			matchedResult, err := ic.compareImageDestinationManifestEqual(ctx, targetInstance)
 			if err != nil {
 				logrus.Warnf("Failed to compare destination image manifest: %v", err)
@@ -274,7 +282,7 @@ func (c *copier) copySingleImage(ctx context.Context, unparsedImage *image.Unpar
 		errs := []string{fmt.Sprintf("%s(%v)", ic.manifestConversionPlan.preferredMIMEType, err)}
 		for _, manifestMIMEType := range ic.manifestConversionPlan.otherMIMETypeCandidates {
 			logrus.Debugf("Trying to use manifest type %s…", manifestMIMEType)
-			ic.manifestUpdates.ManifestMIMEType = manifestMIMEType
+			ic.manifestEdits.ManifestMIMEType = manifestMIMEType
 			attemptedManifest, attemptedManifestDigest, err := ic.copyUpdatedConfigAndManifest(ctx, targetInstance)
 			if err != nil {
 				logrus.Debugf("Upload of manifest type %s failed: %v", manifestMIMEType, err)
@@ -367,12 +375,12 @@ func (ic *imageCopier) updateEmbeddedDockerReference() error {
 		return fmt.Errorf("Copying a schema1 image with an embedded Docker reference to %s (Docker reference %s) would change the manifest, which we cannot do: %q",
 			transports.ImageName(ic.c.dest.Reference()), destRef.String(), ic.cannotModifyManifestReason)
 	}
-	ic.manifestUpdates.EmbeddedDockerReference = destRef
+	ic.manifestEdits.EmbeddedDockerReference = destRef
 	return nil
 }
 
-func (ic *imageCopier) noPendingManifestUpdates() bool {
-	return reflect.DeepEqual(*ic.manifestUpdates, types.ManifestUpdateOptions{InformationOnly: ic.manifestUpdates.InformationOnly})
+func (ic *imageCopier) noPendingManifestEdits() bool {
+	return reflect.DeepEqual(ic.manifestEdits, image.EditedImageEdits{})
 }
 
 // compareImageDestinationManifestEqual compares the source and destination image manifests (reading the manifest from the
@@ -430,7 +438,7 @@ func (ic *imageCopier) compareImageDestinationManifestEqual(ctx context.Context,
 	}, nil
 }
 
-// copyLayers copies layers from ic.src/ic.c.rawSource to dest, using and updating ic.manifestUpdates if necessary and ic.cannotModifyManifestReason == "".
+// copyLayers copies layers from ic.src/ic.c.rawSource to dest, using and updating ic.manifestEdits if necessary and ic.cannotModifyManifestReason == "".
 func (ic *imageCopier) copyLayers(ctx context.Context) ([]compressiontypes.Algorithm, error) {
 	srcInfos := ic.src.LayerInfos()
 	updatedSrcInfos, err := ic.src.LayerInfosForCopy(ctx)
@@ -540,14 +548,14 @@ func (ic *imageCopier) copyLayers(ctx context.Context) ([]compressiontypes.Algor
 		diffIDs[i] = cld.diffID
 	}
 
-	// WARNING: If you are adding new reasons to change ic.manifestUpdates, also update the
+	// WARNING: If you are adding new reasons to change ic.manifestEdits, also update the
 	// OptimizeDestinationImageAlreadyExists short-circuit conditions
-	ic.manifestUpdates.InformationOnly.LayerInfos = destInfos
+	ic.manifestEditInfo.LayerInfos = destInfos
 	if ic.diffIDsAreNeeded {
-		ic.manifestUpdates.InformationOnly.LayerDiffIDs = diffIDs
+		ic.manifestEditInfo.LayerDiffIDs = diffIDs
 	}
 	if srcInfosUpdated || layerDigestsDiffer(srcInfos, destInfos) {
-		ic.manifestUpdates.LayerInfos = destInfos
+		ic.manifestEdits.LayerInfos = destInfos
 	}
 	algos, err := algorithmsByNames(compressionAlgos.All())
 	if err != nil {
@@ -563,37 +571,50 @@ func layerDigestsDiffer(a, b []types.BlobInfo) bool {
 	})
 }
 
-// copyUpdatedConfigAndManifest updates the image per ic.manifestUpdates, if necessary,
+// copyUpdatedConfigAndManifest updates the image per ic.manifestEdits, if necessary,
 // stores the resulting config and manifest to the destination, and returns the stored manifest
 // and its digest.
 func (ic *imageCopier) copyUpdatedConfigAndManifest(ctx context.Context, instanceDigest *digest.Digest) ([]byte, digest.Digest, error) {
-	var pendingImage types.Image = ic.src
-	if !ic.noPendingManifestUpdates() {
+	var pendingImage image.EditableImage = ic.src
+	if !ic.noPendingManifestEdits() {
 		if ic.cannotModifyManifestReason != "" {
 			return nil, "", fmt.Errorf("Internal error: copy needs an updated manifest but that was known to be forbidden: %q", ic.cannotModifyManifestReason)
 		}
-		if !ic.diffIDsAreNeeded && ic.src.UpdatedImageNeedsLayerDiffIDs(*ic.manifestUpdates) {
+		if !ic.diffIDsAreNeeded && ic.src.EditedImageNeedsLayerDiffIDs(ic.manifestEdits) {
 			// We have set ic.diffIDsAreNeeded based on the preferred MIME type returned by determineManifestConversion.
 			// So, this can only happen if we are trying to upload using one of the other MIME type candidates.
-			// Because UpdatedImageNeedsLayerDiffIDs is true only when converting from s1 to s2, this case should only arise
+			// Because EditedImageNeedsLayerDiffIDs is true only when converting from s1 to s2, this case should only arise
 			// when ic.c.dest.SupportedManifestMIMETypes() includes both s1 and s2, the upload using s1 failed, and we are now trying s2.
 			// Supposedly s2-only registries do not exist or are extremely rare, so failing with this error message is good enough for now.
 			// If handling such registries turns out to be necessary, we could compute ic.diffIDsAreNeeded based on the full list of manifest MIME type candidates.
-			return nil, "", fmt.Errorf("Can not convert image to %s, preparing DiffIDs for this case is not supported", ic.manifestUpdates.ManifestMIMEType)
+			return nil, "", fmt.Errorf("Can not convert image to %s, preparing DiffIDs for this case is not supported", ic.manifestEdits.ManifestMIMEType)
 		}
-		pi, err := ic.src.UpdatedImage(ctx, *ic.manifestUpdates)
+		pi, err := image.EditedImage(ctx, pendingImage, ic.manifestEdits, ic.manifestEditInfo)
 		if err != nil {
 			return nil, "", fmt.Errorf("creating an updated image manifest: %w", err)
 		}
 		pendingImage = pi
 	}
+	updatedConfigDigest, err := ic.copyConfig(ctx, pendingImage)
+	if err != nil {
+		return nil, "", err
+	}
+	if updatedConfigDigest != "" {
+		if ic.cannotModifyManifestReason != "" {
+			return nil, "", fmt.Errorf("internal error: copy needs an updated config digest in manifest but that was known to be forbidden: %q", ic.cannotModifyManifestReason)
+		}
+		pi, err := image.EditedImage(ctx, pendingImage, image.EditedImageEdits{
+			ConfigDigest: updatedConfigDigest,
+		}, ic.manifestEditInfo)
+		if err != nil {
+			return nil, "", fmt.Errorf("creating an updated image manifest: %w", err)
+		}
+		pendingImage = pi
+	}
+
 	man, _, err := pendingImage.Manifest(ctx)
 	if err != nil {
 		return nil, "", fmt.Errorf("reading manifest: %w", err)
-	}
-
-	if err := ic.copyConfig(ctx, pendingImage); err != nil {
-		return nil, "", err
 	}
 
 	ic.c.Printf("Writing manifest to image destination\n")
@@ -611,13 +632,15 @@ func (ic *imageCopier) copyUpdatedConfigAndManifest(ctx context.Context, instanc
 	return man, manifestDigest, nil
 }
 
-// copyConfig copies config.json, if any, from src to dest.
-func (ic *imageCopier) copyConfig(ctx context.Context, src types.Image) error {
+// copyConfig copies config.json, if any, from src to dest,
+// and returns an updated config digest _if_ the manifest needs modifying.
+func (ic *imageCopier) copyConfig(ctx context.Context, src image.EditableImage) (digest.Digest, error) {
 	srcInfo := src.ConfigInfo()
+	updatedConfigDigest := digest.Digest("")
 	if srcInfo.Digest != "" {
 		if err := ic.c.concurrentBlobCopiesSemaphore.Acquire(ctx, 1); err != nil {
 			// This can only fail with ctx.Err(), so no need to blame acquiring the semaphore.
-			return fmt.Errorf("copying config: %w", err)
+			return "", fmt.Errorf("copying config: %w", err)
 		}
 		defer ic.c.concurrentBlobCopiesSemaphore.Release(1)
 
@@ -647,13 +670,15 @@ func (ic *imageCopier) copyConfig(ctx context.Context, src types.Image) error {
 			return destInfo, nil
 		}()
 		if err != nil {
-			return err
+			return "", err
 		}
 		if destInfo.Digest != srcInfo.Digest {
-			return fmt.Errorf("Internal error: copying uncompressed config blob %s changed digest to %s", srcInfo.Digest, destInfo.Digest)
+			// FIXME: this isn’t right, we need to also e.g. clean URLs;
+			// so we need the whole updatedBlobInfoFromUpload to edit the config.
+			updatedConfigDigest = destInfo.Digest
 		}
 	}
-	return nil
+	return updatedConfigDigest, nil
 }
 
 // diffIDResult contains both a digest value and an error from diffIDComputationGoroutine.
@@ -667,7 +692,7 @@ type diffIDResult struct {
 // for types.BlobInfo.
 func compressionEditsFromBlobInfo(srcInfo types.BlobInfo) (types.LayerCompression, *compressiontypes.Algorithm, error) {
 	// This MIME type → compression mapping belongs in manifest-specific code in our manifest
-	// package (but we should preferably replace/change UpdatedImage instead of productizing
+	// package (but we should preferably replace/change image.EditedImage instead of productizing
 	// this workaround).
 	switch srcInfo.MediaType {
 	case manifest.DockerV2Schema2LayerMediaType, imgspecv1.MediaTypeImageLayerGzip:
@@ -695,10 +720,11 @@ func (ic *imageCopier) copyLayer(ctx context.Context, srcInfo types.BlobInfo, to
 	// If the srcInfo doesn't contain compression information, try to compute it from the
 	// MediaType, which was either read from a manifest by way of LayerInfos() or constructed
 	// by LayerInfosForCopy(), if it was supplied at all.  If we succeed in copying the blob,
-	// the BlobInfo we return will be passed to UpdatedImage() and then to UpdateLayerInfos(),
+	// the BlobInfo we return will be passed to image.EditedImage() and then to UpdateLayerInfos(),
 	// which uses the compression information to compute the updated MediaType values.
-	// (Sadly UpdatedImage() is documented to not update MediaTypes from
-	//  ManifestUpdateOptions.LayerInfos[].MediaType, so we are doing it indirectly.)
+	// (Sadly the public UpdatedImage() is documented to not update MediaTypes from
+	// ManifestUpdateOptions.LayerInfos[].MediaType, and image.EditedImage() currently matches that,
+	// so we are doing it indirectly.)
 	if srcInfo.CompressionOperation == types.PreserveOriginal && srcInfo.CompressionAlgorithm == nil {
 		op, algo, err := compressionEditsFromBlobInfo(srcInfo)
 		if err != nil {

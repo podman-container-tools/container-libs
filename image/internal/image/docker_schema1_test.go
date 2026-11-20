@@ -59,6 +59,11 @@ var schema1FixtureLayerDiffIDs = []digest.Digest{
 	"sha256:9bd63850e406167b4751f5050f6dc0ebd789bb5ef5e5c6c31ed062bda8c063e8",
 }
 
+var schema1FixtureInfo = EditedImageInfo{
+	LayerInfos:   schema1FixtureLayerInfos,
+	LayerDiffIDs: schema1FixtureLayerDiffIDs,
+}
+
 var schema1WithThrowawaysFixtureLayerInfos = []types.BlobInfo{
 	{Digest: "sha256:6a5a5368e0c2d3e5909184fa28ddfd56072e7ff3ee9a945876f7eee5896ef5bb", Size: 51354364},
 	{Digest: GzippedEmptyLayerDigest, Size: int64(len(GzippedEmptyLayer))},
@@ -353,7 +358,7 @@ func TestManifestSchema1Inspect(t *testing.T) {
 	}
 }
 
-func TestManifestSchema1UpdatedImageNeedsLayerDiffIDs(t *testing.T) {
+func TestManifestSchema1EditedImageNeedsLayerDiffIDs(t *testing.T) {
 	for _, m := range []genericManifest{
 		manifestSchema1FromFixture(t, "schema1.json"),
 		manifestSchema1FromComponentsLikeFixture(t),
@@ -365,7 +370,7 @@ func TestManifestSchema1UpdatedImageNeedsLayerDiffIDs(t *testing.T) {
 			manifest.DockerV2Schema2MediaType:       true,
 			imgspecv1.MediaTypeImageManifest:        true,
 		} {
-			needsDiffIDs := m.UpdatedImageNeedsLayerDiffIDs(types.ManifestUpdateOptions{
+			needsDiffIDs := m.EditedImageNeedsLayerDiffIDs(EditedImageEdits{
 				ManifestMIMEType: mt,
 			})
 			assert.Equal(t, expected, needsDiffIDs, mt)
@@ -373,19 +378,19 @@ func TestManifestSchema1UpdatedImageNeedsLayerDiffIDs(t *testing.T) {
 	}
 }
 
-func TestManifestSchema1UpdatedImage(t *testing.T) {
+func TestManifestSchema1EditedImage(t *testing.T) {
 	original := manifestSchema1FromFixture(t, "schema1.json")
 
 	// LayerInfos:
 	layerInfos := append(slices.Clone(original.LayerInfos()[1:]), original.LayerInfos()[0])
-	res, err := original.UpdatedImage(context.Background(), types.ManifestUpdateOptions{
+	res, err := original.editedImage(context.Background(), EditedImageEdits{
 		LayerInfos: layerInfos,
-	})
+	}, EditedImageInfo{})
 	require.NoError(t, err)
 	assert.Equal(t, layerInfos, res.LayerInfos())
-	_, err = original.UpdatedImage(context.Background(), types.ManifestUpdateOptions{
+	_, err = original.editedImage(context.Background(), EditedImageEdits{
 		LayerInfos: append(layerInfos, layerInfos[0]),
-	})
+	}, EditedImageInfo{})
 	assert.Error(t, err)
 
 	// EmbeddedDockerReference:
@@ -396,9 +401,9 @@ func TestManifestSchema1UpdatedImage(t *testing.T) {
 	} {
 		embeddedRef, err := reference.ParseNormalizedNamed(refName)
 		require.NoError(t, err)
-		res, err = original.UpdatedImage(context.Background(), types.ManifestUpdateOptions{
+		res, err = original.editedImage(context.Background(), EditedImageEdits{
 			EmbeddedDockerReference: embeddedRef,
-		})
+		}, EditedImageInfo{})
 		require.NoError(t, err)
 		// The previous embedded docker reference now does not match.
 		nonEmbeddedRef, err := reference.ParseNormalizedNamed("rhosp12/openstack-nova-api:latest")
@@ -413,21 +418,17 @@ func TestManifestSchema1UpdatedImage(t *testing.T) {
 		manifest.DockerV2Schema2MediaType,
 		imgspecv1.MediaTypeImageManifest,
 	} {
-		_, err = original.UpdatedImage(context.Background(), types.ManifestUpdateOptions{
+		_, err = original.editedImage(context.Background(), EditedImageEdits{
 			ManifestMIMEType: mime,
-			InformationOnly: types.ManifestUpdateInformation{
-				LayerInfos:   schema1FixtureLayerInfos,
-				LayerDiffIDs: schema1FixtureLayerDiffIDs,
-			},
-		})
+		}, schema1FixtureInfo)
 		assert.NoError(t, err, mime)
 	}
 	for _, mime := range []string{
 		"this is invalid",
 	} {
-		_, err = original.UpdatedImage(context.Background(), types.ManifestUpdateOptions{
+		_, err = original.editedImage(context.Background(), EditedImageEdits{
 			ManifestMIMEType: mime,
-		})
+		}, EditedImageInfo{})
 		assert.Error(t, err, mime)
 	}
 
@@ -442,18 +443,15 @@ func TestManifestSchema1UpdatedImage(t *testing.T) {
 
 func TestManifestSchema1ConvertToSchema2(t *testing.T) {
 	original := manifestSchema1FromFixture(t, "schema1.json")
-	res, err := original.UpdatedImage(context.Background(), types.ManifestUpdateOptions{
+	res, err := original.editedImage(context.Background(), EditedImageEdits{
 		ManifestMIMEType: manifest.DockerV2Schema2MediaType,
-		InformationOnly: types.ManifestUpdateInformation{
-			LayerInfos:   schema1FixtureLayerInfos,
-			LayerDiffIDs: schema1FixtureLayerDiffIDs,
-		},
-	})
+	}, schema1FixtureInfo)
 	require.NoError(t, err)
 
-	convertedJSON, mt, err := res.Manifest(context.Background())
-	require.NoError(t, err)
+	mt := res.manifestMIMEType()
 	assert.Equal(t, manifest.DockerV2Schema2MediaType, mt)
+	convertedJSON, err := res.serialize()
+	require.NoError(t, err)
 	// Ignore "config": we don’t want to hard-code a specific digest and size of the marshaled config here.
 	assertJSONEqualsFixture(t, convertedJSON, "schema1-to-schema2.json", "config")
 
@@ -467,19 +465,19 @@ func TestManifestSchema1ConvertToSchema2(t *testing.T) {
 	// (unlike schem1.json) contains throwaway layers.
 	original = manifestSchema1FromFixture(t, "schema2-to-schema1-by-docker.json")
 	updatedLayers, updatedLayersCopy := modifiedLayerInfos(t, schema1WithThrowawaysFixtureLayerInfos)
-	res, err = original.UpdatedImage(context.Background(), types.ManifestUpdateOptions{
+	res, err = original.editedImage(context.Background(), EditedImageEdits{
 		LayerInfos:       updatedLayers,
 		ManifestMIMEType: manifest.DockerV2Schema2MediaType,
-		InformationOnly: types.ManifestUpdateInformation{
-			LayerInfos:   updatedLayers,
-			LayerDiffIDs: schema1WithThrowawaysFixtureLayerDiffIDs,
-		},
+	}, EditedImageInfo{
+		LayerInfos:   updatedLayers,
+		LayerDiffIDs: schema1WithThrowawaysFixtureLayerDiffIDs,
 	})
 	require.NoError(t, err)
 	assert.Equal(t, updatedLayersCopy, updatedLayers) // updatedLayers have not been modified in place
-	convertedJSON, mt, err = res.Manifest(context.Background())
-	require.NoError(t, err)
+	mt = res.manifestMIMEType()
 	assert.Equal(t, manifest.DockerV2Schema2MediaType, mt)
+	convertedJSON, err = res.serialize()
+	require.NoError(t, err)
 	// Layers have been updated as expected
 	originalSrc := newSchema2ImageSource(t, "httpd:latest")
 	s2Manifest, err := manifestSchema2FromManifest(originalSrc, convertedJSON)
@@ -514,13 +512,12 @@ func TestManifestSchema1ConvertToSchema2(t *testing.T) {
 
 	// Conversion to schema2 with encryption fails
 	encryptedLayers := layerInfosWithCryptoOperation(original.LayerInfos(), types.Encrypt)
-	_, err = original.UpdatedImage(context.Background(), types.ManifestUpdateOptions{
+	_, err = original.editedImage(context.Background(), EditedImageEdits{
 		LayerInfos:       encryptedLayers,
 		ManifestMIMEType: manifest.DockerV2Schema2MediaType,
-		InformationOnly: types.ManifestUpdateInformation{
-			LayerInfos:   updatedLayers,
-			LayerDiffIDs: schema1WithThrowawaysFixtureLayerDiffIDs,
-		},
+	}, EditedImageInfo{
+		LayerInfos:   updatedLayers,
+		LayerDiffIDs: schema1WithThrowawaysFixtureLayerDiffIDs,
 	})
 	assert.Error(t, err)
 
@@ -529,18 +526,15 @@ func TestManifestSchema1ConvertToSchema2(t *testing.T) {
 
 func TestManifestSchema1ConvertToManifestOCI1(t *testing.T) {
 	original := manifestSchema1FromFixture(t, "schema1.json")
-	res, err := original.UpdatedImage(context.Background(), types.ManifestUpdateOptions{
+	res, err := original.editedImage(context.Background(), EditedImageEdits{
 		ManifestMIMEType: imgspecv1.MediaTypeImageManifest,
-		InformationOnly: types.ManifestUpdateInformation{
-			LayerInfos:   schema1FixtureLayerInfos,
-			LayerDiffIDs: schema1FixtureLayerDiffIDs,
-		},
-	})
+	}, schema1FixtureInfo)
 	require.NoError(t, err)
 
-	convertedJSON, mt, err := res.Manifest(context.Background())
-	require.NoError(t, err)
+	mt := res.manifestMIMEType()
 	assert.Equal(t, imgspecv1.MediaTypeImageManifest, mt)
+	convertedJSON, err := res.serialize()
+	require.NoError(t, err)
 	// Ignore "config": we don’t want to hard-code a specific digest and size of the marshaled config here.
 	assertJSONEqualsFixture(t, convertedJSON, "schema1-to-oci1.json", "config")
 
@@ -554,19 +548,19 @@ func TestManifestSchema1ConvertToManifestOCI1(t *testing.T) {
 	// (unlike schem1.json) contains throwaway layers.
 	original = manifestSchema1FromFixture(t, "schema2-to-schema1-by-docker.json")
 	updatedLayers, updatedLayersCopy := modifiedLayerInfos(t, schema1WithThrowawaysFixtureLayerInfos)
-	res, err = original.UpdatedImage(context.Background(), types.ManifestUpdateOptions{
+	res, err = original.editedImage(context.Background(), EditedImageEdits{
 		LayerInfos:       updatedLayers,
 		ManifestMIMEType: imgspecv1.MediaTypeImageManifest,
-		InformationOnly: types.ManifestUpdateInformation{ // FIXME: deduplicate this data
-			LayerInfos:   updatedLayers,
-			LayerDiffIDs: schema1WithThrowawaysFixtureLayerDiffIDs,
-		},
+	}, EditedImageInfo{
+		LayerInfos:   updatedLayers,
+		LayerDiffIDs: schema1WithThrowawaysFixtureLayerDiffIDs,
 	})
 	require.NoError(t, err)
 	assert.Equal(t, updatedLayersCopy, updatedLayers) // updatedLayers have not been modified in place
-	convertedJSON, mt, err = res.Manifest(context.Background())
-	require.NoError(t, err)
+	mt = res.manifestMIMEType()
 	assert.Equal(t, imgspecv1.MediaTypeImageManifest, mt)
+	convertedJSON, err = res.serialize()
+	require.NoError(t, err)
 	// Layers have been updated as expected
 	originalSrc := newSchema2ImageSource(t, "httpd:latest")
 	ociManifest, err := manifestOCI1FromManifest(originalSrc, convertedJSON)
@@ -601,18 +595,18 @@ func TestManifestSchema1ConvertToManifestOCI1(t *testing.T) {
 
 	// Conversion to OCI with encryption is possible.
 	encryptedLayers := layerInfosWithCryptoOperation(schema1WithThrowawaysFixtureLayerInfos, types.Encrypt)
-	res, err = original.UpdatedImage(context.Background(), types.ManifestUpdateOptions{
+	res, err = original.editedImage(context.Background(), EditedImageEdits{
 		LayerInfos:       encryptedLayers,
 		ManifestMIMEType: imgspecv1.MediaTypeImageManifest,
-		InformationOnly: types.ManifestUpdateInformation{
-			LayerInfos:   encryptedLayers,
-			LayerDiffIDs: schema1WithThrowawaysFixtureLayerDiffIDs,
-		},
+	}, EditedImageInfo{
+		LayerInfos:   encryptedLayers,
+		LayerDiffIDs: schema1WithThrowawaysFixtureLayerDiffIDs,
 	})
 	require.NoError(t, err)
-	convertedJSON, mt, err = res.Manifest(context.Background())
-	require.NoError(t, err)
+	mt = res.manifestMIMEType()
 	assert.Equal(t, imgspecv1.MediaTypeImageManifest, mt)
+	convertedJSON, err = res.serialize()
+	require.NoError(t, err)
 	// Layers have been updated as expected
 	ociManifest, err = manifestOCI1FromManifest(originalSrc, convertedJSON)
 	require.NoError(t, err)
@@ -650,7 +644,7 @@ func TestManifestSchema1ConvertToManifestOCI1(t *testing.T) {
 func TestConvertSchema1ToManifestOCIWithAnnotations(t *testing.T) {
 	// Test when converting an image from schema 1 (which doesn't support certain fields like
 	// URLs, annotations, etc.) to an OCI image (which supports those fields),
-	// that UpdatedImage propagates the features to the converted manifest.
+	// that editedImage propagates the features to the converted manifest.
 
 	original := manifestSchema1FromFixture(t, "schema1.json")
 	layerInfoOverwrites := []types.BlobInfo{
@@ -691,27 +685,19 @@ func TestConvertSchema1ToManifestOCIWithAnnotations(t *testing.T) {
 			MediaType: imgspecv1.MediaTypeImageLayerGzip,
 		},
 	}
-	res, err := original.UpdatedImage(context.Background(), types.ManifestUpdateOptions{
+	res, err := original.editedImage(context.Background(), EditedImageEdits{
 		ManifestMIMEType: imgspecv1.MediaTypeImageManifest,
 		LayerInfos:       layerInfoOverwrites,
-		InformationOnly: types.ManifestUpdateInformation{
-			LayerInfos:   schema1FixtureLayerInfos,
-			LayerDiffIDs: schema1FixtureLayerDiffIDs,
-		},
-	})
+	}, schema1FixtureInfo)
 	require.NoError(t, err)
 	assert.Equal(t, res.LayerInfos(), layerInfoOverwrites)
 
 	// Doing this with schema2 should fail
 	original = manifestSchema1FromFixture(t, "schema1.json")
-	res, err = original.UpdatedImage(context.Background(), types.ManifestUpdateOptions{
+	res, err = original.editedImage(context.Background(), EditedImageEdits{
 		ManifestMIMEType: manifest.DockerV2Schema2MediaType,
 		LayerInfos:       layerInfoOverwrites,
-		InformationOnly: types.ManifestUpdateInformation{
-			LayerInfos:   schema1FixtureLayerInfos,
-			LayerDiffIDs: schema1FixtureLayerDiffIDs,
-		},
-	})
+	}, schema1FixtureInfo)
 	require.NoError(t, err)
 	assert.NotEqual(t, res.LayerInfos(), layerInfoOverwrites)
 }
