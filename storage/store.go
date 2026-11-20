@@ -839,8 +839,9 @@ type store struct {
 	roLayerStoresUseGetters []roLayerStore // Almost all users should use the provided accessors instead of accessing this field directly.
 
 	// FIXME: The following fields need locking, and don’t have it.
-	additionalUIDs *idSet // Set by getAvailableIDs()
-	additionalGIDs *idSet // Set by getAvailableIDs()
+	additionalUIDs   *idSet // Set by getAvailableIDs()
+	additionalGIDs   *idSet // Set by getAvailableIDs()
+	additionalIDsErr error
 }
 
 // GetStore attempts to find an already-created Store object matching the

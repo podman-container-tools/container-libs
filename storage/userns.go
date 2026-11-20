@@ -3,6 +3,7 @@
 package storage
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/user"
@@ -25,8 +26,6 @@ import (
 // Differently, if the username is not specified for root users, a
 // default name is used.
 func getAdditionalSubIDs(username string) (*idSet, *idSet, error) {
-	var uids, gids *idSet
-
 	if unshare.IsRootless() {
 		username = os.Getenv("USER")
 		if username == "" {
@@ -46,12 +45,13 @@ func getAdditionalSubIDs(username string) (*idSet, *idSet, error) {
 	}
 	mappings, err := idtools.NewIDMappings(username, username)
 	if err != nil {
-		logrus.Errorf("Cannot find mappings for user %q: %v", username, err)
-	} else {
-		uids = getHostIDs(mappings.UIDs())
-		gids = getHostIDs(mappings.GIDs())
+		var unknownUser user.UnknownUserError
+		if _, lookupErr := user.Lookup(username); errors.As(lookupErr, &unknownUser) {
+			return nil, nil, fmt.Errorf("user %q was not found on the system, cannot read its subordinate IDs: %w", username, err)
+		}
+		return nil, nil, fmt.Errorf("cannot find mappings for user %q: %w", username, err)
 	}
-	return uids, gids, nil
+	return getHostIDs(mappings.UIDs()), getHostIDs(mappings.GIDs()), nil
 }
 
 // getAvailableIDs returns the list of ranges that are usable by the current user.
@@ -61,11 +61,8 @@ func getAdditionalSubIDs(username string) (*idSet, *idSet, error) {
 func (s *store) getAvailableIDs() (*idSet, *idSet, error) {
 	if s.additionalUIDs == nil {
 		uids, gids, err := getAdditionalSubIDs(s.autoUsernsUser)
-		if err != nil {
-			return nil, nil, err
-		}
 		// Store the result so we don't need to look it up again next time
-		s.additionalUIDs, s.additionalGIDs = uids, gids
+		s.additionalUIDs, s.additionalGIDs, s.additionalIDsErr = uids, gids, err
 	}
 
 	if !unshare.IsRootless() {
@@ -291,12 +288,16 @@ func (s *store) getAutoUserNS(options *types.AutoUserNsOptions, image *Image, rl
 		}
 	}
 
-	return getAutoUserNSIDMappings(
+	uidMap, gidMap, err := getAutoUserNSIDMappings(
 		int(size),
 		availableUIDs, availableGIDs,
 		usedUIDs, usedGIDs,
 		options.AdditionalUIDMappings, options.AdditionalGIDMappings,
 	)
+	if err != nil && errors.Is(err, types.ErrNoAvailableIDs) && s.additionalIDsErr != nil {
+		return nil, nil, fmt.Errorf("%w: %w", err, s.additionalIDsErr)
+	}
+	return uidMap, gidMap, err
 }
 
 // getAutoUserNSIDMappings computes the user/group id mappings for the automatic user namespace.
