@@ -103,6 +103,49 @@ func TestUnknownHookPath(t *testing.T) {
 	}
 }
 
+func TestStartContainerPathValidation(t *testing.T) {
+	tests := []struct {
+		name            string
+		stages          []string
+		extensionStages []string
+		expectedErr     error
+	}{
+		{
+			name:   "path need not exist in runtime namespace",
+			stages: []string{"startContainer"},
+		},
+		{
+			name:        "mixed-stage path must exist in runtime namespace",
+			stages:      []string{"startContainer", "poststart"},
+			expectedErr: os.ErrNotExist,
+		},
+		{
+			name:            "extension path need not exist in runtime namespace",
+			stages:          []string{"startContainer"},
+			extensionStages: []string{"startContainer"},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			hook := Hook{
+				Version: "1.0.0",
+				Hook: rspec.Hook{
+					Path: filepath.Join(t.TempDir(), "exists-only-in-container"),
+				},
+				Stages: test.stages,
+			}
+
+			err := hook.Validate(test.extensionStages)
+			if test.expectedErr == nil {
+				assert.NoError(t, err)
+			} else {
+				assert.ErrorIs(t, err, test.expectedErr)
+			}
+		})
+	}
+}
+
 func TestNoStages(t *testing.T) {
 	hook := Hook{
 		Version: "1.0.0",
