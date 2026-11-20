@@ -227,10 +227,10 @@ func newPullClient(sys *types.SystemContext, logicalRef dockerReference, pullSou
 	endpointSys := sys
 	// sys.DockerAuthConfig does not explicitly specify a registry; we must not blindly send the credentials intended for the primary endpoint to mirrors.
 	if endpointSys != nil && endpointSys.DockerAuthConfig != nil && reference.Domain(physicalRef.ref) != reference.Domain(logicalRef.ref) {
-		copy := *endpointSys
-		copy.DockerAuthConfig = nil
-		copy.DockerBearerRegistryToken = ""
-		endpointSys = &copy
+		copied := *endpointSys
+		copied.DockerAuthConfig = nil
+		copied.DockerBearerRegistryToken = ""
+		endpointSys = &copied
 	}
 
 	client, err := newDockerClientFromRef(endpointSys, physicalRef, registryConfig, false, "pull")
@@ -1026,13 +1026,13 @@ func deleteImage(ctx context.Context, sys *types.SystemContext, ref dockerRefere
 
 	// When retrieving the digest from a registry >= 2.3 use the following header:
 	//   "Accept": "application/vnd.docker.distribution.manifest.v2+json"
-	delete, err := c.makeRequest(ctx, http.MethodDelete, deletePath, headers, nil, v2Auth, nil)
+	deleteResp, err := c.makeRequest(ctx, http.MethodDelete, deletePath, headers, nil, v2Auth, nil)
 	if err != nil {
 		return err
 	}
-	defer delete.Body.Close()
-	if delete.StatusCode != http.StatusAccepted {
-		return fmt.Errorf("deleting %v: %w", ref.ref, registryHTTPResponseToError(delete))
+	defer deleteResp.Body.Close()
+	if deleteResp.StatusCode != http.StatusAccepted {
+		return fmt.Errorf("deleting %v: %w", ref.ref, registryHTTPResponseToError(deleteResp))
 	}
 
 	for i := 0; ; i++ {

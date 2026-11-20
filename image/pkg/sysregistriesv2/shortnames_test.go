@@ -15,10 +15,10 @@ func TestShortNameAliasConfNonempty(t *testing.T) {
 		{},
 		{Aliases: map[string]string{}},
 	} {
-		copy := c // A shallow copy
-		res := copy.nonempty()
+		copied := c // A shallow copy
+		res := copied.nonempty()
 		assert.False(t, res, c)
-		assert.Equal(t, c, copy, c) // Ensure the method did not change the original value
+		assert.Equal(t, c, copied, c) // Ensure the method did not change the original value
 	}
 
 	res := (&shortNameAliasConf{}).nonempty()
@@ -26,10 +26,10 @@ func TestShortNameAliasConfNonempty(t *testing.T) {
 	for _, c := range []shortNameAliasConf{
 		{Aliases: map[string]string{"a": "example.com/b"}},
 	} {
-		copy := c // A shallow copy
-		res := copy.nonempty()
+		copied := c // A shallow copy
+		res := copied.nonempty()
 		assert.True(t, res, c)
-		assert.Equal(t, c, copy, c) // Ensure the method did not change the original value
+		assert.Equal(t, c, copied, c) // Ensure the method did not change the original value
 	}
 }
 

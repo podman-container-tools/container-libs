@@ -62,11 +62,11 @@ type shortNameAliasConf struct {
 
 // nonempty returns true if config contains at least one configuration entry.
 func (c *shortNameAliasConf) nonempty() bool {
-	copy := *c // A shallow copy
-	if copy.Aliases != nil && len(copy.Aliases) == 0 {
-		copy.Aliases = nil
+	copied := *c // A shallow copy
+	if copied.Aliases != nil && len(copied.Aliases) == 0 {
+		copied.Aliases = nil
 	}
-	return !reflect.DeepEqual(copy, shortNameAliasConf{})
+	return !reflect.DeepEqual(copied, shortNameAliasConf{})
 }
 
 // alias combines the parsed value of an alias with the config file it has been

@@ -195,17 +195,17 @@ type V1RegistriesConf struct {
 // Nonempty returns true if config contains at least one configuration entry.
 // Empty arrays are treated as missing entries.
 func (config *V1RegistriesConf) Nonempty() bool {
-	copy := *config // A shallow copy
-	if copy.V1TOMLConfig.Search.Registries != nil && len(copy.V1TOMLConfig.Search.Registries) == 0 {
-		copy.V1TOMLConfig.Search.Registries = nil
+	copied := *config // A shallow copy
+	if copied.V1TOMLConfig.Search.Registries != nil && len(copied.V1TOMLConfig.Search.Registries) == 0 {
+		copied.V1TOMLConfig.Search.Registries = nil
 	}
-	if copy.V1TOMLConfig.Insecure.Registries != nil && len(copy.V1TOMLConfig.Insecure.Registries) == 0 {
-		copy.V1TOMLConfig.Insecure.Registries = nil
+	if copied.V1TOMLConfig.Insecure.Registries != nil && len(copied.V1TOMLConfig.Insecure.Registries) == 0 {
+		copied.V1TOMLConfig.Insecure.Registries = nil
 	}
-	if copy.V1TOMLConfig.Block.Registries != nil && len(copy.V1TOMLConfig.Block.Registries) == 0 {
-		copy.V1TOMLConfig.Block.Registries = nil
+	if copied.V1TOMLConfig.Block.Registries != nil && len(copied.V1TOMLConfig.Block.Registries) == 0 {
+		copied.V1TOMLConfig.Block.Registries = nil
 	}
-	return copy.hasSetField()
+	return copied.hasSetField()
 }
 
 // hasSetField returns true if config contains at least one configuration entry.
@@ -253,20 +253,20 @@ type V2RegistriesConf struct {
 
 // Nonempty returns true if config contains at least one configuration entry.
 func (config *V2RegistriesConf) Nonempty() bool {
-	copy := *config // A shallow copy
-	if copy.Registries != nil && len(copy.Registries) == 0 {
-		copy.Registries = nil
+	copied := *config // A shallow copy
+	if copied.Registries != nil && len(copied.Registries) == 0 {
+		copied.Registries = nil
 	}
-	if copy.UnqualifiedSearchRegistries != nil && len(copy.UnqualifiedSearchRegistries) == 0 {
-		copy.UnqualifiedSearchRegistries = nil
+	if copied.UnqualifiedSearchRegistries != nil && len(copied.UnqualifiedSearchRegistries) == 0 {
+		copied.UnqualifiedSearchRegistries = nil
 	}
-	if copy.CredentialHelpers != nil && len(copy.CredentialHelpers) == 0 {
-		copy.CredentialHelpers = nil
+	if copied.CredentialHelpers != nil && len(copied.CredentialHelpers) == 0 {
+		copied.CredentialHelpers = nil
 	}
-	if !copy.shortNameAliasConf.nonempty() {
-		copy.shortNameAliasConf = shortNameAliasConf{}
+	if !copied.shortNameAliasConf.nonempty() {
+		copied.shortNameAliasConf = shortNameAliasConf{}
 	}
-	return copy.hasSetField()
+	return copied.hasSetField()
 }
 
 // hasSetField returns true if config contains at least one configuration entry.

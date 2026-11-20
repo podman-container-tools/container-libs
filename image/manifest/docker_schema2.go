@@ -189,8 +189,8 @@ func Schema2FromComponents(config Schema2Descriptor, layers []Schema2Descriptor)
 
 // Schema2Clone creates a copy of the supplied Schema2 manifest.
 func Schema2Clone(src *Schema2) *Schema2 {
-	copy := *src
-	return &copy
+	copied := *src
+	return &copied
 }
 
 // ConfigInfo returns a complete BlobInfo for the separate config object, or a BlobInfo{Digest:""} if there isn't a separate object.
