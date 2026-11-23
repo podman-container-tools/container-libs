@@ -2,9 +2,11 @@ package secrets
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.podman.io/common/pkg/secrets/define"
 )
 
 var drivertype = "file"
@@ -299,4 +301,85 @@ func TestSecretList(t *testing.T) {
 	allSecrets, err := manager.List()
 	require.NoError(t, err)
 	require.Len(t, allSecrets, 2)
+}
+
+func TestStoreErrorCategories(t *testing.T) {
+	tests := []struct {
+		name     string
+		existing string // if set, store a secret with this name first
+		secret   string
+		data     []byte
+		driver   string
+		replace  bool
+		ignore   bool
+		wantErr  error // nil means success expected
+		notErr   error // if set, the error must NOT match this
+	}{
+		// secret name validation
+		{name: "empty name", secret: "", wantErr: define.ErrInvalidArg},
+		{name: "name with comma", secret: "a,b", wantErr: define.ErrInvalidArg},
+		{name: "name with slash", secret: "a/b", wantErr: define.ErrInvalidArg},
+		{name: "name with equals", secret: "a=b", wantErr: define.ErrInvalidArg},
+		{name: "name with NULL", secret: "a\000b", wantErr: define.ErrInvalidArg},
+		{name: "name too long", secret: strings.Repeat("a", 254), wantErr: define.ErrInvalidArg},
+		{name: "name max length", secret: strings.Repeat("a", 253)},
+
+		// data size validation (limit is exclusive)
+		{name: "empty data", secret: "s", data: []byte{}, wantErr: define.ErrInvalidArg},
+		{name: "data at limit", secret: "s", data: make([]byte, maxSecretSize), wantErr: define.ErrInvalidArg},
+		{name: "data below limit", secret: "s", data: make([]byte, maxSecretSize-1)},
+
+		// driver validation
+		{name: "unknown driver", secret: "s", driver: "bogus", wantErr: define.ErrInvalidArg},
+
+		// option validation
+		{name: "replace and ignore", secret: "s", replace: true, ignore: true, wantErr: define.ErrInvalidArg},
+
+		// conflicts
+		{
+			name: "duplicate name", existing: "dup", secret: "dup",
+			wantErr: define.ErrSecretExists, notErr: define.ErrInvalidArg,
+		},
+		{
+			name: "duplicate name with unknown driver", existing: "dup", secret: "dup", driver: "bogus",
+			wantErr: define.ErrSecretExists, notErr: define.ErrInvalidArg,
+		},
+		{name: "duplicate name with replace", existing: "dup", secret: "dup", replace: true},
+		{name: "duplicate name with ignore", existing: "dup", secret: "dup", ignore: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			manager, opts := setup(t)
+
+			if tt.existing != "" {
+				_, err := manager.Store(tt.existing, []byte("mydata"), drivertype, StoreOptions{DriverOpts: opts})
+				require.NoError(t, err)
+			}
+
+			data := tt.data
+			if data == nil {
+				data = []byte("mydata")
+			}
+			driver := tt.driver
+			if driver == "" {
+				driver = drivertype
+			}
+
+			_, err := manager.Store(tt.secret, data, driver, StoreOptions{
+				DriverOpts:     opts,
+				Replace:        tt.replace,
+				IgnoreIfExists: tt.ignore,
+			})
+
+			if tt.wantErr == nil {
+				require.NoError(t, err)
+				return
+			}
+			require.ErrorIs(t, err, tt.wantErr)
+			if tt.notErr != nil {
+				require.NotErrorIs(t, err, tt.notErr)
+			}
+		})
+	}
 }
