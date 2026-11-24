@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.podman.io/image/v5/types"
+	"go.yaml.in/yaml/v3"
 )
 
 func dockerRefFromString(t *testing.T, s string) dockerReference {
@@ -404,6 +405,85 @@ func TestRegistryNamespaceSignatureTopLevel(t *testing.T) {
 	} {
 		res := c.ns.signatureTopLevel(c.forWriting)
 		assert.Equal(t, c.expected, res, fmt.Sprintf("%#v %v", c.ns, c.forWriting))
+	}
+}
+
+func TestSigstoreAttachmentsWriteModeUnmarshalYAML(t *testing.T) {
+	for _, c := range []struct {
+		input    string
+		expected sigstoreAttachmentsWriteMode
+	}{
+		{"cosign-tag", sigstoreAttachmentsWriteCosignTag},
+		{"referrers", sigstoreAttachmentsWriteReferrers},
+		{"both", sigstoreAttachmentsWriteBoth},
+	} {
+		var ns registryNamespace
+		err := yaml.Unmarshal([]byte("sigstore-attachments-write: "+c.input), &ns)
+		require.NoError(t, err, c.input)
+		require.NotNil(t, ns.SigstoreAttachmentsWrite, c.input)
+		assert.Equal(t, c.expected, *ns.SigstoreAttachmentsWrite, c.input)
+	}
+
+	for _, input := range []string{"cosign", "referrer", "Both", "true", "[]"} {
+		var ns registryNamespace
+		err := yaml.Unmarshal([]byte("sigstore-attachments-write: "+input), &ns)
+		assert.Error(t, err, input)
+	}
+
+	// The option is optional; neither omitting it nor setting it to null is an error.
+	for _, input := range []string{"use-sigstore-attachments: true", "sigstore-attachments-write:"} {
+		var ns registryNamespace
+		require.NoError(t, yaml.Unmarshal([]byte(input), &ns), input)
+		assert.Nil(t, ns.SigstoreAttachmentsWrite, input)
+	}
+}
+
+func TestRegistryConfigurationSigstoreAttachmentsWrite(t *testing.T) {
+	mode := func(m sigstoreAttachmentsWriteMode) *sigstoreAttachmentsWriteMode { return &m }
+
+	// Not configured at all: writing referrers is opt-in.
+	emptyConfig := registryConfiguration{}
+	assert.Equal(t, sigstoreAttachmentsWriteCosignTag,
+		emptyConfig.sigstoreAttachmentsWrite(dockerRefFromString(t, "//example.com/ns1/repo")))
+
+	config := registryConfiguration{
+		DefaultDocker: &registryNamespace{SigstoreAttachmentsWrite: mode(sigstoreAttachmentsWriteBoth)},
+		Docker: map[string]registryNamespace{
+			"example.com":                  {SigstoreAttachmentsWrite: mode(sigstoreAttachmentsWriteReferrers)},
+			"example.com/ns1":              {}, // Set, but without the option: keep looking at the parents.
+			"example.com/ns1/ns2/repo":     {SigstoreAttachmentsWrite: mode(sigstoreAttachmentsWriteCosignTag)},
+			"other.example.com/ns1/repo:t": {SigstoreAttachmentsWrite: mode(sigstoreAttachmentsWriteBoth)},
+		},
+	}
+	for _, c := range []struct {
+		input    string
+		expected sigstoreAttachmentsWriteMode
+	}{
+		{"example.com/ns1/ns2/repo:latest", sigstoreAttachmentsWriteCosignTag},
+		{"example.com/ns1/ns2/other:latest", sigstoreAttachmentsWriteReferrers},
+		{"example.com/ns1/repo:latest", sigstoreAttachmentsWriteReferrers},
+		{"example.com/other/repo:latest", sigstoreAttachmentsWriteReferrers},
+		{"other.example.com/ns1/repo:t", sigstoreAttachmentsWriteBoth},
+		{"other.example.com/ns1/repo:latest", sigstoreAttachmentsWriteBoth}, // From default-docker
+		{"unknown.example.com/repo:latest", sigstoreAttachmentsWriteBoth},   // From default-docker
+	} {
+		res := config.sigstoreAttachmentsWrite(dockerRefFromString(t, "//"+c.input))
+		assert.Equal(t, c.expected, res, c.input)
+	}
+}
+
+func TestSigstoreAttachmentsWriteModeDestinations(t *testing.T) {
+	for _, c := range []struct {
+		mode                 sigstoreAttachmentsWriteMode
+		cosignTag, referrers bool
+	}{
+		{"", true, false}, // The zero value behaves like the default
+		{sigstoreAttachmentsWriteCosignTag, true, false},
+		{sigstoreAttachmentsWriteReferrers, false, true},
+		{sigstoreAttachmentsWriteBoth, true, true},
+	} {
+		assert.Equal(t, c.cosignTag, c.mode.writesCosignTag(), string(c.mode))
+		assert.Equal(t, c.referrers, c.mode.writesReferrers(), string(c.mode))
 	}
 }
 
