@@ -24,6 +24,17 @@ func (e ErrBadRequest) Error() string {
 	return "bad request"
 }
 
+// ErrFullBlobResponse is returned by ImageSourceSeekable.GetBlobAt when the server replied to a request
+// for parts of the blob (anything other than a single chunk at offset 0) with the whole blob;
+// the caller can request the whole blob (a single chunk at offset 0) and serve the ranges from a local copy.
+// It must not be returned for a single chunk at offset 0.
+type ErrFullBlobResponse struct { //nolint: errname
+}
+
+func (e ErrFullBlobResponse) Error() string {
+	return "server returned the full blob for a partial request"
+}
+
 // ErrFallbackToOrdinaryLayerDownload is a custom error type that
 // suggests to the caller that a fallback mechanism can be used
 // instead of a hard failure.

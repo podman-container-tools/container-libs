@@ -73,6 +73,9 @@ type chunkedDiffer struct {
 	// is no TOC referenced by the manifest.
 	blobDigest digest.Digest
 	blobSize   int64
+	// fullBlobFallback is the local copy of the blob used if the source can't serve partial requests.
+	// It is released by Close.
+	fullBlobFallback *fullBlobFallback
 
 	// Input format
 	// ==========
@@ -194,6 +197,10 @@ func (c *chunkedDiffer) convertTarToZstdChunked(destDirectory string, payload *o
 }
 
 func (c *chunkedDiffer) Close() error {
+	if c.fullBlobFallback != nil {
+		_ = c.fullBlobFallback.Close()
+		c.fullBlobFallback = nil
+	}
 	if c.tarSplit != nil {
 		err := c.tarSplit.Close()
 		c.tarSplit = nil
@@ -206,7 +213,7 @@ func (c *chunkedDiffer) Close() error {
 // If it returns an error that matches ErrFallbackToOrdinaryLayerDownload, the caller can
 // retry the operation with a different method.
 // The caller must call Close() on the returned Differ.
-func NewDiffer(ctx context.Context, store storage.Store, blobDigest digest.Digest, blobSize int64, annotations map[string]string, iss ImageSourceSeekable) (graphdriver.Differ, error) {
+func NewDiffer(ctx context.Context, store storage.Store, blobDigest digest.Digest, blobSize int64, annotations map[string]string, iss ImageSourceSeekable) (_ graphdriver.Differ, retErr error) {
 	pullOptions := parsePullOptions(store)
 
 	if !pullOptions.enablePartialImages {
@@ -227,6 +234,15 @@ func NewDiffer(ctx context.Context, store storage.Store, blobDigest digest.Diges
 		return nil, newErrFallbackToOrdinaryLayerDownload(fmt.Errorf("graph driver %s does not support partial pull", graphDriver.String()))
 	}
 
+	// If the source can't serve partial requests, keep a local copy of the blob (convert_images reuses it if it was already downloaded).
+	fallback := &fullBlobFallback{source: iss, tmpDir: store.GraphRoot(), blobDigest: blobDigest, blobSize: blobSize}
+	iss = fallback
+	defer func() {
+		if retErr != nil {
+			_ = fallback.Close()
+		}
+	}()
+
 	differ, err := getProperDiffer(store, blobDigest, blobSize, annotations, iss, pullOptions)
 	if err != nil {
 		if _, ok := errors.AsType[ErrFallbackToOrdinaryLayerDownload](err); !ok {
@@ -243,9 +259,13 @@ func NewDiffer(ctx context.Context, store storage.Store, blobDigest digest.Diges
 			return nil, fmt.Errorf("neither a partial pull nor convert_images is possible: %s", err.Error())
 		}
 		logrus.Debugf("Created differ to convert blob %q", blobDigest)
-		return makeConvertFromRawDiffer(store, blobDigest, blobSize, iss, pullOptions)
+		differ, err = makeConvertFromRawDiffer(store, blobDigest, blobSize, iss, pullOptions)
+		if err != nil {
+			return nil, err
+		}
 	}
 
+	differ.fullBlobFallback = fallback
 	return differ, nil
 }
 
@@ -271,7 +291,7 @@ func (e errFallbackCanConvert) Unwrap() error {
 // It returns a “proper” differ (not a convert_images one) if possible.
 // May return an error matching ErrFallbackToOrdinaryLayerDownload if a fallback to an alternative
 // (either makeConvertFromRawDiffer, or a non-partial pull) is permissible.
-func getProperDiffer(store storage.Store, blobDigest digest.Digest, blobSize int64, annotations map[string]string, iss ImageSourceSeekable, pullOptions pullOptions) (graphdriver.Differ, error) {
+func getProperDiffer(store storage.Store, blobDigest digest.Digest, blobSize int64, annotations map[string]string, iss ImageSourceSeekable, pullOptions pullOptions) (*chunkedDiffer, error) {
 	zstdChunkedTOCDigestString, hasZstdChunkedTOC := annotations[minimal.ManifestChecksumKey]
 	estargzTOCDigestString, hasEstargzTOC := annotations[estargz.TOCJSONDigestAnnotation]
 
@@ -1486,8 +1506,8 @@ func getBlobAt(is ImageSourceSeekable, chunksToRequest ...ImageSourceChunk) (cha
 	return stream, nil
 }
 
-func (c *chunkedDiffer) copyAllBlobToFile(destination *os.File) (digest.Digest, error) {
-	streamsOrErrors, err := getBlobAt(c.stream, ImageSourceChunk{Offset: 0, Length: uint64(c.blobSize)})
+func copyAllBlobToFile(stream ImageSourceSeekable, blobSize int64, destination *os.File, copyBuffer []byte) (digest.Digest, error) {
+	streamsOrErrors, err := getBlobAt(stream, ImageSourceChunk{Offset: 0, Length: uint64(blobSize)})
 	if err != nil {
 		return "", err
 	}
@@ -1495,10 +1515,10 @@ func (c *chunkedDiffer) copyAllBlobToFile(destination *os.File) (digest.Digest, 
 	originalRawDigester := digest.Canonical.Digester()
 	for soe := range streamsOrErrors {
 		if soe.stream != nil {
-			r := io.TeeReader(soe.stream, originalRawDigester.Hash())
+			r := io.TeeReader(io.LimitReader(soe.stream, blobSize+1), originalRawDigester.Hash()) // +1: a server sending more than blobSize is detected
 
 			// copy the entire tarball and compute its digest
-			_, err = io.CopyBuffer(destination, r, c.copyBuffer)
+			_, err = io.CopyBuffer(destination, r, copyBuffer)
 			_ = soe.stream.Close()
 		}
 		if soe.err != nil && err == nil {
@@ -1560,7 +1580,7 @@ func (c *chunkedDiffer) ApplyDiff(dest string, options *archive.TarOptions, diff
 		}()
 
 		// calculate the checksum before accessing the file.
-		compressedDigest, err = c.copyAllBlobToFile(blobFile)
+		compressedDigest, err = copyAllBlobToFile(c.stream, c.blobSize, blobFile, c.copyBuffer)
 		if err != nil {
 			return graphdriver.DriverWithDifferOutput{}, err
 		}

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -19,6 +20,7 @@ import (
 
 	"github.com/docker/distribution/registry/api/errcode"
 	v2 "github.com/docker/distribution/registry/api/v2"
+	"github.com/opencontainers/go-digest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.podman.io/image/v5/internal/private"
@@ -237,6 +239,55 @@ func verifyGetBlobAtOutput(t *testing.T, streams chan io.ReadCloser, errs chan e
 		data, err := readNextStream(streams, errs)
 		assert.Equal(t, c.expectedData, data)
 		assert.Equal(t, c.expectedError, err)
+	}
+}
+
+func TestDockerImageSourceGetBlobAt(t *testing.T) {
+	blob := []byte("0123456789")
+	blobDigest := digest.FromBytes(blob)
+	blobPathRegex := regexp.MustCompile("^/v2/.*/blobs/" + blobDigest.String() + "$")
+
+	// A server that ignores all Range headers
+	server := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v2/":
+			rw.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodGet && r.URL.Path == "/v2/busybox/manifests/latest":
+			rw.WriteHeader(http.StatusOK) // Empty body is good enough for this test
+		case r.Method == http.MethodGet && blobPathRegex.MatchString(r.URL.Path):
+			_, err := rw.Write(blob)
+			assert.NoError(t, err)
+		default:
+			assert.Fail(t, "Unexpected request", "%v %v", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	registryURL, err := url.Parse(server.URL)
+	require.NoError(t, err)
+	ref, err := ParseReference("//" + registryURL.Host + "/busybox:latest")
+	require.NoError(t, err)
+	src, err := ref.NewImageSource(context.Background(), &types.SystemContext{
+		DockerInsecureSkipTLSVerify: types.OptionalBoolTrue,
+	})
+	require.NoError(t, err)
+	defer src.Close()
+
+	for _, c := range []struct {
+		chunks   []private.ImageSourceChunk
+		expected []verifyGetBlobAtData // nil if FullBlobResponseError is expected
+	}{
+		{[]private.ImageSourceChunk{{Offset: 0, Length: 4}}, []verifyGetBlobAtData{{[]byte("0123"), nil}, {[]byte(nil), nil}}},    // A prefix
+		{[]private.ImageSourceChunk{{Offset: 0, Length: math.MaxUint64}}, []verifyGetBlobAtData{{blob, nil}, {[]byte(nil), nil}}}, // The whole blob
+		{[]private.ImageSourceChunk{{Offset: 2, Length: 3}}, nil},
+		{[]private.ImageSourceChunk{{Offset: 0, Length: 2}, {Offset: 5, Length: 2}}, nil},
+	} {
+		streams, errs, err := src.(private.ImageSource).GetBlobAt(context.Background(), types.BlobInfo{Digest: blobDigest, Size: int64(len(blob))}, c.chunks)
+		if c.expected == nil {
+			assert.Equal(t, private.FullBlobResponseError{}, err, c.chunks)
+			continue
+		}
+		require.NoError(t, err, c.chunks)
+		verifyGetBlobAtOutput(t, streams, errs, c.expected)
 	}
 }
 
