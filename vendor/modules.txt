@@ -8,6 +8,10 @@ cyphar.com/go-pathrs/procfs
 # dario.cat/mergo v1.0.2
 ## explicit; go 1.13
 dario.cat/mergo
+# filippo.io/edwards25519 v1.2.0
+## explicit; go 1.24.0
+filippo.io/edwards25519
+filippo.io/edwards25519/field
 # github.com/BurntSushi/toml v1.6.0
 ## explicit; go 1.18
 github.com/BurntSushi/toml
@@ -74,7 +78,9 @@ github.com/chzyer/readline
 ## explicit; go 1.18
 github.com/clipperhouse/uax29/v2/graphemes
 # github.com/cloudflare/circl v1.6.3
-## explicit; go 1.22.0
+## explicit; go 1.24.0
+# github.com/cloudflare/circl v1.6.4
+## go 1.24.0
 github.com/cloudflare/circl/dh/x25519
 github.com/cloudflare/circl/dh/x448
 github.com/cloudflare/circl/ecc/goldilocks
@@ -142,7 +148,7 @@ github.com/containers/ocicrypt/keywrap/pkcs7
 github.com/containers/ocicrypt/spec
 github.com/containers/ocicrypt/utils
 github.com/containers/ocicrypt/utils/keyprovider
-# github.com/coreos/go-oidc/v3 v3.20.0
+# github.com/coreos/go-oidc/v3 v3.21.0
 ## explicit; go 1.25.0
 github.com/coreos/go-oidc/v3/oidc
 # github.com/coreos/go-systemd/v22 v22.7.0
@@ -203,6 +209,8 @@ github.com/felixge/httpsnoop
 github.com/fsnotify/fsnotify
 github.com/fsnotify/fsnotify/internal
 # github.com/go-jose/go-jose/v4 v4.1.7
+## explicit; go 1.24.0
+# github.com/go-jose/go-jose/v4 v4.1.9
 ## explicit; go 1.24.0
 github.com/go-jose/go-jose/v4
 github.com/go-jose/go-jose/v4/cipher
@@ -445,14 +453,18 @@ github.com/secure-systems-lab/go-securesystemslib/encrypted
 # github.com/sergi/go-diff v1.4.0
 ## explicit; go 1.13
 # github.com/sigstore/fulcio v1.8.8
-## explicit; go 1.26.0
+## explicit; go 1.27.3
+# github.com/sigstore/fulcio v1.10.2
+## explicit; go 1.27.3
 github.com/sigstore/fulcio/pkg/api
 github.com/sigstore/fulcio/pkg/certificate
 # github.com/sigstore/protobuf-specs v0.5.2
 ## explicit; go 1.23
 github.com/sigstore/protobuf-specs/gen/pb-go/common/v1
 # github.com/sigstore/sigstore v1.10.11
-## explicit; go 1.25.0
+## explicit; go 1.27
+# github.com/sigstore/sigstore v1.11.4
+## explicit; go 1.27
 github.com/sigstore/sigstore/pkg/cryptoutils
 github.com/sigstore/sigstore/pkg/oauth
 github.com/sigstore/sigstore/pkg/oauthflow
@@ -575,7 +587,7 @@ go.opentelemetry.io/otel/trace/embedded
 go.opentelemetry.io/otel/trace/internal/telemetry
 go.opentelemetry.io/otel/trace/noop
 # go.podman.io/image/v5 v5.42.1
-## explicit; go 1.26.0
+## explicit; go 1.27.3
 # go.podman.io/storage v1.65.1
 ## explicit; go 1.26.0
 # go.yaml.in/yaml/v2 v2.4.4
@@ -703,13 +715,19 @@ golang.org/x/tools/internal/typesinternal
 golang.org/x/tools/internal/versions
 # google.golang.org/genproto/googleapis/api v0.0.0-20260928230214-8a89bd6388cc
 ## explicit; go 1.26.0
+# google.golang.org/genproto/googleapis/api v0.0.0-20261026165753-2ffab32bce7e
+## explicit; go 1.26.0
 google.golang.org/genproto/googleapis/api
 google.golang.org/genproto/googleapis/api/annotations
 # google.golang.org/genproto/googleapis/rpc v0.0.0-20260928230214-8a89bd6388cc
 ## explicit; go 1.26.0
+# google.golang.org/genproto/googleapis/rpc v0.0.0-20261026165753-2ffab32bce7e
+## explicit; go 1.26.0
 google.golang.org/genproto/googleapis/rpc/status
 # google.golang.org/grpc v1.83.2
-## explicit; go 1.25.0
+## explicit; go 1.26.0
+# google.golang.org/grpc v1.85.0
+## explicit; go 1.26.0
 google.golang.org/grpc
 google.golang.org/grpc/attributes
 google.golang.org/grpc/backoff
