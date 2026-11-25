@@ -173,15 +173,36 @@ func TestAddReplaceSecretName(t *testing.T) {
 		Replace:    true,
 	}
 
-	_, err := manager.Store("mysecret", []byte("mydata"), drivertype, storeOpts)
+	id1, err := manager.Store("mysecret", []byte("mydata"), drivertype, storeOpts)
 	require.NoError(t, err)
 
-	_, err = manager.Store("mysecret", []byte("mydata.diff"), drivertype, storeOpts)
+	id2, err := manager.Store("mysecret", []byte("mydata.diff"), drivertype, storeOpts)
 	require.NoError(t, err)
+	require.NotEqual(t, id1, id2)
 
 	_, data, err := manager.LookupSecretData("mysecret")
 	require.NoError(t, err)
 	require.Equal(t, string(data), "mydata.diff")
+
+	// Simulate a driver losing the old secret data while metadata remains.
+	driver, err := getDriver(drivertype, opts)
+	require.NoError(t, err)
+	require.NoError(t, driver.Delete(id2))
+
+	id3, err := manager.Store("mysecret", []byte("mydata.after-lost"), drivertype, storeOpts)
+	require.NoError(t, err)
+	require.NotEqual(t, id2, id3)
+
+	_, err = manager.Lookup(id2)
+	require.ErrorIs(t, err, ErrNoSuchSecret)
+
+	secrets, err := manager.List()
+	require.NoError(t, err)
+	require.Len(t, secrets, 1)
+
+	_, data, err = manager.LookupSecretData("mysecret")
+	require.NoError(t, err)
+	require.Equal(t, string(data), "mydata.after-lost")
 
 	_, err = manager.Store("nonexistingsecret", []byte("mydata"), drivertype, storeOpts)
 	require.NoError(t, err)
