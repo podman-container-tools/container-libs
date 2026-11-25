@@ -1,6 +1,6 @@
 module go.podman.io/image/v5
 
-go 1.26.0
+go 1.27
 
 // Warning: Ensure the "go" and "toolchain" versions match exactly to prevent unwanted auto-updates.
 // That generally means there should be no toolchain directive present.
@@ -31,7 +31,7 @@ require (
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	github.com/secure-systems-lab/go-securesystemslib v0.11.1
 	github.com/sigstore/fulcio v1.8.8
-	github.com/sigstore/sigstore v1.10.11
+	github.com/sigstore/sigstore v1.11.4
 	github.com/sirupsen/logrus v1.10.2
 	github.com/stretchr/testify v1.12.1
 	github.com/sylabs/sif/v2 v2.24.2
@@ -47,6 +47,7 @@ require (
 
 require (
 	cyphar.com/go-pathrs v0.2.5 // indirect
+	filippo.io/edwards25519 v1.2.0 // indirect
 	github.com/Microsoft/go-winio v0.6.3 // indirect
 	github.com/VividCortex/ewma v1.2.0 // indirect
 	github.com/acarl005/stripansi v0.0.0-20180116102854-5a71ef0e047d // indirect
@@ -57,12 +58,12 @@ require (
 	github.com/containerd/errdefs v1.0.0 // indirect
 	github.com/containerd/errdefs/pkg v0.3.0 // indirect
 	github.com/containerd/stargz-snapshotter/estargz v0.19.1 // indirect
-	github.com/coreos/go-oidc/v3 v3.20.0 // indirect
+	github.com/coreos/go-oidc/v3 v3.21.0 // indirect
 	github.com/cyphar/filepath-securejoin v0.7.0 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/fatih/color v1.19.0 // indirect
 	github.com/felixge/httpsnoop v1.1.0 // indirect
-	github.com/go-jose/go-jose/v4 v4.1.7 // indirect
+	github.com/go-jose/go-jose/v4 v4.1.9 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/google/go-containerregistry v0.22.1 // indirect

@@ -8,6 +8,10 @@ cyphar.com/go-pathrs/procfs
 # dario.cat/mergo v1.0.2
 ## explicit; go 1.13
 dario.cat/mergo
+# filippo.io/edwards25519 v1.2.0
+## explicit; go 1.24.0
+filippo.io/edwards25519
+filippo.io/edwards25519/field
 # github.com/BurntSushi/toml v1.6.0
 ## explicit; go 1.18
 github.com/BurntSushi/toml
@@ -142,7 +146,7 @@ github.com/containers/ocicrypt/keywrap/pkcs7
 github.com/containers/ocicrypt/spec
 github.com/containers/ocicrypt/utils
 github.com/containers/ocicrypt/utils/keyprovider
-# github.com/coreos/go-oidc/v3 v3.20.0
+# github.com/coreos/go-oidc/v3 v3.21.0
 ## explicit; go 1.25.0
 github.com/coreos/go-oidc/v3/oidc
 # github.com/coreos/go-systemd/v22 v22.7.0
@@ -203,6 +207,8 @@ github.com/felixge/httpsnoop
 github.com/fsnotify/fsnotify
 github.com/fsnotify/fsnotify/internal
 # github.com/go-jose/go-jose/v4 v4.1.7
+## explicit; go 1.24.0
+# github.com/go-jose/go-jose/v4 v4.1.9
 ## explicit; go 1.24.0
 github.com/go-jose/go-jose/v4
 github.com/go-jose/go-jose/v4/cipher
@@ -452,7 +458,9 @@ github.com/sigstore/fulcio/pkg/certificate
 ## explicit; go 1.23
 github.com/sigstore/protobuf-specs/gen/pb-go/common/v1
 # github.com/sigstore/sigstore v1.10.11
-## explicit; go 1.25.0
+## explicit; go 1.27
+# github.com/sigstore/sigstore v1.11.4
+## explicit; go 1.27
 github.com/sigstore/sigstore/pkg/cryptoutils
 github.com/sigstore/sigstore/pkg/oauth
 github.com/sigstore/sigstore/pkg/oauthflow
@@ -575,7 +583,7 @@ go.opentelemetry.io/otel/trace/embedded
 go.opentelemetry.io/otel/trace/internal/telemetry
 go.opentelemetry.io/otel/trace/noop
 # go.podman.io/image/v5 v5.42.1
-## explicit; go 1.26.0
+## explicit; go 1.27
 # go.podman.io/storage v1.65.1
 ## explicit; go 1.26.0
 # go.yaml.in/yaml/v2 v2.4.4
