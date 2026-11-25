@@ -202,6 +202,9 @@ type ProtoDriver interface {
 	Dedup(DedupArgs) (DedupResult, error)
 	// SyncMode returns the sync mode configured for the driver.
 	SyncMode() SyncMode
+	// SupportsVolatile reports whether the driver can use the overlay
+	// "volatile" mount option.
+	SupportsVolatile() (bool, error)
 }
 
 // DiffDriver is the interface to use to implement graph diffs

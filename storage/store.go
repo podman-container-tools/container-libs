@@ -264,6 +264,11 @@ type Store interface {
 	// to driver.
 	Status() ([][2]string, error)
 
+	// SupportsVolatile reports whether the graph driver can use the overlay
+	// "volatile" mount option. Drivers that do not support the
+	// option return false, nil.
+	SupportsVolatile() (bool, error)
+
 	// Delete removes the layer, image, or container which has the
 	// passed-in ID or name.  Note that no safety checks are performed, so
 	// this can leave images with references to layers which do not exist,
@@ -3044,6 +3049,14 @@ func (s *store) Status() ([][2]string, error) {
 		return nil, err
 	}
 	return rlstore.Status()
+}
+
+func (s *store) SupportsVolatile() (bool, error) {
+	if err := s.startUsingGraphDriver(); err != nil {
+		return false, err
+	}
+	defer s.stopUsingGraphDriver()
+	return s.graphDriver.SupportsVolatile()
 }
 
 //go:embed VERSION

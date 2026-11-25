@@ -193,6 +193,12 @@ func (d *Driver) SyncMode() graphdriver.SyncMode {
 	return graphdriver.SyncModeNone
 }
 
+// SupportsVolatile reports whether the driver can use the overlay "volatile"
+// mount option. ZFS does not support it.
+func (d *Driver) SupportsVolatile() (bool, error) {
+	return false, nil
+}
+
 // Status returns information about the ZFS filesystem. It returns a two dimensional array of information
 // such as pool name, dataset name, disk usage, parent quota and compression used.
 // Currently it return 'Zpool', 'Zpool Health', 'Parent Dataset', 'Space Used By Parent',

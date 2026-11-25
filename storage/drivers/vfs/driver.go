@@ -135,6 +135,12 @@ func (d *Driver) SyncMode() graphdriver.SyncMode {
 	return d.syncMode
 }
 
+// SupportsVolatile reports whether the driver can use the overlay "volatile"
+// mount option. VFS does not support it.
+func (d *Driver) SupportsVolatile() (bool, error) {
+	return false, nil
+}
+
 type fileGetNilCloser struct {
 	storage.FileGetter
 }

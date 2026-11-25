@@ -290,6 +290,12 @@ func (d *Driver) getSupportsVolatile() (bool, error) {
 	return supportsVolatile, nil
 }
 
+// SupportsVolatile reports whether the driver can use the overlay "volatile"
+// mount option.
+func (d *Driver) SupportsVolatile() (bool, error) {
+	return d.getSupportsVolatile()
+}
+
 func (d *Driver) getSupportsDataOnly() (bool, error) {
 	if d.supportsDataOnly != nil {
 		return *d.supportsDataOnly, nil

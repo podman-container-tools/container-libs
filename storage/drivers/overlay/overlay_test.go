@@ -58,6 +58,26 @@ func TestContainersOverlayXattr(t *testing.T) {
 	assert.Equal(t, 0o555&os.ModePerm, fi.Mode()&os.ModePerm, root)
 }
 
+func TestSupportsVolatile(t *testing.T) {
+	trueVal := true
+	falseVal := false
+	for _, tc := range []struct {
+		name   string
+		cached *bool
+		want   bool
+	}{
+		{name: "cached true", cached: &trueVal, want: true},
+		{name: "cached false", cached: &falseVal, want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := &Driver{supportsVolatile: tc.cached}
+			supported, err := d.SupportsVolatile()
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, supported)
+		})
+	}
+}
+
 func TestSupportsShifting(t *testing.T) {
 	contiguousMap := []idtools.IDMap{
 		{

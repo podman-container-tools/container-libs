@@ -174,6 +174,12 @@ func (d *Driver) SyncMode() graphdriver.SyncMode {
 	return graphdriver.SyncModeNone
 }
 
+// SupportsVolatile reports whether the driver can use the overlay "volatile"
+// mount option. Btrfs does not support it.
+func (d *Driver) SupportsVolatile() (bool, error) {
+	return false, nil
+}
+
 func free(p *C.char) {
 	C.free(unsafe.Pointer(p))
 }
