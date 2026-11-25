@@ -13,7 +13,7 @@ require (
 	github.com/containers/ocicrypt v1.3.2
 	github.com/cyberphone/json-canonicalization v0.0.0-20261011152517-32a48195b9b2
 	github.com/distribution/reference v0.6.0
-	github.com/docker/cli v29.10.0+incompatible
+	github.com/docker/cli v29.10.1+incompatible
 	github.com/docker/distribution v2.8.3+incompatible
 	github.com/docker/docker-credential-helpers v0.9.13
 	github.com/docker/go-connections v0.8.2
