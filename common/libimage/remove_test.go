@@ -6,12 +6,68 @@ import (
 	"cmp"
 	"context"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"go.podman.io/common/pkg/config"
 )
+
+// testStorageState returns a snapshot of the local storage, mapping image IDs
+// to their names, along with the IDs of all containers.
+func testStorageState(t *testing.T, ctx context.Context, runtime *Runtime) (map[string][]string, []string) {
+	images, err := runtime.ListImages(ctx, nil)
+	require.NoError(t, err)
+	imageState := make(map[string][]string, len(images))
+	for _, image := range images {
+		names := slices.Clone(image.Names())
+		slices.Sort(names)
+		imageState[image.ID()] = names
+	}
+
+	containers, err := runtime.store.Containers()
+	require.NoError(t, err)
+	containerIDs := make([]string, 0, len(containers))
+	for _, container := range containers {
+		containerIDs = append(containerIDs, container.ID)
+	}
+	slices.Sort(containerIDs)
+
+	return imageState, containerIDs
+}
+
+// testRemoveImagesDryRun runs RemoveImages with DryRun set and makes sure
+// that it did not alter the storage.  It then runs the real RemoveImages on
+// the same state and makes sure that both runs produced the same output.
+// The output of the real run is returned.
+func testRemoveImagesDryRun(t *testing.T, ctx context.Context, runtime *Runtime, names []string, options *RemoveImagesOptions) ([]*RemoveImageReport, []error) {
+	var dryRunOptions, realOptions RemoveImagesOptions
+	if options != nil {
+		dryRunOptions = *options
+		realOptions = *options
+	}
+	dryRunOptions.DryRun = true
+	realOptions.DryRun = false
+
+	imagesBefore, containersBefore := testStorageState(t, ctx, runtime)
+
+	dryRunReports, dryRunErrors := runtime.RemoveImages(ctx, names, &dryRunOptions)
+
+	imagesAfter, containersAfter := testStorageState(t, ctx, runtime)
+	require.Equal(t, imagesBefore, imagesAfter, "dry run must not alter images")
+	require.Equal(t, containersBefore, containersAfter, "dry run must not alter containers")
+
+	rmReports, rmErrors := runtime.RemoveImages(ctx, names, &realOptions)
+
+	require.Equal(t, rmReports, dryRunReports, "dry run reports must match the real run")
+	require.Len(t, dryRunErrors, len(rmErrors), "dry run errors must match the real run")
+	for i := range rmErrors {
+		require.EqualError(t, dryRunErrors[i], rmErrors[i].Error(), "dry run errors must match the real run")
+	}
+
+	return rmReports, rmErrors
+}
 
 func TestRemoveImages(t *testing.T) {
 	// Note: this will resolve pull from the GCR registry (see
@@ -154,4 +210,65 @@ func TestRemoveImagesSpaceLimits(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, tc.exists, exists, tc.img.ID())
 	}
+}
+
+func TestRemoveImagesDryRun(t *testing.T) {
+	// Note: this will resolve pull from the GCR registry (see
+	// testdata/registries.conf).
+	busyboxLatest := "quay.io/libpod/busybox:latest"
+
+	runtime := testNewRuntime(t)
+	ctx := context.Background()
+
+	pullOptions := &PullOptions{}
+	pullOptions.Writer = os.Stdout
+	pulledImages, err := runtime.Pull(ctx, busyboxLatest, config.PullPolicyAlways, pullOptions)
+	require.NoError(t, err)
+	require.Len(t, pulledImages, 1)
+
+	err = pulledImages[0].Tag("foobar")
+	require.NoError(t, err)
+
+	// containers/podman/issues/10685 - a dry run of force removal on image
+	// with multiple tags must only report the untag.
+	rmReports, rmErrors := testRemoveImagesDryRun(t, ctx, runtime, []string{"foobar"}, &RemoveImagesOptions{Force: true})
+	require.Nil(t, rmErrors)
+	require.Len(t, rmReports, 1)
+	require.Equal(t, pulledImages[0].ID(), rmReports[0].ID)
+	require.False(t, rmReports[0].Removed)
+	require.Equal(t, []string{"localhost/foobar:latest"}, rmReports[0].Untagged)
+
+	err = pulledImages[0].Tag("foo:a")
+	require.NoError(t, err)
+	err = pulledImages[0].Tag("foo:b")
+	require.NoError(t, err)
+
+	// Removing an image with multiple tags by ID requires force.
+	_, rmErrors = testRemoveImagesDryRun(t, ctx, runtime, []string{pulledImages[0].ID()}, nil)
+	require.Len(t, rmErrors, 1)
+
+	// Untagging several tags of the same image in one call; the dry run
+	// must keep track of the tags it already untagged.
+	rmReports, rmErrors = testRemoveImagesDryRun(t, ctx, runtime, []string{"foo:a", "foo:b"}, nil)
+	require.Nil(t, rmErrors)
+	require.Len(t, rmReports, 1)
+	require.False(t, rmReports[0].Removed)
+	require.Equal(t, []string{"localhost/foo:a", "localhost/foo:b"}, rmReports[0].Untagged)
+
+	// An image used by a container cannot be removed without force.
+	_, err = runtime.store.CreateContainer("", nil, pulledImages[0].ID(), "", "", nil)
+	require.NoError(t, err)
+	_, rmErrors = testRemoveImagesDryRun(t, ctx, runtime, []string{"busybox"}, nil)
+	require.Len(t, rmErrors, 1)
+
+	// Force removes the container along with the image.
+	rmReports, rmErrors = testRemoveImagesDryRun(t, ctx, runtime, []string{"busybox"}, &RemoveImagesOptions{Force: true})
+	require.Nil(t, rmErrors)
+	require.Len(t, rmReports, 1)
+	require.True(t, rmReports[0].Removed)
+	require.Equal(t, []string{busyboxLatest}, rmReports[0].Untagged)
+
+	exists, err := runtime.Exists(busyboxLatest)
+	require.NoError(t, err)
+	require.False(t, exists)
 }
