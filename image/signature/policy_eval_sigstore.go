@@ -90,6 +90,7 @@ func (f *prSigstoreSignedFulcio) prepareTrustRoot() (*fulcioTrustRoot, error) {
 		caCertificates: certs,
 		oidcIssuer:     f.OIDCIssuer,
 		subjectEmail:   f.SubjectEmail,
+		buildSignerURI: f.BuildSignerURI,
 	}
 	if err := fulcio.validate(); err != nil {
 		return nil, err
