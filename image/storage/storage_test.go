@@ -600,6 +600,24 @@ func TestDuplicateName(t *testing.T) {
 	images, err = st.Images()
 	require.NoError(t, err)
 	assert.Len(t, images, 2)
+
+	// Images created by older versions have no MatchingDigest and use the config
+	// digest as their ID; a pull of the same content must find and reuse them.
+	st = newStore(t)
+	legacyLayer := makeLayer(t, archive.Gzip)
+	legacyConfig := configForLayers(t, []testBlob{legacyLayer})
+	legacyID := legacyConfig.uncompressedDigest.Encoded()
+	legacyRef, err := Transport.ParseReference("@" + legacyID)
+	require.NoError(t, err)
+	createImage(t, legacyRef, cache, []testBlob{legacyLayer}, &legacyConfig)
+
+	namedRef, err := Transport.ParseReference("legacy")
+	require.NoError(t, err)
+	createImage(t, namedRef, cache, []testBlob{legacyLayer}, &legacyConfig)
+	images, err = st.Images()
+	require.NoError(t, err)
+	require.Len(t, images, 1)
+	assert.Equal(t, legacyID, images[0].ID)
 }
 
 func TestDuplicateID(t *testing.T) {

@@ -879,6 +879,32 @@ func (s *storageImageDestination) matchingDigest(diffIDs []digest.Digest) (diges
 	return sourced.MatchingDigest(diffIDs)
 }
 
+// findExistingImage returns an image which has the given content identity and top layer,
+// or (nil, nil) if no such image exists.  It also finds images created by older versions,
+// which have no MatchingDigest and store the matching digest value as their ID.
+// An image with the given identity but a different top layer is reported as storage.ErrDuplicateID.
+func (s *storageImageDestination) findExistingImage(matchingDigest digest.Digest, lastLayer string) (*storage.Image, error) {
+	store := s.imageRef.transport.store
+	img, err := store.ImageByMatchingDigest(matchingDigest)
+	if err != nil {
+		if !errors.Is(err, storage.ErrImageUnknown) {
+			return nil, err
+		}
+		img, err = store.Image(matchingDigest.Encoded())
+		if err != nil {
+			if errors.Is(err, storage.ErrImageUnknown) {
+				return nil, nil
+			}
+			return nil, err
+		}
+	}
+	if img.TopLayer != lastLayer {
+		logrus.Debugf("error creating image: image with ID %q exists, but uses different layers", img.ID)
+		return nil, fmt.Errorf("image with ID %q already exists, but uses a different top layer: %w", img.ID, storage.ErrDuplicateID)
+	}
+	return img, nil
+}
+
 // getConfigBlob exists only to let us retrieve the configuration blob so that the manifest package can dig
 // information out of it for Inspect().
 func (s *storageImageDestination) getConfigBlob(info types.BlobInfo) ([]byte, error) {
@@ -1584,38 +1610,55 @@ func (s *storageImageDestination) CommitWithOptions(ctx context.Context, options
 			imgOptions.MatchingDigest = matchingDigest
 		}
 	}
+	store := s.imageRef.transport.store
 	oldNames := []string{}
-	img, err := s.imageRef.transport.store.CreateImage(intendedID, nil, lastLayer, "", imgOptions)
-	if err != nil {
-		if !errors.Is(err, storage.ErrDuplicateID) {
-			logrus.Debugf("error creating image: %q", err)
-			if intendedID == "" {
-				return fmt.Errorf("creating image with matching digest %q: %w", matchingDigest, err)
-			}
-			return fmt.Errorf("creating image %q: %w", intendedID, err)
-		}
-		// An image with the same MatchingDigest, or with the requested ID,
-		// already exists; reuse it.
-		if matchingDigest != "" {
-			img, err = s.imageRef.transport.store.ImageByMatchingDigest(matchingDigest)
-			if err != nil {
-				// Images created by older versions have no MatchingDigest, and
-				// store the matching digest value as their ID.
-				img, err = s.imageRef.transport.store.Image(matchingDigest.Encoded())
-			}
-		} else {
-			img, err = s.imageRef.transport.store.Image(intendedID)
-		}
+	var img *storage.Image
+	reused := false
+	if matchingDigest != "" {
+		// Look for an existing image before creating a new record.  CreateImage only
+		// detects a duplicate MatchingDigest, so this lookup is required to reuse
+		// images created by older versions, which have no MatchingDigest and store
+		// the matching digest value as their ID.
+		img, err = s.findExistingImage(matchingDigest, lastLayer)
 		if err != nil {
-			if matchingDigest != "" {
-				return fmt.Errorf("reading image with matching digest %q: %w", matchingDigest, err)
+			return err
+		}
+		reused = img != nil
+	}
+	if img == nil {
+		img, err = store.CreateImage(intendedID, nil, lastLayer, "", imgOptions)
+		if err != nil {
+			if !errors.Is(err, storage.ErrDuplicateID) {
+				logrus.Debugf("error creating image: %q", err)
+				if intendedID == "" {
+					return fmt.Errorf("creating image with matching digest %q: %w", matchingDigest, err)
+				}
+				return fmt.Errorf("creating image %q: %w", intendedID, err)
 			}
-			return fmt.Errorf("reading image %q: %w", intendedID, err)
+			// A concurrent operation created an image with the same MatchingDigest,
+			// or the explicitly requested ID already exists; reuse it.
+			if matchingDigest != "" {
+				img, err = s.findExistingImage(matchingDigest, lastLayer)
+			} else {
+				img, err = store.Image(intendedID)
+				if err == nil && img.TopLayer != lastLayer {
+					logrus.Debugf("error creating image: image with ID %q exists, but uses different layers", img.ID)
+					return fmt.Errorf("image with ID %q already exists, but uses a different top layer: %w", img.ID, storage.ErrDuplicateID)
+				}
+			}
+			if err == nil && img == nil {
+				err = storage.ErrImageUnknown
+			}
+			if err != nil {
+				if matchingDigest != "" {
+					return fmt.Errorf("reading image with matching digest %q: %w", matchingDigest, err)
+				}
+				return fmt.Errorf("reading image %q: %w", intendedID, err)
+			}
+			reused = true
 		}
-		if img.TopLayer != lastLayer {
-			logrus.Debugf("error creating image: image with ID %q exists, but uses different layers", img.ID)
-			return fmt.Errorf("image with ID %q already exists, but uses a different top layer: %w", img.ID, storage.ErrDuplicateID)
-		}
+	}
+	if reused {
 		logrus.Debugf("reusing image ID %q", img.ID)
 		oldNames = append(oldNames, img.Names...)
 		// set the data items and metadata on the already-present image
@@ -1624,13 +1667,13 @@ func (s *storageImageDestination) CommitWithOptions(ctx context.Context, options
 		// been present with new values, when ideally we'd find a way
 		// to merge them since they all apply to the same image
 		for _, data := range imgOptions.BigData {
-			if err := s.imageRef.transport.store.SetImageBigData(img.ID, data.Key, data.Data, manifest.Digest); err != nil {
+			if err := store.SetImageBigData(img.ID, data.Key, data.Data, manifest.Digest); err != nil {
 				logrus.Debugf("error saving big data %q for image %q: %v", data.Key, img.ID, err)
 				return fmt.Errorf("saving big data %q for image %q: %w", data.Key, img.ID, err)
 			}
 		}
 		if imgOptions.Metadata != "" {
-			if err := s.imageRef.transport.store.SetMetadata(img.ID, imgOptions.Metadata); err != nil {
+			if err := store.SetMetadata(img.ID, imgOptions.Metadata); err != nil {
 				logrus.Debugf("error saving metadata for image %q: %v", img.ID, err)
 				return fmt.Errorf("saving metadata for image %q: %w", img.ID, err)
 			}
@@ -1640,15 +1683,20 @@ func (s *storageImageDestination) CommitWithOptions(ctx context.Context, options
 		logrus.Debugf("created new image ID %q with metadata %q", img.ID, imgOptions.Metadata)
 	}
 
-	// Clean up the unfinished image on any error.
-	// (Is this the right thing to do if the image has existed before?)
+	// Clean up the unfinished image on any error, but never delete an image which
+	// was already present before this commit.
 	commitSucceeded := false
 	defer func() {
-		if !commitSucceeded {
-			logrus.Errorf("Updating image %q (old names %v) failed, deleting it", img.ID, oldNames)
-			if _, err := s.imageRef.transport.store.DeleteImage(img.ID, true); err != nil {
-				logrus.Errorf("Error deleting incomplete image %q: %v", img.ID, err)
-			}
+		if commitSucceeded {
+			return
+		}
+		if reused {
+			logrus.Errorf("Updating reused image %q (old names %v) failed, not deleting it", img.ID, oldNames)
+			return
+		}
+		logrus.Errorf("Updating image %q (old names %v) failed, deleting it", img.ID, oldNames)
+		if _, err := store.DeleteImage(img.ID, true); err != nil {
+			logrus.Errorf("Error deleting incomplete image %q: %v", img.ID, err)
 		}
 	}()
 
