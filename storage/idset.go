@@ -24,7 +24,7 @@ func newIDSet(intervals []interval) *idSet {
 
 // getHostIDs returns all the host ids in the id map.
 func getHostIDs(idMaps []idtools.IDMap) *idSet {
-	var intervals []interval
+	intervals := make([]interval, 0, len(idMaps))
 	for _, m := range idMaps {
 		intervals = append(intervals, interval{start: m.HostID, end: m.HostID + m.Size})
 	}
@@ -33,7 +33,7 @@ func getHostIDs(idMaps []idtools.IDMap) *idSet {
 
 // getContainerIDs returns all the container ids in the id map.
 func getContainerIDs(idMaps []idtools.IDMap) *idSet {
-	var intervals []interval
+	intervals := make([]interval, 0, len(idMaps))
 	for _, m := range idMaps {
 		intervals = append(intervals, interval{start: m.ContainerID, end: m.ContainerID + m.Size})
 	}

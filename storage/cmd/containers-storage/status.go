@@ -13,12 +13,13 @@ func status(flags *mflag.FlagSet, action string, m storage.Store, args []string)
 	if err != nil {
 		return 1, fmt.Errorf("status: %w", err)
 	}
-	basics := [][2]string{
-		{"Root", m.GraphRoot()},
-		{"Run Root", m.RunRoot()},
-		{"Driver Name", m.GraphDriverName()},
-		{"Driver Options", fmt.Sprintf("%v", m.GraphOptions())},
-	}
+	basics := make([][2]string, 0, 4+len(status))
+	basics = append(basics,
+		[2]string{"Root", m.GraphRoot()},
+		[2]string{"Run Root", m.RunRoot()},
+		[2]string{"Driver Name", m.GraphDriverName()},
+		[2]string{"Driver Options", fmt.Sprintf("%v", m.GraphOptions())},
+	)
 	status = append(basics, status...)
 	if jsonOutput {
 		return outputJSON(status)
