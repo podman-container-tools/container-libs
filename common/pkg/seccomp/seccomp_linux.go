@@ -97,6 +97,10 @@ func setupSeccomp(config *Seccomp, rs *specs.Spec) (*specs.LinuxSeccomp, error) 
 		return nil, nil
 	}
 
+	if err := checkNullEntries(config); err != nil {
+		return nil, err
+	}
+
 	newConfig := &specs.LinuxSeccomp{}
 
 	var arch string
@@ -185,6 +189,23 @@ Loop:
 	}
 
 	return newConfig, nil
+}
+
+// checkNullEntries refuses a null syscall entry or argument, such as
+// "syscalls": [null], which decodes to a nil pointer. It checks every entry,
+// including those the architecture and capability filters would skip.
+func checkNullEntries(config *Seccomp) error {
+	for i, call := range config.Syscalls {
+		if call == nil {
+			return fmt.Errorf("syscall entry %d in the seccomp profile is null", i)
+		}
+		for j, arg := range call.Args {
+			if arg == nil {
+				return fmt.Errorf("argument %d of syscall entry %d in the seccomp profile is null", j, i)
+			}
+		}
+	}
+	return nil
 }
 
 func createSpecsSyscall(names []string, action Action, args []*Arg, errnoRet *uint) specs.LinuxSyscall {
