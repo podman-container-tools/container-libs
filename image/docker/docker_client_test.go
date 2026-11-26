@@ -166,7 +166,9 @@ func TestBearerTokenReadFromHTTPResponseBody(t *testing.T) {
 		},
 	} {
 		token := &bearerToken{}
-		err := token.readFromHTTPResponseBody(testTokenHTTPResponse(t, c.input))
+		resp := testTokenHTTPResponse(t, c.input)
+		err := token.readFromHTTPResponseBody(resp)
+		resp.Body.Close()
 		if c.expected == nil {
 			assert.Error(t, err, c.input)
 		} else {
@@ -183,7 +185,9 @@ func TestBearerTokenReadFromHTTPResponseBodyIssuedAtZero(t *testing.T) {
 	now := time.Now()
 	tokenBlob := fmt.Sprintf(`{"token":"IAmAToken","expires_in":100,"issued_at":"%s"}`, zeroTime)
 	token := &bearerToken{}
-	err := token.readFromHTTPResponseBody(testTokenHTTPResponse(t, tokenBlob))
+	resp := testTokenHTTPResponse(t, tokenBlob)
+	err := token.readFromHTTPResponseBody(resp)
+	resp.Body.Close()
 	require.NoError(t, err)
 	expectedExpiration := now.Add(time.Duration(100) * time.Second)
 	require.False(t, token.expirationTime.Before(expectedExpiration),
@@ -405,6 +409,7 @@ func TestGetBlobSize(t *testing.T) {
 			assert.Equal(t, int64(-1), c.expected)
 		} else {
 			res, err := getBlobSize(resp)
+			resp.Body.Close()
 			if c.expected == -1 {
 				assert.Error(t, err, c.headers)
 			} else {

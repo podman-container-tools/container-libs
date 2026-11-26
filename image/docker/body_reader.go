@@ -26,6 +26,11 @@ const (
 
 // bodyReader is an io.ReadCloser returned by dockerImageSource.GetBlob,
 // which can transparently resume some (very limited) kinds of aborted connections.
+//
+// ctx is stored so Read can retry aborted downloads; the interface is io.ReadCloser
+// and does not accept a per-call context.
+//
+//nolint:containedctx
 type bodyReader struct {
 	ctx                 context.Context
 	c                   *dockerClient

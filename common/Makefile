@@ -66,13 +66,17 @@ netavark-testplugin: bin/netavark-testplugin
 docs:
 	$(MAKE) -C docs
 
+# Match the historical common lint tag set (kept out of the shared config so
+# image/storage can pass their own tags via --build-tags).
+LINT_BUILD_TAGS ?= apparmor,seccomp,selinux,systemd,exclude_graphdriver_btrfs,containers_image_openpgp
+
 .PHONY: lint
 lint:
-	golangci-lint run
+	golangci-lint run --config ../.golangci.yml --build-tags "$(LINT_BUILD_TAGS)"
 
 .PHONY: fmt
 fmt:
-	golangci-lint fmt
+	golangci-lint fmt --config ../.golangci.yml
 
 .PHONY: validate
 validate: lint

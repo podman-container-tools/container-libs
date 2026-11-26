@@ -97,7 +97,7 @@ func doesSupportNativeDiff(d, mountOpts string) error {
 	// rename "d1" to "d2"
 	if err := os.Rename(filepath.Join(td, "merged", "d1"), filepath.Join(td, "merged", "d2")); err != nil {
 		// if rename failed with syscall.EXDEV, the kernel doesn't have CONFIG_OVERLAY_FS_REDIRECT_DIR enabled
-		if err.(*os.LinkError).Err == syscall.EXDEV {
+		if linkErr, ok := errors.AsType[*os.LinkError](err); ok && linkErr.Err == syscall.EXDEV {
 			return nil
 		}
 		return fmt.Errorf("failed to rename dir in merged directory: %w", err)

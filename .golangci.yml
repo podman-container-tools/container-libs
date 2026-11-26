@@ -1,0 +1,110 @@
+version: "2"
+
+run:
+  timeout: 5m
+  # gitroot so exclusion paths can target common/image/storage modules.
+  # Build tags are passed per-module via Make/CI --build-tags, not here.
+  relative-path-mode: gitroot
+
+formatters:
+  enable:
+    - gofumpt
+
+linters:
+  default: standard
+  enable:
+    - asasalint
+    - bidichk
+    - bodyclose
+    - containedctx
+    - contextcheck
+    - copyloopvar
+    - durationcheck
+    - errorlint
+    - exptostd
+    - fatcontext
+    - gocheckcompilerdirectives
+    - gochecksumtype
+    - ginkgolinter
+    - makezero
+    - misspell
+    - modernize
+    - nilnesserr
+    - nolintlint
+    - nosprintfhostport
+    - prealloc
+    - predeclared
+    - reassign
+    - recvcheck
+    - unconvert
+    - unparam
+    - usestdlibvars
+    - usetesting
+  settings:
+    errcheck:
+      # Leave unchecked type assertions alone. For "impossible" asserts, a panic
+      # at the conversion site is clearer than soft-failing with a default value.
+      check-type-assertions: false
+    errorlint:
+      # See https://golangci-lint.run/usage/linters/#errorlint.
+      # Only allow warnings about not using %w.
+      errorf-multi: false
+      asserts: false
+      comparison: false
+    staticcheck:
+      checks:
+        - all
+        - -QF1008 # https://staticcheck.dev/docs/checks/#QF1008 Omit embedded fields from selector expression.
+  exclusions:
+    generated: strict
+    presets:
+      - comments
+      - common-false-positives
+      - std-error-handling
+    rules:
+      - linters:
+          - prealloc
+        path: _test\.go
+      - linters:
+          - contextcheck
+        path: ^common/libimage
+        text: LookupImage
+      # storage_dest DiffID lookup is in-memory; intentionally uses context.Background().
+      - linters:
+          - contextcheck
+        path: ^image/storage/storage_dest\.go$
+      # c/image uses capitalized error strings by convention.
+      - linters:
+          - staticcheck
+        path: ^image/
+        text: "ST1005:"
+      # go.podman.io/image/v5/copy is a stable public package name; cannot rename.
+      - linters:
+          - predeclared
+        path: ^image/copy/
+      # go.podman.io/storage/drivers/copy is a stable package import path.
+      - linters:
+          - predeclared
+        path: ^storage/drivers/copy/
+      # Intentional mixed receivers: value Marshal* (non-addressable values) +
+      # pointer Unmarshal*; or storage transport/reference value vs pointer APIs.
+      - linters:
+          - recvcheck
+        path: ^image/(pkg/cli/basetls/basetls\.go|docker/reference/reference\.go|signature/(policy_types\.go|simple\.go|internal/(rekor_api_types|rekor_set|sigstore_payload)\.go)|storage/(storage_reference|storage_transport)\.go)$
+      - linters:
+          - recvcheck
+        path: ^common/libnetwork/types/network\.go$
+      # Public / ABI-facing names in c/storage that cannot be renamed (ST1003).
+      - linters:
+          - staticcheck
+        path: ^storage/
+        text: "ST1003:"
+      # 0.1.0 hooks must set When.Or for any-of matching; the field is deprecated in 1.0.0.
+      - linters:
+          - staticcheck
+        path: ^common/pkg/hooks/0\.1\.0/
+        text: "SA1019:"
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

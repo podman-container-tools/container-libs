@@ -120,7 +120,7 @@ func layerParentOwners(flags *mflag.FlagSet, action string, m storage.Store, arg
 	for _, layer := range matched {
 		uids, gids, err := m.LayerParentOwners(layer.ID)
 		if err != nil {
-			return 1, fmt.Errorf("LayerParentOwner: %+v", err)
+			return 1, fmt.Errorf("LayerParentOwner: %w", err)
 		}
 		if jsonOutput {
 			mappings := struct {

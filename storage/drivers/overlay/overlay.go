@@ -267,7 +267,7 @@ func checkAndRecordOverlaySupport(home, runhome string) (bool, error) {
 			}
 			err = fmt.Errorf("kernel does not support overlay fs: %w", err)
 			if err2 := cachedFeatureRecord(runhome, feature, false, err.Error()); err2 != nil {
-				return false, fmt.Errorf("recording overlay not being supported (%v): %w", err, err2)
+				return false, fmt.Errorf("recording overlay not being supported (%v): %w", err, err2) //nolint:errorlint // keep both errors on one line
 			}
 			return false, err
 		}
@@ -794,7 +794,7 @@ func supportsOverlay(home string, rootIDPair idtools.IDPair) (supportsDType bool
 			if err == nil {
 				if err = os.RemoveAll(mergedSubdir); err != nil {
 					logrus.StandardLogger().Logf(logLevel, "overlay: removing an item from the merged directory failed: %v", err)
-					return supportsDType, fmt.Errorf("kernel returned %v when we tried to delete an item in the merged directory: %w", err, graphdriver.ErrNotSupported)
+					return supportsDType, fmt.Errorf("kernel returned %v when we tried to delete an item in the merged directory: %w", err, graphdriver.ErrNotSupported) //nolint:errorlint // keep both errors on one line
 				}
 				logrus.Debugf("overlay: test mount with multiple lowers succeeded")
 				return supportsDType, nil
@@ -2342,7 +2342,7 @@ func (d *Driver) StartStagingDiffToApply(parent string, options graphdriver.Appl
 		// If we have a ENOENT it means the parent was removed which can happen as we are unlocked here.
 		// In this case also wrap ErrLayerUnknown which some callers can handle to retry after recreating the parent.
 		if errors.Is(err, fs.ErrNotExist) {
-			err = fmt.Errorf("parent layer %q: %w: %w", parent, graphdriver.ErrLayerUnknown, err)
+			err = fmt.Errorf("parent layer %q: %w: %w", parent, graphdriver.ErrLayerUnknown, err) //nolint:errorlint // keep both errors on one line
 		}
 		return t.Cleanup, nil, -1, err
 	}

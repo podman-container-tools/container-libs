@@ -534,10 +534,9 @@ func UserOwnsCurrentSystemdCgroup() (bool, error) {
 			return false, fmt.Errorf("stat cgroup path is nil %s", cgroupPath)
 		}
 
-		//nolint:errcheck // This cast should never fail, if it does we get a interface
-		// conversion panic and a stack trace on how we ended up here which is more
-		// valuable than returning a human friendly error test as we don't know how it
-		// happened.
+		// This cast should never fail; if it does we get an interface conversion
+		// panic and a stack trace on how we ended up here which is more valuable
+		// than returning a human friendly error as we don't know how it happened.
 		if int(s.(*syscall.Stat_t).Uid) != uid {
 			return false, nil
 		}

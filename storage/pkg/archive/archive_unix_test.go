@@ -308,8 +308,10 @@ func TestTarUntarWithXattr(t *testing.T) {
 // assertSameFile asserts that fi1 and fi2 refer to two links to the same underlying file.
 func assertSameFile(t *testing.T, fi1, fi2 os.FileInfo) {
 	t.Helper()
-	st1 := fi1.Sys().(*syscall.Stat_t)
-	st2 := fi2.Sys().(*syscall.Stat_t)
+	st1, ok := fi1.Sys().(*syscall.Stat_t)
+	require.True(t, ok, "expected *syscall.Stat_t")
+	st2, ok := fi2.Sys().(*syscall.Stat_t)
+	require.True(t, ok, "expected *syscall.Stat_t")
 	assert.Equal(t, st1.Dev, st2.Dev)
 	assert.Equal(t, st1.Ino, st2.Ino)
 }

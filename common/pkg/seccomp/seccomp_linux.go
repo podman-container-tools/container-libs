@@ -28,7 +28,7 @@ func GetDefaultProfile(rs *specs.Spec) (*specs.LinuxSeccomp, error) {
 func LoadProfile(body string, rs *specs.Spec) (*specs.LinuxSeccomp, error) {
 	var config Seccomp
 	if err := json.Unmarshal([]byte(body), &config); err != nil {
-		return nil, fmt.Errorf("decoding seccomp profile failed: %v", err)
+		return nil, fmt.Errorf("decoding seccomp profile failed: %w", err)
 	}
 	return setupSeccomp(&config, rs)
 }
@@ -37,7 +37,7 @@ func LoadProfile(body string, rs *specs.Spec) (*specs.LinuxSeccomp, error) {
 func LoadProfileFromBytes(body []byte, rs *specs.Spec) (*specs.LinuxSeccomp, error) {
 	config := &Seccomp{}
 	if err := json.Unmarshal(body, config); err != nil {
-		return nil, fmt.Errorf("decoding seccomp profile failed: %v", err)
+		return nil, fmt.Errorf("decoding seccomp profile failed: %w", err)
 	}
 	return setupSeccomp(config, rs)
 }

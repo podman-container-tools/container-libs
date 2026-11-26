@@ -72,7 +72,7 @@ func (index *OCI1IndexPublic) Instance(instanceDigest digest.Digest) (ListUpdate
 // UpdateInstances updates the sizes, digests, and media types of the manifests
 // which the list catalogs.
 func (index *OCI1IndexPublic) UpdateInstances(updates []ListUpdate) error {
-	editInstances := []ListEdit{}
+	editInstances := make([]ListEdit, 0, len(updates))
 	for i, instance := range updates {
 		editInstances = append(editInstances, ListEdit{
 			UpdateOldDigest: index.Manifests[i].Digest,

@@ -59,9 +59,10 @@ func newGraphDriver(t testing.TB, name string, options []string, root string, ru
 }
 
 func newDriver(t testing.TB, name string, options []string) *Driver {
-	root, err := os.MkdirTemp("", "storage-graphtest-")
+	// Intentionally not t.TempDir(): the driver may persist across test functions.
+	root, err := os.MkdirTemp("", "storage-graphtest-") //nolint:usetesting
 	require.NoError(t, err)
-	runRoot, err := os.MkdirTemp("", "storage-graphtest-")
+	runRoot, err := os.MkdirTemp("", "storage-graphtest-") //nolint:usetesting
 	require.NoError(t, err)
 
 	defer func() {
@@ -479,11 +480,12 @@ func DriverTestEcho(t testing.TB, drivername string, driverOptions ...string) {
 			t.Fatal(err)
 		}
 
-		expectedChanges := []archive.Change{
-			{Kind: archive.ChangeAdd, Path: "/a file"},
-			{Kind: archive.ChangeAdd, Path: "/a subdir"},
-		}
-		paths := []string{}
+		expectedChanges := make([]archive.Change, 0, 2+(components-1)+1)
+		expectedChanges = append(expectedChanges,
+			archive.Change{Kind: archive.ChangeAdd, Path: "/a file"},
+			archive.Change{Kind: archive.ChangeAdd, Path: "/a subdir"},
+		)
+		paths := make([]string, 0, (components-1)+1)
 		path := "/"
 		for i := range components - 1 {
 			path = filepath.Join(path, fmt.Sprintf("subdir%d", i+1))
@@ -518,7 +520,7 @@ func DriverTestEcho(t testing.TB, drivername string, driverOptions ...string) {
 		if err = os.RemoveAll(filepath.Join(root, paths[depth])); err != nil {
 			t.Fatal(err)
 		}
-		expectedChanges = []archive.Change{}
+		expectedChanges = make([]archive.Change, 0, depth+1)
 		for i := range depth {
 			expectedChanges = append(expectedChanges, archive.Change{Kind: archive.ChangeModify, Path: paths[i]})
 		}

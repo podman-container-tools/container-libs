@@ -7,13 +7,12 @@ import (
 	"strings"
 )
 
-func expandEnvPath(path string, rootlessUID int) (string, error) {
-	var err error
+func expandEnvPath(path string, rootlessUID int) string {
 	path = strings.ReplaceAll(path, "$UID", strconv.Itoa(rootlessUID))
 	path = os.ExpandEnv(path)
 	newpath, err := filepath.EvalSymlinks(path)
 	if err != nil {
-		newpath = filepath.Clean(path)
+		return filepath.Clean(path)
 	}
-	return newpath, nil
+	return newpath
 }

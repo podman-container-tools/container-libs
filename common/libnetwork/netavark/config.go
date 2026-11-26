@@ -202,7 +202,7 @@ func (n *netavarkNetwork) networkCreate(newNetwork *types.Network, defaultNet bo
 	err = n.execNetavark([]string{"create"}, needsPlugin, &opts, &result)
 	if err != nil {
 		if strings.Contains(err.Error(), "network already exists") {
-			return nil, fmt.Errorf("%w%.0w", err, types.ErrNetworkExists)
+			return nil, fmt.Errorf("%w%.0w", err, types.ErrNetworkExists) //nolint:errorlint // %.0w attaches ErrNetworkExists for errors.Is without changing the message
 		}
 		return nil, err
 	}

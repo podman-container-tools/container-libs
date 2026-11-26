@@ -70,7 +70,9 @@ func TestTlsConfig(t *testing.T) {
 	for _, c := range tests {
 		httpClient, err := tlsConfig(c.ctx)
 		require.NoError(t, err)
-		tlsCfg := httpClient.Transport.(*http.Transport).TLSClientConfig
+		transport, ok := httpClient.Transport.(*http.Transport)
+		require.True(t, ok)
+		tlsCfg := transport.TLSClientConfig
 		assert.Equal(t, c.wantInsecure, tlsCfg.InsecureSkipVerify)
 
 		if c.wantCAIncluded {

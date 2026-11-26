@@ -235,8 +235,8 @@ func Resolve(ctx *types.SystemContext, name string) (*Resolved, error) {
 	// Create a copy of the system context to make it usable beyond this
 	// function call.
 	if ctx != nil {
-		copy := *ctx
-		ctx = &copy
+		copied := *ctx
+		ctx = &copied
 	}
 	resolved.systemContext = ctx
 

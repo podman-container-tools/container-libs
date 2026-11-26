@@ -75,7 +75,7 @@ func (list *Schema2ListPublic) Instance(instanceDigest digest.Digest) (ListUpdat
 // UpdateInstances updates the sizes, digests, and media types of the manifests
 // which the list catalogs.
 func (list *Schema2ListPublic) UpdateInstances(updates []ListUpdate) error {
-	editInstances := []ListEdit{}
+	editInstances := make([]ListEdit, 0, len(updates))
 	for i, instance := range updates {
 		editInstances = append(editInstances, ListEdit{
 			UpdateOldDigest: list.Manifests[i].Digest,

@@ -58,7 +58,7 @@ func mount(flags *mflag.FlagSet, action string, m storage.Store, args []string) 
 }
 
 func unmount(flags *mflag.FlagSet, action string, m storage.Store, args []string) (int, error) {
-	mes := []mountPointError{}
+	mes := make([]mountPointError, 0, len(args))
 	errors := false
 	for _, arg := range args {
 		mounted, err := m.Unmount(arg, force)
@@ -95,7 +95,7 @@ func unmount(flags *mflag.FlagSet, action string, m storage.Store, args []string
 }
 
 func mounted(flags *mflag.FlagSet, action string, m storage.Store, args []string) (int, error) {
-	mes := []mountPointError{}
+	mes := make([]mountPointError, 0, len(args))
 	errors := false
 	for _, arg := range args {
 		mounted, err := m.Mounted(arg)

@@ -776,7 +776,7 @@ func (s *store) Repair(report CheckReport, options *RepairOptions) []error {
 			// logic worry about telling the storage driver to delete the layer.
 			if errors.Is(reportedErr, ErrLayerUnaccounted) {
 				if err = s.graphDriver.Remove(id); err != nil {
-					err = fmt.Errorf("deleting storage layer %s: %v", id, err)
+					err = fmt.Errorf("deleting storage layer %s: %w", id, err)
 				} else {
 					logrus.Debugf("deleted storage layer %s", id)
 				}

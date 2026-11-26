@@ -37,7 +37,9 @@ func Blob(sig Signature) ([]byte, error) {
 		// For compatibility with old dir formats:
 		return chunk, nil
 	default:
-		res := []byte{0} // Start with a zero byte to clearly mark this is a binary format, and disambiguate from random text.
+		// Start with a zero byte to clearly mark this is a binary format, and disambiguate from random text.
+		res := make([]byte, 0, 1+len(format)+1+len(chunk))
+		res = append(res, 0)
 		res = append(res, []byte(format)...)
 		res = append(res, '\n')
 		res = append(res, chunk...)

@@ -263,7 +263,7 @@ func (r *Runtime) LookupImage(name string, options *LookupImageOptions) (*Image,
 	byFullID := reference.IsFullIdentifier(name)
 
 	if byDigest && !byFullID {
-		return nil, "", fmt.Errorf("%s: %v", originalName, errNoHexValue)
+		return nil, "", fmt.Errorf("%s: %w", originalName, errNoHexValue)
 	}
 
 	// If the name clearly refers to a local image, try to look it up.
@@ -411,7 +411,7 @@ func (r *Runtime) lookupImageInLocalStorage(name, candidate string, namedCandida
 				logrus.Debug("No matching instance was found: returning manifest list instead")
 				return image, nil
 			}
-			return nil, fmt.Errorf("%v: %w", err, storage.ErrImageUnknown)
+			return nil, fmt.Errorf("%v: %w", err, storage.ErrImageUnknown) //nolint:errorlint // keep both errors on one line
 		}
 		ref, err = storageTransport.Transport.ParseStoreReference(r.store, "@"+instance.ID())
 		if err != nil {

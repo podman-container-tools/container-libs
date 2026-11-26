@@ -1933,7 +1933,7 @@ func (s *store) imageTopLayerForMapping(image *Image, ristore roImageStore, rlst
 	// By construction, createMappedLayer can only be true if ristore == s.imageStore.
 	if err = s.imageStore.addMappedTopLayer(image.ID, mappedLayer.ID); err != nil {
 		if err2 := rlstore.deleteWhileHoldingLock(mappedLayer.ID); err2 != nil {
-			err = fmt.Errorf("deleting layer %q: %v: %w", mappedLayer.ID, err2, err)
+			err = fmt.Errorf("deleting layer %q: %v: %w", mappedLayer.ID, err2, err) //nolint:errorlint // keep both errors on one line
 		}
 		return nil, fmt.Errorf("registering ID-mapped layer with image %q: %w", image.ID, err)
 	}

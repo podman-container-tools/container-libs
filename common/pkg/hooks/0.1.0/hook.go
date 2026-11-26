@@ -71,7 +71,8 @@ func Read(content []byte) (hook *current.Hook, err error) {
 		When: current.When{
 			Commands:      raw.Cmds,
 			HasBindMounts: raw.HasBindMounts,
-			Or:            true, //nolint:staticcheck // SA1019: Or is deprecated in v1.0.0, but we must set it to represent the 0.1.0 behavior.
+			// Or is deprecated in v1.0.0, but 0.1.0 hooks require any-of matching.
+			Or: true,
 		},
 		Stages: raw.Stages,
 	}

@@ -303,7 +303,7 @@ func (i *IDMappings) GIDs() []IDMap {
 }
 
 func createIDMap(subidRanges []subIDRange) []IDMap {
-	idMap := []IDMap{}
+	idMap := make([]IDMap, 0, len(subidRanges))
 
 	// sort the ranges by lowest ID first
 	slices.SortFunc(subidRanges, compareRanges)

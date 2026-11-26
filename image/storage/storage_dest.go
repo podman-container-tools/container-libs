@@ -333,6 +333,10 @@ func (s *storageImageDestination) putBlobToPendingFile(stream io.Reader, blobinf
 	}, nil
 }
 
+// zstdFetcher adapts BlobChunkAccessor to chunked.GetBlobAt, which has no context
+// parameter, so the pull context must be stored on the adapter.
+//
+//nolint:containedctx
 type zstdFetcher struct {
 	chunkAccessor private.BlobChunkAccessor
 	ctx           context.Context
@@ -502,13 +506,14 @@ func (s *storageImageDestination) PutBlobPartial(ctx context.Context, chunkAcces
 	}
 
 	succeeded = true
-	return private.UploadedBlob{
-		Digest: blobDigest,
-		Size:   srcInfo.Size,
-	}, s.queueOrCommit(options.LayerIndex, addedLayerInfo{
+	err = s.queueOrCommit(options.LayerIndex, addedLayerInfo{
 		digest:     blobDigest,
 		emptyLayer: options.EmptyLayer,
 	})
+	return private.UploadedBlob{
+		Digest: blobDigest,
+		Size:   srcInfo.Size,
+	}, err
 }
 
 // TryReusingBlobWithOptions checks whether the transport already contains, or can efficiently reuse, a blob, and if so, applies it to the current destination

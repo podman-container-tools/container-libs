@@ -222,11 +222,7 @@ func LoadStoreOptions(opts LoadOptions) (StoreOptions, error) {
 	}
 
 	if config.Storage.RunRoot != "" {
-		runRoot, err := expandEnvPath(config.Storage.RunRoot, rootlessUID)
-		if err != nil {
-			return storeOptions, err
-		}
-		storeOptions.RunRoot = runRoot
+		storeOptions.RunRoot = expandEnvPath(config.Storage.RunRoot, rootlessUID)
 	}
 	if storeOptions.RunRoot == "" {
 		return storeOptions, fmt.Errorf("runroot must be set")
@@ -235,22 +231,14 @@ func LoadStoreOptions(opts LoadOptions) (StoreOptions, error) {
 	// Parse this before graphroot which means any graphroot setting overwrites the
 	// rootless_storage_path, so if the main config has both set only graphroot is used.
 	if config.Storage.RootlessStoragePath != "" && usePerUserStorage() {
-		storagePath, err := expandEnvPath(config.Storage.RootlessStoragePath, rootlessUID)
-		if err != nil {
-			return storeOptions, err
-		}
-		storeOptions.GraphRoot = storagePath
+		storeOptions.GraphRoot = expandEnvPath(config.Storage.RootlessStoragePath, rootlessUID)
 	}
 
 	if config.Storage.GraphRoot != "" {
 		if config.Storage.RootlessStoragePath != "" {
 			logrus.Warn("Both rootless_storage_path and graphroot are set, using graphroot setting only, rootless_storage_path is deprecated and should be removed from the config")
 		}
-		graphRoot, err := expandEnvPath(config.Storage.GraphRoot, rootlessUID)
-		if err != nil {
-			return storeOptions, err
-		}
-		storeOptions.GraphRoot = graphRoot
+		storeOptions.GraphRoot = expandEnvPath(config.Storage.GraphRoot, rootlessUID)
 	}
 
 	if storeOptions.GraphRoot == "" {

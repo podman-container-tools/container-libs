@@ -281,9 +281,11 @@ func getUserIdentificationPartialConfig(configAuthInfo clientcmdAuthInfo) *restC
 // ConfirmUsable looks a particular context and determines if that particular part of the config is usable.  There might still be errors in the config,
 // but no errors in the sections requested or referenced.  It does not return early so that it can find as many errors as possible.
 func (config *directClientConfig) ConfirmUsable() error {
-	var validationErrors []error
-	validationErrors = append(validationErrors, validateAuthInfo(config.getAuthInfoName(), config.getAuthInfo())...)
-	validationErrors = append(validationErrors, validateClusterInfo(config.getClusterName(), config.getCluster())...)
+	authErrs := validateAuthInfo(config.getAuthInfoName(), config.getAuthInfo())
+	clusterErrs := validateClusterInfo(config.getClusterName(), config.getCluster())
+	validationErrors := make([]error, 0, len(authErrs)+len(clusterErrs))
+	validationErrors = append(validationErrors, authErrs...)
+	validationErrors = append(validationErrors, clusterErrs...)
 	// when direct client config is specified, and our only error is that no server is defined, we should
 	// return a standard "no config" error
 	if len(validationErrors) == 1 && validationErrors[0] == errEmptyCluster {
@@ -535,7 +537,7 @@ type clientConfigLoadingRules struct {
 func (rules *clientConfigLoadingRules) Load() (*clientcmdConfig, error) {
 	errlist := []error{}
 
-	kubeConfigFiles := []string{}
+	kubeConfigFiles := make([]string, 0, len(rules.Precedence))
 
 	// REMOVED: explicit path support
 	kubeConfigFiles = append(kubeConfigFiles, rules.Precedence...)
