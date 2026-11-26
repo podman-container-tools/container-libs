@@ -3,6 +3,7 @@
 package storage
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/user"
@@ -25,8 +26,6 @@ import (
 // Differently, if the username is not specified for root users, a
 // default name is used.
 func getAdditionalSubIDs(username string) (*idSet, *idSet, error) {
-	var uids, gids *idSet
-
 	if unshare.IsRootless() {
 		username = os.Getenv("USER")
 		if username == "" {
@@ -46,31 +45,31 @@ func getAdditionalSubIDs(username string) (*idSet, *idSet, error) {
 	}
 	mappings, err := idtools.NewIDMappings(username, username)
 	if err != nil {
-		logrus.Errorf("Cannot find mappings for user %q: %v", username, err)
-	} else {
-		uids = getHostIDs(mappings.UIDs())
-		gids = getHostIDs(mappings.GIDs())
+		var unknownUser user.UnknownUserError
+		if _, lookupErr := user.Lookup(username); errors.As(lookupErr, &unknownUser) {
+			return nil, nil, fmt.Errorf("user %q was not found on the system, cannot read its subordinate IDs: %w", username, err)
+		}
+		return nil, nil, fmt.Errorf("cannot find mappings for user %q: %w", username, err)
 	}
-	return uids, gids, nil
+	return getHostIDs(mappings.UIDs()), getHostIDs(mappings.GIDs()), nil
 }
 
 // getAvailableIDs returns the list of ranges that are usable by the current user.
 // When running as root, it looks up the additional IDs assigned to the specified user.
 // When running as rootless, the mappings assigned to the unprivileged user are converted
 // to the IDs inside of the initial rootless user namespace.
-func (s *store) getAvailableIDs() (*idSet, *idSet, error) {
-	if s.additionalUIDs == nil {
+func (s *store) getAvailableIDs() (*idSet, *idSet) {
+	if !s.additionalIDsSet {
 		uids, gids, err := getAdditionalSubIDs(s.autoUsernsUser)
-		if err != nil {
-			return nil, nil, err
-		}
-		// Store the result so we don't need to look it up again next time
-		s.additionalUIDs, s.additionalGIDs = uids, gids
+		// Store the result, including a failure, so we don't need to look it up again.
+		// On failure uids and gids are nil, which is a valid empty idSet.
+		s.additionalUIDs, s.additionalGIDs, s.additionalIDsErr = uids, gids, err
+		s.additionalIDsSet = true
 	}
 
 	if !unshare.IsRootless() {
 		// No mapping to inner namespace needed
-		return s.additionalUIDs, s.additionalGIDs, nil
+		return s.additionalUIDs, s.additionalGIDs
 	}
 
 	// We are already inside of the rootless user namespace.
@@ -78,7 +77,7 @@ func (s *store) getAvailableIDs() (*idSet, *idSet, error) {
 	// inside of the rootless userns.
 	u := newIDSet([]interval{{start: 1, end: s.additionalUIDs.size() + 1}})
 	g := newIDSet([]interval{{start: 1, end: s.additionalGIDs.size() + 1}})
-	return u, g, nil
+	return u, g
 }
 
 // nobodyUser returns the UID and GID of the "nobody" user.  Hardcode its value
@@ -252,10 +251,7 @@ func (s *store) getAutoUserNS(options *types.AutoUserNsOptions, image *Image, rl
 		initialSize = options.InitialSize
 	}
 
-	availableUIDs, availableGIDs, err := s.getAvailableIDs()
-	if err != nil {
-		return nil, nil, fmt.Errorf("cannot read mappings: %w", err)
-	}
+	availableUIDs, availableGIDs := s.getAvailableIDs()
 
 	// Look at every container that is using a user namespace and store
 	// the intervals that are already used.
@@ -291,12 +287,16 @@ func (s *store) getAutoUserNS(options *types.AutoUserNsOptions, image *Image, rl
 		}
 	}
 
-	return getAutoUserNSIDMappings(
+	uidMap, gidMap, err := getAutoUserNSIDMappings(
 		int(size),
 		availableUIDs, availableGIDs,
 		usedUIDs, usedGIDs,
 		options.AdditionalUIDMappings, options.AdditionalGIDMappings,
 	)
+	if err != nil && errors.Is(err, types.ErrNoAvailableIDs) && s.additionalIDsErr != nil {
+		return nil, nil, fmt.Errorf("%w: %w", err, s.additionalIDsErr)
+	}
+	return uidMap, gidMap, err
 }
 
 // getAutoUserNSIDMappings computes the user/group id mappings for the automatic user namespace.

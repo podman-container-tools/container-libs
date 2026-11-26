@@ -839,8 +839,15 @@ type store struct {
 	roLayerStoresUseGetters []roLayerStore // Almost all users should use the provided accessors instead of accessing this field directly.
 
 	// FIXME: The following fields need locking, and don’t have it.
-	additionalUIDs *idSet // Set by getAvailableIDs()
-	additionalGIDs *idSet // Set by getAvailableIDs()
+	// additionalIDsSet is true once getAvailableIDs() has looked up the IDs; the result is
+	// cached for the lifetime of the store, even on failure, because the mappings must not
+	// change while containers using the previous ones may still be running.
+	additionalIDsSet bool
+	// additionalUIDs and additionalGIDs are set by getAvailableIDs(). A nil *idSet is a valid empty set.
+	additionalUIDs *idSet
+	additionalGIDs *idSet
+	// additionalIDsErr is a non-fatal lookup error, only used to improve the error when no IDs are available.
+	additionalIDsErr error
 }
 
 // GetStore attempts to find an already-created Store object matching the
