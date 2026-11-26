@@ -95,7 +95,7 @@ func (c *Compat) TryReusingBlob(ctx context.Context, info types.BlobInfo, cache 
 // (when the primary manifest is a manifest list); this should always be nil if the primary manifest is not a manifest list.
 // MUST be called after PutManifest (signatures may reference manifest contents).
 func (c *Compat) PutSignatures(ctx context.Context, signatures [][]byte, instanceDigest *digest.Digest) error {
-	withFormat := []signature.Signature{}
+	withFormat := make([]signature.Signature, 0, len(signatures))
 	for _, sig := range signatures {
 		withFormat = append(withFormat, signature.SimpleSigningFromBlob(sig))
 	}
