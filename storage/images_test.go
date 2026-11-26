@@ -45,6 +45,57 @@ func TestAddNameToHistorySuccess(t *testing.T) {
 	require.Len(t, image.NamesHistory, 2)
 }
 
+func TestImageMatchingDigest(t *testing.T) {
+	dir := t.TempDir()
+	store, err := newImageStore(dir)
+	require.NoError(t, err)
+
+	matchingDigest := digest.FromString("image")
+
+	require.NoError(t, store.startWriting())
+	image, err := store.create("first", nil, "", ImageOptions{MatchingDigest: matchingDigest})
+	require.NoError(t, err)
+	require.Equal(t, matchingDigest, image.MatchingDigest)
+
+	// Creating another image with the same MatchingDigest is rejected as a
+	// duplicate ID, so that callers using that error to detect "the image is
+	// already present" keep working.
+	_, err = store.create("second", nil, "", ImageOptions{MatchingDigest: matchingDigest})
+	require.ErrorIs(t, err, ErrDuplicateID)
+
+	// Images without a MatchingDigest don't collide with each other.
+	_, err = store.create("third", nil, "", ImageOptions{})
+	require.NoError(t, err)
+	_, err = store.create("fourth", nil, "", ImageOptions{})
+	require.NoError(t, err)
+
+	found, err := store.ByMatchingDigest(matchingDigest)
+	require.NoError(t, err)
+	require.Equal(t, "first", found.ID)
+
+	_, err = store.ByMatchingDigest(digest.FromString("unknown"))
+	require.ErrorIs(t, err, ErrImageUnknown)
+	_, err = store.ByMatchingDigest("")
+	require.ErrorIs(t, err, ErrImageUnknown)
+	store.stopWriting()
+
+	// The value and the index survive a reload.
+	reloaded, err := newImageStore(dir)
+	require.NoError(t, err)
+	require.NoError(t, reloaded.startReading())
+	found, err = reloaded.ByMatchingDigest(matchingDigest)
+	require.NoError(t, err)
+	require.Equal(t, "first", found.ID)
+	reloaded.stopReading()
+
+	// Deleting the image also removes it from the index.
+	require.NoError(t, store.startWriting())
+	require.NoError(t, store.Delete("first"))
+	_, err = store.ByMatchingDigest(matchingDigest)
+	require.ErrorIs(t, err, ErrImageUnknown)
+	store.stopWriting()
+}
+
 func TestHistoryNames(t *testing.T) {
 	// Given
 	store := newTestImageStore(t)
