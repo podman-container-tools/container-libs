@@ -713,6 +713,9 @@ type RemoveImagesOptions struct {
 	// on the file system holding the graph root. Only applies when no names are
 	// passed to RemoveImages.
 	MinFreeSpace int64
+	// DryRun will not remove images but will display image id's
+	// that would have been removed
+	DryRun bool
 }
 
 // RemoveImages removes images specified by names.  If no names are specified,

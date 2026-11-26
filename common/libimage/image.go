@@ -221,6 +221,36 @@ func (i *Image) isDangling(ctx context.Context, tree *layerTree) (bool, error) {
 	return (len(children) == 0 && !usedInManfiestList), nil
 }
 
+// isDanglingDryRunCheck is an alternative to isDangling in a dry run,
+// it checks and skips children with goneFromLayerTree set, as they would
+// have been deleted in a real run.
+func (i *Image) isDanglingDryRunCheck(ctx context.Context, rmMap map[string]*RemoveImageReport) (bool, error) {
+	if len(i.Names()) > 0 {
+		return false, nil
+	}
+
+	images, layers, err := i.runtime.getImagesAndLayers()
+	if err != nil {
+		return false, err
+	}
+
+	tree, err := i.runtime.newLayerTreeFromData(images, layers, true)
+	if err != nil {
+		return false, err
+	}
+
+	remaining, err := i.hasRemainingChildren(ctx, rmMap, tree)
+	if err != nil {
+		return false, err
+	}
+	if remaining {
+		return false, nil
+	}
+
+	_, usedInManifestList := tree.manifestListDigests[i.Digest()]
+	return !usedInManifestList, nil
+}
+
 // IsIntermediate returns true if the image is an intermediate image, that is
 // an untagged image with children.
 func (i *Image) IsIntermediate(ctx context.Context) (bool, error) {
@@ -290,6 +320,20 @@ func (i *Image) HasChildren(ctx context.Context) (bool, error) {
 	return len(children) > 0, nil
 }
 
+// hasRemainingChildren returns whether the image has any child not marked goneFromLayerTree in rmMap.
+func (i *Image) hasRemainingChildren(ctx context.Context, rmMap map[string]*RemoveImageReport, tree *layerTree) (bool, error) {
+	children, err := i.getChildren(ctx, false, tree)
+	if err != nil {
+		return false, err
+	}
+	for _, child := range children {
+		if report, exists := rmMap[child.ID()]; !exists || !report.goneFromLayerTree {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // Children returns the image's children.
 func (i *Image) Children(ctx context.Context) ([]*Image, error) {
 	children, err := i.getChildren(ctx, true, nil)
@@ -336,7 +380,7 @@ func (i *Image) removeContainers(options *RemoveImagesOptions) error {
 		return nil
 	}
 
-	if options.Force && options.RemoveContainerFunc != nil {
+	if options.Force && options.RemoveContainerFunc != nil && !options.DryRun {
 		logrus.Debugf("Removing containers of image %s with custom removal function", i.ID())
 		if err := options.RemoveContainerFunc(i.ID()); err != nil {
 			return err
@@ -351,6 +395,7 @@ func (i *Image) removeContainers(options *RemoveImagesOptions) error {
 	if !options.Force && options.ExternalContainers {
 		// All containers must be external ones.
 		for _, cID := range containers {
+			// Dry run depends on this call not having any side effects
 			isExternal, err := options.IsExternalContainerFunc(cID)
 			if err != nil {
 				return fmt.Errorf("checking if %s is an external container: %w", cID, err)
@@ -361,13 +406,16 @@ func (i *Image) removeContainers(options *RemoveImagesOptions) error {
 		}
 	}
 
-	logrus.Debugf("Removing containers of image %s from the local containers storage", i.ID())
 	var multiE error
-	for _, cID := range containers {
-		if err := i.runtime.store.DeleteContainer(cID); err != nil {
-			// If the container does not exist anymore, we're good.
-			if !errors.Is(err, storage.ErrContainerUnknown) {
-				multiE = multierror.Append(multiE, err)
+
+	if !options.DryRun {
+		logrus.Debugf("Removing containers of image %s from the local containers storage", i.ID())
+		for _, cID := range containers {
+			if err := i.runtime.store.DeleteContainer(cID); err != nil {
+				// If the container does not exist anymore, we're good.
+				if !errors.Is(err, storage.ErrContainerUnknown) {
+					multiE = multierror.Append(multiE, err)
+				}
 			}
 		}
 	}
@@ -400,6 +448,10 @@ type RemoveImageReport struct {
 	FreedSize int64
 	// The untagged tags.
 	Untagged []string
+	// For internal bookkeeping, not part of the report.
+	// It is true once the image has been deleted from storage,
+	// or would have been in a dry run.
+	goneFromLayerTree bool
 }
 
 // remove removes the image along with all dangling parent images that no other
@@ -420,6 +472,26 @@ func (i *Image) remove(ctx context.Context, rmMap map[string]*RemoveImageReport,
 	return i.removeRecursive(ctx, rmMap, processedIDs, referencedBy, options)
 }
 
+// remainingNames returns the image's names minus those already untagged
+// earlier in the same removal operation.
+func (i *Image) remainingNames(report *RemoveImageReport) []string {
+	untagged := make(map[string]struct{}, len(report.Untagged))
+	for _, name := range report.Untagged {
+		if ref, err := NormalizeName(name); err == nil {
+			name = ref.String()
+		}
+		untagged[name] = struct{}{}
+	}
+
+	var names []string
+	for _, name := range i.Names() {
+		if _, ok := untagged[name]; !ok {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
 func (i *Image) removeRecursive(ctx context.Context, rmMap map[string]*RemoveImageReport, processedIDs []string, referencedBy string, options *RemoveImagesOptions) ([]string, error) {
 	// If referencedBy is empty, the image is considered to be removed via
 	// `image remove --all` which alters the logic below.
@@ -435,7 +507,7 @@ func (i *Image) removeRecursive(ctx context.Context, rmMap map[string]*RemoveIma
 		return processedIDs, fmt.Errorf("cannot remove read-only image %q", i.ID())
 	}
 
-	if i.runtime.eventChannel != nil {
+	if i.runtime.eventChannel != nil && !options.DryRun {
 		defer i.runtime.writeEvent(&Event{ID: i.ID(), Name: referencedBy, Time: time.Now(), Type: EventTypeImageRemove})
 	}
 
@@ -474,7 +546,8 @@ func (i *Image) removeRecursive(ctx context.Context, rmMap map[string]*RemoveIma
 	}
 
 	skipRemove := false
-	numNames := len(i.Names())
+	names := i.remainingNames(report)
+	numNames := len(names)
 
 	// NOTE: the `numNames != 1` check is not only a performance
 	// optimization but also preserves existing Podman/Docker behaviour.
@@ -487,23 +560,30 @@ func (i *Image) removeRecursive(ctx context.Context, rmMap map[string]*RemoveIma
 		byDigest := strings.HasPrefix(referencedBy, "sha256:")
 		if !options.Force {
 			if byID && numNames > 1 {
-				return processedIDs, fmt.Errorf("unable to delete image %q by ID with more than one tag (%s): please force removal", i.ID(), i.Names())
+				return processedIDs, fmt.Errorf("unable to delete image %q by ID with more than one tag (%s): please force removal", i.ID(), names)
 			} else if byDigest && numNames > 1 {
 				// FIXME - Docker will remove the digest but containers storage
 				// does not support that yet, so our hands are tied.
-				return processedIDs, fmt.Errorf("unable to delete image %q by digest with more than one tag (%s): please force removal", i.ID(), i.Names())
+				return processedIDs, fmt.Errorf("unable to delete image %q by digest with more than one tag (%s): please force removal", i.ID(), names)
 			}
 		}
 
 		// Only try to untag if we know it's not an ID or digest.
 		if !byID && !byDigest {
-			if err := i.Untag(referencedBy); handleError(err) != nil {
-				return processedIDs, err
+			if options.DryRun {
+				if err := i.untagDryRun(referencedBy, report); handleError(err) != nil {
+					return processedIDs, err
+				}
+			} else {
+				if err := i.Untag(referencedBy); handleError(err) != nil {
+					return processedIDs, err
+				}
 			}
+
 			report.Untagged = append(report.Untagged, referencedBy)
 
 			// If there's still tags left, we cannot delete it.
-			skipRemove = len(i.Names()) > 0
+			skipRemove = len(i.remainingNames(report)) > 0
 		}
 	}
 
@@ -520,7 +600,14 @@ func (i *Image) removeRecursive(ctx context.Context, rmMap map[string]*RemoveIma
 	// Podman/Docker compat: we only report an image as removed if it has
 	// no children. Otherwise, the data is effectively still present in the
 	// storage despite the image being removed.
-	hasChildren, err := i.HasChildren(ctx)
+	var hasChildren bool
+	var err error
+
+	if options.DryRun {
+		hasChildren, err = i.hasRemainingChildren(ctx, rmMap, nil)
+	} else {
+		hasChildren, err = i.HasChildren(ctx)
+	}
 	if err != nil {
 		// We must be tolerant toward corrupted images.
 		// See containers/podman commit fd9dd7065d44.
@@ -538,15 +625,31 @@ func (i *Image) removeRecursive(ctx context.Context, rmMap map[string]*RemoveIma
 		parent = nil
 	}
 
+	// Stop dry runs from recursing into a parent, a real run wouldn't find an already deleted parent.
+	if parent != nil && options.DryRun {
+		parentReport, exists := rmMap[parent.ID()]
+		if exists && parentReport.goneFromLayerTree {
+			parent = nil
+		}
+	}
+
 	// The store reports what the removal released, which is the layers no
 	// remaining image references anymore along with the image's big data.
 	var freedSize int64
 	var deleteErr error
 	if options.WithSize {
-		_, freedSize, deleteErr = i.runtime.store.DeleteImageWithSize(i.ID(), true)
+		_, freedSize, deleteErr = i.runtime.store.DeleteImageWithSize(i.ID(), !options.DryRun)
 	} else {
-		_, deleteErr = i.runtime.store.DeleteImage(i.ID(), true)
+		_, deleteErr = i.runtime.store.DeleteImage(i.ID(), !options.DryRun)
 	}
+
+	// In a dry run, if a container is using the image, store.DeleteImage would return
+	// an error. But we would expect that a run with Force/ExternalContainers would have removed
+	// the containers either way, so we discard the error.
+	if options.DryRun && (options.Force || options.ExternalContainers) && errors.Is(deleteErr, storage.ErrImageUsedByContainer) {
+		deleteErr = nil
+	}
+
 	if deleteErr != nil {
 		if handleError(deleteErr) != nil {
 			if errors.Is(deleteErr, storage.ErrImageUsedByContainer) {
@@ -560,9 +663,15 @@ func (i *Image) removeRecursive(ctx context.Context, rmMap map[string]*RemoveIma
 	}
 	report.FreedSize = freedSize
 
-	report.Untagged = append(report.Untagged, i.Names()...)
-	if i.runtime.eventChannel != nil {
-		for _, name := range i.Names() {
+	// Only read in dry runs to identify images that would have been deleted.
+	report.goneFromLayerTree = true
+
+	// Compute the remaining names before appending them to report.Untagged,
+	// otherwise they would filter themselves out.
+	names = i.remainingNames(report)
+	report.Untagged = append(report.Untagged, names...)
+	if i.runtime.eventChannel != nil && !options.DryRun {
+		for _, name := range names {
 			i.runtime.writeEvent(&Event{ID: i.ID(), Name: name, Time: time.Now(), Type: EventTypeImageUntag})
 		}
 	}
@@ -581,18 +690,29 @@ func (i *Image) removeRecursive(ctx context.Context, rmMap map[string]*RemoveIma
 		return processedIDs, nil
 	}
 
-	// Only remove the parent if it's dangling, that is being untagged and
-	// without children.
-	danglingParent, err := parent.IsDangling(ctx)
-	if err != nil {
-		// See Podman commit fd9dd7065d44: we need to
-		// be tolerant toward corrupted images.
-		logrus.Warnf("Failed to determine if an image is a parent: %v, ignoring the error", err)
-		danglingParent = false
+	var danglingParent bool
+
+	if options.DryRun {
+		danglingParent, err = parent.isDanglingDryRunCheck(ctx, rmMap)
+		if err != nil {
+			logrus.Warnf("Failed to determine if an image is a parent: %v, ignoring the error", err)
+		}
+	} else {
+		// Only remove the parent if it's dangling, that is being untagged and
+		// without children.
+		danglingParent, err = parent.IsDangling(ctx)
+		if err != nil {
+			// See Podman commit fd9dd7065d44: we need to
+			// be tolerant toward corrupted images.
+			logrus.Warnf("Failed to determine if an image is a parent: %v, ignoring the error", err)
+			danglingParent = false
+		}
 	}
+
 	if !danglingParent {
 		return processedIDs, nil
 	}
+
 	// Recurse into removing the parent.
 	return parent.removeRecursive(ctx, rmMap, processedIDs, "", options)
 }
@@ -634,17 +754,16 @@ var errTagUnknown = errors.New("tag not known")
 // image.  However, that's something containers storage does not support.
 var errUntagDigest = errors.New("untag by digest not supported")
 
-// Untag the image with the specified name and make the change persistent in
-// the local containers storage.  The name is normalized according to the rules
-// of NormalizeName.
-func (i *Image) Untag(name string) error {
+// validateUntag validates that a name can be normalized according to the rules of
+// NormalizeName and returns it.
+func (i *Image) validateUntag(name string) (reference.Named, error) {
 	if strings.HasPrefix(name, "sha256:") { // ambiguous input
-		return fmt.Errorf("%s: %w", name, errUntagDigest)
+		return nil, fmt.Errorf("%s: %w", name, errUntagDigest)
 	}
 
 	ref, err := NormalizeName(name)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// FIXME: this is breaking Podman CI but must be re-enabled once
@@ -654,8 +773,20 @@ func (i *Image) Untag(name string) error {
 	// !!! Also make sure to re-enable the tests !!!
 	//
 	// if _, isDigested := ref.(reference.Digested); isDigested {
-	// 	return fmt.Errorf("%s: %w", name, errUntagDigest)
+	// 	return nil, fmt.Errorf("%s: %w", name, errUntagDigest)
 	// }
+
+	return ref, nil
+}
+
+// Untag the image with the specified name and make the change persistent in
+// the local containers storage. The name is normalized according to the
+// rules of NormalizeName.
+func (i *Image) Untag(name string) error {
+	ref, err := i.validateUntag(name)
+	if err != nil {
+		return err
+	}
 
 	name = ref.String()
 
@@ -675,6 +806,25 @@ func (i *Image) Untag(name string) error {
 	}
 
 	return i.reload()
+}
+
+// untagDryRun is an alternative to Untag in a dry run, it won't touch the
+// local containers storage but will return errors that would have happened.
+func (i *Image) untagDryRun(name string, report *RemoveImageReport) error {
+	ref, err := i.validateUntag(name)
+	if err != nil {
+		return err
+	}
+
+	name = ref.String()
+
+	if !slices.Contains(i.remainingNames(report), name) {
+		return fmt.Errorf("%s: %w", name, errTagUnknown)
+	}
+
+	logrus.Debugf("DryRun: Untagging %q from image %s", ref.String(), i.ID())
+
+	return nil
 }
 
 // RepoTags returns a string slice of repotags associated with the image.
