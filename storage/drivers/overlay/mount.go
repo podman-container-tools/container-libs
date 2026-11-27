@@ -7,9 +7,11 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 
 	"go.podman.io/storage/pkg/reexec"
 	"golang.org/x/sys/unix"
@@ -17,6 +19,34 @@ import (
 
 func init() {
 	reexec.Register("storage-mountfrom", mountOverlayFromMain)
+}
+
+func runMountProgram(mountProgramPath, home, label, target, supportProgramCgroup string) error {
+	var b bytes.Buffer
+	mountProgram := exec.Command(mountProgramPath, "-o", label, target)
+	mountProgram.Dir = home
+	mountProgram.Stderr = &b
+
+	if supportProgramCgroup != "" {
+		fd, err := unix.Open(supportProgramCgroup, unix.O_PATH|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
+		if err != nil {
+			return fmt.Errorf("opening cgroup %s for mount program %s: %w", supportProgramCgroup, mountProgramPath, err)
+		}
+		defer unix.Close(fd)
+		mountProgram.SysProcAttr = &syscall.SysProcAttr{
+			UseCgroupFD: true,
+			CgroupFD:    fd,
+		}
+	}
+
+	if err := mountProgram.Run(); err != nil {
+		output := b.String()
+		if output == "" {
+			output = "<stderr empty>"
+		}
+		return fmt.Errorf("using mount program %s: %s: %w", mountProgramPath, output, err)
+	}
+	return nil
 }
 
 func fatal(err error) {

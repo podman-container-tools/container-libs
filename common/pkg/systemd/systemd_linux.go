@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 
 	systemdDbus "github.com/coreos/go-systemd/v22/dbus"
@@ -97,6 +99,17 @@ func MoveRootlessNetnsProcessToUserSlice(pid int) error {
 // MovePauseProcessToScope moves the pause process used for rootless mode to keep the namespaces alive to
 // a separate scope.
 func MovePauseProcessToScope(pausePidPath string) {
+	if data, err := os.ReadFile(pausePidPath); err == nil {
+		if pid, err := strconv.Atoi(strings.TrimSpace(string(data))); err == nil {
+			if cgroup, err := cgroups.GetCgroupProcess(pid); err == nil {
+				base := filepath.Base(cgroup)
+				if strings.HasPrefix(base, "podman-pause-") && strings.HasSuffix(base, ".scope") {
+					return
+				}
+			}
+		}
+	}
+
 	var err error
 
 	for range 10 {

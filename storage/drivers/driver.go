@@ -468,12 +468,13 @@ func getBuiltinDriver(name, home string, options Options) (Driver, error) {
 
 // Options is used to initialize a graphdriver
 type Options struct {
-	Root                string
-	RunRoot             string
-	ImageStore          string
-	DriverPriority      []string
-	DriverOptions       []string
-	ExperimentalEnabled bool
+	Root                 string
+	RunRoot              string
+	ImageStore           string
+	DriverPriority       []string
+	DriverOptions        []string
+	ExperimentalEnabled  bool
+	SupportProgramCgroup string
 }
 
 // New creates the driver and initializes it at the specified root.
