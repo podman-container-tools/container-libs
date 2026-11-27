@@ -238,6 +238,7 @@ func newPullClient(sys *types.SystemContext, logicalRef dockerReference, pullSou
 		return nil, err
 	}
 	client.tlsClientConfig.InsecureSkipVerify = pullSource.Endpoint.Insecure
+	client.registryProxy = pullSource.Endpoint.Proxy
 	client.namespaceProxy = pullSource.Endpoint.NamespaceProxy
 
 	return &pullEndpoint{client: client, ref: physicalRef, endpointSys: endpointSys}, nil
