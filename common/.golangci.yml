@@ -54,6 +54,7 @@ linters:
     - recvcheck
     - revive
     - staticcheck
+    - stylecheck
     - unconvert
     - unparam
     - usestdlibvars
