@@ -205,11 +205,26 @@ func oci1DescriptorFromSchema2Descriptor(d manifest.Schema2Descriptor) imgspecv1
 // value.
 // This does not change the state of the original manifestSchema2 object.
 func (m *manifestSchema2) convertToManifestOCI1(ctx context.Context, _ *types.ManifestUpdateOptions) (genericManifest, error) {
-	configOCI, err := m.OCIConfig(ctx)
+	configBlob, err := m.ConfigBlob(ctx)
 	if err != nil {
 		return nil, err
 	}
-	configOCIBytes, err := json.Marshal(configOCI)
+
+	// Decode the standard OCI-compatible fields.
+	configOCI := &imgspecv1.Image{}
+	if err := json.Unmarshal(configBlob, configOCI); err != nil {
+		return nil, err
+	}
+
+	// Preserve the Docker HEALTHCHECK extension in our OCI config.
+	healthcheck, err := manifest.Schema2HealthcheckFromConfigBlob(configBlob)
+	if err != nil {
+		return nil, err
+	}
+
+	// Create the config bytes using the extended OCI config.
+	extendedOCIConfig := manifest.NewOCIImageExtended(*configOCI, healthcheck)
+	configOCIBytes, err := json.Marshal(&extendedOCIConfig)
 	if err != nil {
 		return nil, err
 	}

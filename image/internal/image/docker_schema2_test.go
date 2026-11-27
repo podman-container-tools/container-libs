@@ -737,3 +737,27 @@ func TestManifestSchema2CanChangeLayerCompression(t *testing.T) {
 		assert.False(t, m.CanChangeLayerCompression("a completely unknown and quite possibly invalid MIME type"))
 	}
 }
+
+func TestConvertToManifestOCIPreservesHealthcheck(t *testing.T) {
+	configBlob := []byte(`{
+		"architecture": "amd64", "os": "linux",
+		"config": {
+			"Cmd": ["my-command"],
+			"Healthcheck": {"Test": ["CMD-SHELL", "curl -f http://localhost/health"],
+			                "Interval": 30000000000, "Retries": 3}
+		},
+		"rootfs": {"type": "layers", "diff_ids": []}
+	}`)
+	m := manifestSchema2FromComponentsLikeFixture(configBlob).(*manifestSchema2)
+	converted, err := m.convertToManifestOCI1(context.Background(), nil)
+	require.NoError(t, err)
+	out, err := converted.ConfigBlob(context.Background())
+	require.NoError(t, err)
+
+	hc, err := manifest.Schema2HealthcheckFromConfigBlob(out)
+	require.NoError(t, err)
+	assert.Equal(t, &manifest.Schema2HealthConfig{
+		Test:     []string{"CMD-SHELL", "curl -f http://localhost/health"},
+		Interval: 30 * time.Second, Retries: 3,
+	}, hc)
+}

@@ -155,6 +155,55 @@ type Schema2Image struct {
 	OSFeatures []string         `json:"os.features,omitempty"`
 }
 
+// Private type used only for decoding the healthcheck out of configs.
+type schema2HealthcheckConfig struct {
+	Healthcheck *Schema2HealthConfig `json:"Healthcheck"`
+}
+
+// config takes precedence whenever it is present, even if its Healthcheck is nil.
+func schema2Healthcheck(
+	config *schema2HealthcheckConfig,
+	containerConfig schema2HealthcheckConfig,
+) *Schema2HealthConfig {
+	if config != nil {
+		return config.Healthcheck
+	}
+	return containerConfig.Healthcheck
+}
+
+// Healthcheck returns the image healthcheck. config.Healthcheck is preferred;
+// the legacy container_config.Healthcheck is used only when config is absent.
+func (i *Schema2V1Image) Healthcheck() *Schema2HealthConfig {
+	if i == nil {
+		return nil
+	}
+
+	var config *schema2HealthcheckConfig
+	if i.Config != nil {
+		config = &schema2HealthcheckConfig{Healthcheck: i.Config.Healthcheck}
+	}
+
+	return schema2Healthcheck(config, schema2HealthcheckConfig{
+		Healthcheck: i.ContainerConfig.Healthcheck,
+	})
+}
+
+// Schema2HealthcheckFromConfigBlob extracts only the healthchecks from an
+// image config blob (Docker schema2 or OCI), using the same precedence as
+// Schema2V1Image.Healthcheck.
+func Schema2HealthcheckFromConfigBlob(configBlob []byte) (*Schema2HealthConfig, error) {
+	var parsed struct {
+		Config          *schema2HealthcheckConfig `json:"config"`
+		ContainerConfig schema2HealthcheckConfig  `json:"container_config"`
+	}
+
+	if err := json.Unmarshal(configBlob, &parsed); err != nil {
+		return nil, err
+	}
+
+	return schema2Healthcheck(parsed.Config, parsed.ContainerConfig), nil
+}
+
 // Schema2FromManifest creates a Schema2 manifest instance from a manifest blob.
 func Schema2FromManifest(manifestBlob []byte) (*Schema2, error) {
 	s2 := Schema2{}

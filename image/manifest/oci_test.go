@@ -1,9 +1,11 @@
 package manifest
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/opencontainers/go-digest"
 	imgspecv1 "github.com/opencontainers/image-spec/specs-go/v1"
@@ -410,4 +412,78 @@ func TestOCI1CanChangeLayerCompression(t *testing.T) {
 
 	artifact := manifestOCI1FromFixture(t, "ociv1.artifact.json")
 	assert.False(t, artifact.CanChangeLayerCompression(imgspecv1.MediaTypeImageLayerGzip))
+}
+
+func TestNewOCIImageExtended(t *testing.T) {
+	image := imgspecv1.Image{
+		Platform: imgspecv1.Platform{
+			Architecture: "amd64",
+			OS:           "linux",
+		},
+		Config: imgspecv1.ImageConfig{
+			User: "1000",
+			Env:  []string{"PATH=/usr/bin"},
+			Cmd:  []string{"my-command"},
+			Labels: map[string]string{
+				"version": "1.0",
+			},
+		},
+		RootFS: imgspecv1.RootFS{
+			Type: "layers",
+		},
+		History: []imgspecv1.History{
+			{CreatedBy: "test build"},
+		},
+	}
+
+	healthcheck := &Schema2HealthConfig{
+		Test:          []string{"CMD-SHELL", "curl -f http://localhost/health"},
+		Interval:      30 * time.Second,
+		Timeout:       5 * time.Second,
+		StartPeriod:   10 * time.Second,
+		StartInterval: 2 * time.Second,
+		Retries:       3,
+	}
+
+	tests := []struct {
+		name        string
+		healthcheck *Schema2HealthConfig
+	}{
+		{name: "without healthcheck"},
+		{name: "with healthcheck", healthcheck: healthcheck},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			serialized, err := json.Marshal(NewOCIImageExtended(image, tt.healthcheck))
+			if !assert.NoError(t, err) {
+				return
+			}
+
+			if tt.healthcheck == nil {
+				expected, err := json.Marshal(image)
+				if !assert.NoError(t, err) {
+					return
+				}
+				assert.Equal(t, expected, serialized)
+				return
+			}
+
+			var decodedImage imgspecv1.Image
+			if !assert.NoError(t, json.Unmarshal(serialized, &decodedImage)) {
+				return
+			}
+			assert.Equal(t, image, decodedImage)
+
+			var decoded struct {
+				Config struct {
+					Healthcheck *Schema2HealthConfig `json:"Healthcheck"`
+				} `json:"config"`
+			}
+			if !assert.NoError(t, json.Unmarshal(serialized, &decoded)) {
+				return
+			}
+			assert.Equal(t, healthcheck, decoded.Config.Healthcheck)
+		})
+	}
 }
