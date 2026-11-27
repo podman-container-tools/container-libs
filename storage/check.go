@@ -850,8 +850,8 @@ type checkDirectory struct {
 	checkFileInfo
 }
 
-// newCheckDirectory creates an empty checkDirectory
-func newCheckDirectory(uid, gid int, size int64, mode os.FileMode, mtime int64) *checkDirectory {
+// newCheckDirectory creates an empty checkDirectory with size zero
+func newCheckDirectory(uid, gid int, mode os.FileMode, mtime int64) *checkDirectory {
 	return &checkDirectory{
 		directory: make(map[string]*checkDirectory),
 		file:      make(map[string]checkFileInfo),
@@ -859,7 +859,7 @@ func newCheckDirectory(uid, gid int, size int64, mode os.FileMode, mtime int64) 
 			typeflag: tar.TypeDir,
 			uid:      uid,
 			gid:      gid,
-			size:     size,
+			size:     0,
 			mode:     mode,
 			mtime:    mtime,
 		},
@@ -869,7 +869,7 @@ func newCheckDirectory(uid, gid int, size int64, mode os.FileMode, mtime int64) 
 // newCheckDirectoryDefaults creates an empty checkDirectory with hardwired defaults for the UID
 // (0), GID (0), size (0) and permissions (0o555)
 func newCheckDirectoryDefaults() *checkDirectory {
-	return newCheckDirectory(0, 0, 0, 0o555, time.Now().Unix())
+	return newCheckDirectory(0, 0, 0o555, time.Now().Unix())
 }
 
 // newCheckDirectoryFromDirectory creates a checkDirectory for an on-disk directory tree
@@ -922,7 +922,7 @@ func (c *checkDirectory) add(path string, typeflag byte, uid, gid int, size int6
 			delete(c.file, components[0])
 			// directory entries are mergers, not replacements
 			if _, present := c.directory[components[0]]; !present {
-				c.directory[components[0]] = newCheckDirectory(uid, gid, size, mode, mtime)
+				c.directory[components[0]] = newCheckDirectory(uid, gid, mode, mtime)
 			} else {
 				c.directory[components[0]].checkFileInfo = checkFileInfo{
 					typeflag: tar.TypeDir,
@@ -952,7 +952,7 @@ func (c *checkDirectory) add(path string, typeflag byte, uid, gid int, size int6
 	}
 	subdirectory := c.directory[components[0]]
 	if subdirectory == nil {
-		subdirectory = newCheckDirectory(uid, gid, size, mode, mtime)
+		subdirectory = newCheckDirectory(uid, gid, mode, mtime)
 		c.directory[components[0]] = subdirectory
 	}
 	subdirectory.add(strings.Join(components[1:], "/"), typeflag, uid, gid, size, mode, mtime)
