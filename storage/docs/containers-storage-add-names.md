@@ -28,6 +28,6 @@ containers-storage add-names \
 ```
 
 ## SEE ALSO
-containers-storage-get-names(1)
-containers-storage-remove-names(1)
-containers-storage-set-names(1)
+[containers-storage-get-names(1)](containers-storage-get-names.md)
+[containers-storage-remove-names(1)](containers-storage-remove-names.md)
+[containers-storage-set-names(1)](containers-storage-set-names.md)

@@ -73,5 +73,5 @@ Create GID map for group-name using the data from /etc/subgid. It cannot be spec
     containers-storage import-layer -f 71841c97e320d6cde.tar.gz -n new-layer somelayer
 
 ## SEE ALSO
-containers-storage-create-layer(1)
+[containers-storage-create-layer(1)](containers-storage-create-layer.md)
 containers-storage-apply-diff(1)

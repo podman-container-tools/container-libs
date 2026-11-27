@@ -14,4 +14,4 @@ Retrieves information about all known images and lists their IDs and names.
     containers-storage images
 
 ## SEE ALSO
-containers-storage-image(1)
+[containers-storage-image(1)](containers-storage-image.md)

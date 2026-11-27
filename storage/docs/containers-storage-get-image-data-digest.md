@@ -15,7 +15,7 @@ image.
     containers-storage get-image-data-digest my-image manifest.json
 
 ## SEE ALSO
-containers-storage-get-image-data(1)
-containers-storage-get-image-data-size(1)
-containers-storage-list-image-data(1)
-containers-storage-set-image-data(1)
+[containers-storage-get-image-data(1)](containers-storage-get-image-data.md)
+[containers-storage-get-image-data-size(1)](containers-storage-get-image-data-size.md)
+[containers-storage-list-image-data(1)](containers-storage-list-image-data.md)
+[containers-storage-set-image-data(1)](containers-storage-set-image-data.md)

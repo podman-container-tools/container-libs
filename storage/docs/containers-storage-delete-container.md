@@ -14,6 +14,6 @@ Deletes a container and its layer.
     containers-storage delete-container my-awesome-container
 
 ## SEE ALSO
-containers-storage-create-container(1)
-containers-storage-delete-image(1)
-containers-storage-delete-layer(1)
+[containers-storage-create-container(1)](containers-storage-create-container.md)
+[containers-storage-delete-image(1)](containers-storage-delete-image.md)
+[containers-storage-delete-layer(1)](containers-storage-delete-layer.md)

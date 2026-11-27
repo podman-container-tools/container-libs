@@ -103,7 +103,7 @@ not required by Skopeo.
 %build
 mkdir -p man5
 for i in common/docs/*.5.md image/docs/*.5.md storage/docs/*.5.md; do
-   go-md2man -in $i -out man5/$(basename $i .md)
+   sed -E -f hack/md2man-preprocess.sed $i | go-md2man -out man5/$(basename $i .md)
 done
 
 %install

@@ -14,4 +14,4 @@ Outputs version information about the storage library and *containers-storage*.
     containers-storage version
 
 ## SEE ALSO
-containers-storage-status(1)
+[containers-storage-status(1)](containers-storage-status.md)

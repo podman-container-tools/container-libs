@@ -22,4 +22,4 @@ Read the data contents from a file instead of stdin.
      configuration
 
 ## SEE ALSO
-containers-storage-get-layer-data(1)
+[containers-storage-get-layer-data(1)](containers-storage-get-layer-data.md)

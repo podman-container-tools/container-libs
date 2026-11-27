@@ -16,6 +16,6 @@ to create it, any names that image has, and the ID of the container's layer.
     containers-storage container my-awesome-container
 
 ## SEE ALSO
-containers-storage-containers(1)
-containers-storage-image(1)
-containers-storage-layer(1)
+[containers-storage-containers(1)](containers-storage-containers.md)
+[containers-storage-image(1)](containers-storage-image.md)
+[containers-storage-layer(1)](containers-storage-layer.md)

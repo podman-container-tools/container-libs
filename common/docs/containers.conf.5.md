@@ -30,7 +30,7 @@ used. Then the files will be parsed in the sorted order.
 Fields specified in containers conf override the default options, as well as
 options in previously read containers.conf files.
 
-See **containers-config(5)** for a more detailed description on how the files are loaded.
+See **[containers-config(5)](containers-config.5.md)** for a more detailed description on how the files are loaded.
 
 Not all options are supported in all container engines.
 
@@ -572,7 +572,7 @@ and `systemd`.
 
 Enforce using docker.io for completing short names in Podman's compatibility
 REST API. Note that this will ignore unqualified-search-registries and
-short-name aliases defined in containers-registries.conf(5).
+short-name aliases defined in [containers-registries.conf(5)](../../image/docs/containers-registries.conf.5.md).
 
 **compose_providers**=[]
 
@@ -1087,6 +1087,6 @@ Number of seconds to wait for podmansh logins. This value if favoured over the d
 The default value is 30.
 
 # SEE ALSO
-containers-config(5), containers-storage.conf(5), containers-policy.json(5), containers-registries.conf(5), tmpfiles.d(5)
+[containers-config(5)](containers-config.5.md), [containers-storage.conf(5)](../../storage/docs/containers-storage.conf.5.md), [containers-policy.json(5)](../../image/docs/containers-policy.json.5.md), [containers-registries.conf(5)](../../image/docs/containers-registries.conf.5.md), tmpfiles.d(5)
 
 [toml]: https://github.com/toml-lang/toml

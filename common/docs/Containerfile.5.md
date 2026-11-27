@@ -582,8 +582,8 @@ The secret needs to be passed to the build using the --secret flag. The final im
 
   The variable expansion technique in this example allows you to pass arguments
   from the command line and persist them in the final image by leveraging the
-  `ENV` instruction. Variable expansion is only supported for [a limited set of
-  Containerfile instructions.](#environment-replacement)
+  `ENV` instruction. Variable expansion is only supported for
+  [a limited set of Containerfile instructions](#environment-replacement).
 
   Container engines have a set of predefined `ARG` variables that you can use without a
   corresponding `ARG` instruction in the Containerfile.

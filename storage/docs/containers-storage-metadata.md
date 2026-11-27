@@ -20,4 +20,4 @@ Don't print the ID or name of the item with which the metadata is associated.
     containers-storage metadata -q my-image > my-image.txt
 
 ## SEE ALSO
-containers-storage-set-metadata(1)
+[containers-storage-set-metadata(1)](containers-storage-set-metadata.md)

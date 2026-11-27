@@ -15,4 +15,4 @@ either a specified command or the current user's shell.
     containers-storage unshare id
 
 ## SEE ALSO
-containers-storage-status(1)
+[containers-storage-status(1)](containers-storage-status.md)

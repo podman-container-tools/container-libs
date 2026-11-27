@@ -14,5 +14,5 @@ Check if a filesystem is mounted
     containers-storage mounted my-container
 
 ## SEE ALSO
-containers-storage-mount(1)
-containers-storage-unmount(1)
+[containers-storage-mount(1)](containers-storage-mount.md)
+[containers-storage-unmount(1)](containers-storage-unmount.md)

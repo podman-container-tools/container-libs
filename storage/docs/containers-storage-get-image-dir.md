@@ -15,4 +15,4 @@ information which should be cleaned up when the image is deleted.
     containers-storage get-image-dir my-image
 
 ## SEE ALSO
-containers-storage-get-image-run-dir(1)
+[containers-storage-get-image-run-dir(1)](containers-storage-get-image-run-dir.md)

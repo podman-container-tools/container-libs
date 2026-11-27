@@ -33,6 +33,6 @@ Sets the metadata for the container to the contents of the specified file.
     containers-storage create-container -f manifest.json -n new-container goodimage
 
 ## SEE ALSO
-containers-storage-create-image(1)
-containers-storage-create-layer(1)
-containers-storage-delete-container(1)
+[containers-storage-create-image(1)](containers-storage-create-image.md)
+[containers-storage-create-layer(1)](containers-storage-create-layer.md)
+[containers-storage-delete-container(1)](containers-storage-delete-container.md)

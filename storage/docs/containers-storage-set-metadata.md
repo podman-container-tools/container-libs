@@ -24,4 +24,4 @@ Use the specified value as the metadata.
     containers-storage set-metadata -m "compression: gzip" my-layer
 
 ## SEE ALSO
-containers-storage-metadata(1)
+[containers-storage-metadata(1)](containers-storage-metadata.md)

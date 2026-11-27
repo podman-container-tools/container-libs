@@ -5,8 +5,8 @@ GOMD2MAN ?= $(shell command -v go-md2man || echo '$(GOBIN)/go-md2man')
 
 docs: $(patsubst %.md,%,$(wildcard *.md))
 
-%.5:  %.5.md
-	$(GOMD2MAN) -in $^ -out $@
+%.5:  %.5.md ../../hack/md2man-preprocess.sed
+	sed -E -f ../../hack/md2man-preprocess.sed $< | $(GOMD2MAN) -out $@
 
 .PHONY: install
 install:

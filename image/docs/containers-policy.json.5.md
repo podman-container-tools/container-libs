@@ -64,7 +64,7 @@ The global `default` set of policy requirements is mandatory; all of the other f
 <!-- NOTE: Keep this in sync with transports/transports.go! -->
 ## Supported transports and their scopes
 
-See containers-transports(5) for general documentation about the transports and their reference syntax.
+See [containers-transports(5)](containers-transports.5.md) for general documentation about the transports and their reference syntax.
 
 ### `atomic:`
 
@@ -367,7 +367,7 @@ signed by one of the provided public keys.
 The `signedIdentity` field has the same semantics as in the `signedBy` requirement described above.
 Note that `cosign`-created signatures only contain a repository, so only `matchRepository` and `exactRepository` can be used to accept them (and that does not protect against substitution of a signed image with an unexpected tag).
 
-To use this with images hosted on image registries, the `use-sigstore-attachments` option needs to be enabled for the relevant registry or repository in the client's containers-registries.d(5).
+To use this with images hosted on image registries, the `use-sigstore-attachments` option needs to be enabled for the relevant registry or repository in the client's [containers-registries.d(5)](containers-registries.d.5.md).
 
 ## Examples
 

@@ -14,4 +14,4 @@ Queries the storage library's driver for status information.
     containers-storage status
 
 ## SEE ALSO
-containers-storage-version(1)
+[containers-storage-version(1)](containers-storage-version.md)
