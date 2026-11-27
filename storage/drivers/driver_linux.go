@@ -47,6 +47,8 @@ const (
 	FsMagicXfs = FsMagic(0x58465342)
 	// FsMagicZfs filesystem id for Zfs
 	FsMagicZfs = FsMagic(0x2fc12fc1)
+	// FsMagicBcachefs filesystem id for bcachefs
+	FsMagicBcachefs = FsMagic(0xca451a4e)
 	// FsMagicOverlay filesystem id for overlay
 	FsMagicOverlay = FsMagic(0x794C7630)
 	// FsMagicFUSE filesystem id for FUSE
@@ -94,6 +96,7 @@ var (
 	Priority = []string{
 		"overlay",
 		"btrfs",
+		"bcachefs",
 		"zfs",
 		"vfs",
 	}
@@ -102,6 +105,7 @@ var (
 	FsNames = map[FsMagic]string{
 		FsMagicAufs:        "aufs",
 		FsMagicBtrfs:       "btrfs",
+		FsMagicBcachefs:    "bcachefs",
 		FsMagicCramfs:      "cramfs",
 		FsMagicEcryptfs:    "ecryptfs",
 		FsMagicEROFS:       "erofs",
