@@ -52,6 +52,12 @@ type netavarkNetwork struct {
 	// defaultsubnetPools contains the subnets which must be used to allocate a free subnet by network create
 	defaultsubnetPools []config.SubnetPool
 
+	// defaultSubnetV6 is the default ipv6 subnet for the default network (may be zero value).
+	defaultSubnetV6 types.IPNet
+
+	// defaultSubnetPoolsV6 contains ipv6 subnets for allocating free subnets by network create
+	defaultSubnetPoolsV6 []config.SubnetPool
+
 	// dnsBindPort is set the port to pass to netavark for aardvark
 	dnsBindPort uint16
 
@@ -157,6 +163,16 @@ func NewNetworkInterface(conf *InitConfig) (types.ContainerNetwork, error) {
 		defaultSubnetPools = config.DefaultSubnetPools
 	}
 
+	var defaultSubnetV6 types.IPNet
+	if v6 := conf.Config.Network.DefaultSubnetV6; v6 != "" {
+		defaultSubnetV6, err = types.ParseCIDR(v6)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse default ipv6 subnet: %w", err)
+		}
+	}
+
+	defaultSubnetPoolsV6 := conf.Config.Network.DefaultSubnetPoolsV6
+
 	n := &netavarkNetwork{
 		networkConfigDir:      conf.NetworkConfigDir,
 		networkRunDir:         conf.NetworkRunDir,
@@ -170,6 +186,8 @@ func NewNetworkInterface(conf *InitConfig) (types.ContainerNetwork, error) {
 		defaultNetwork:        defaultNetworkName,
 		defaultSubnet:         defaultNet,
 		defaultsubnetPools:    defaultSubnetPools,
+		defaultSubnetV6:       defaultSubnetV6,
+		defaultSubnetPoolsV6:  defaultSubnetPoolsV6,
 		dnsBindPort:           conf.Config.Network.DNSBindPort,
 		pluginDirs:            conf.Config.Network.NetavarkPluginDirs.Get(),
 		lock:                  lock,
@@ -312,16 +330,25 @@ func parseNetwork(network *types.Network) error {
 }
 
 func (n *netavarkNetwork) createDefaultNetwork() (*types.Network, error) {
+	subnets := []types.Subnet{
+		{Subnet: n.defaultSubnet},
+	}
+
+	ipv6Enabled := false
+	if n.defaultSubnetV6.IP != nil {
+		subnets = append(subnets, types.Subnet{Subnet: n.defaultSubnetV6})
+		ipv6Enabled = true
+	}
+
 	network := &types.Network{
 		Name:             n.defaultNetwork,
 		NetworkInterface: defaultBridgeName + "0",
 		// Important do not change this ID
-		ID:      "2f259bab93aaaaa2542ba43ef33eb990d0999ee1b9924b557b7be53c0b7a1bb9",
-		Driver:  types.BridgeNetworkDriver,
-		Created: time.Now(),
-		Subnets: []types.Subnet{
-			{Subnet: n.defaultSubnet},
-		},
+		ID:          "2f259bab93aaaaa2542ba43ef33eb990d0999ee1b9924b557b7be53c0b7a1bb9",
+		Driver:      types.BridgeNetworkDriver,
+		Created:     time.Now(),
+		Subnets:     subnets,
+		IPv6Enabled: ipv6Enabled,
 		IPAMOptions: map[string]string{
 			"driver": types.HostLocalIPAMDriver,
 		},

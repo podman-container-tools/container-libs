@@ -166,6 +166,7 @@ func (n *netavarkNetwork) networkCreate(newNetwork *types.Network, defaultNet bo
 
 	type ConfigOpts struct {
 		SubnetPools          []config.SubnetPool `json:"subnet_pools"`
+		SubnetPoolsV6        []config.SubnetPool `json:"subnet_pools_v6,omitempty"`
 		DefaultInterfaceName string              `json:"default_interface_name"`
 		CheckUsedSubnets     bool                `json:"check_used_subnets"`
 	}
@@ -190,6 +191,7 @@ func (n *netavarkNetwork) networkCreate(newNetwork *types.Network, defaultNet bo
 		},
 		Options: ConfigOpts{
 			SubnetPools:          n.defaultsubnetPools,
+			SubnetPoolsV6:        n.defaultSubnetPoolsV6,
 			DefaultInterfaceName: n.DefaultInterfaceName(),
 			CheckUsedSubnets:     !defaultNet,
 		},
