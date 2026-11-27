@@ -319,6 +319,19 @@ func isNetworkFileSystem(fsMagic graphdriver.FsMagic) bool {
 	return false
 }
 
+func isIdmapNetworkFileSystem(fsMagic graphdriver.FsMagic) bool {
+	switch fsMagic {
+	// network file systems with idmapped mounts support...
+	case graphdriver.FsMagicLUSTRE:
+		return true
+	}
+	return false
+}
+
+func isNonIdmapNetworkFileSystem(fsMagic graphdriver.FsMagic) bool {
+	return isNetworkFileSystem(fsMagic) && !isIdmapNetworkFileSystem(fsMagic)
+}
+
 // Init returns the a native diff driver for overlay filesystem.
 // If overlay filesystem is not supported on the host, a wrapped graphdriver.ErrNotSupported is returned as error.
 // If an overlay filesystem is not supported over an existing filesystem then a wrapped graphdriver.ErrIncompatibleFS is returned.
@@ -390,7 +403,7 @@ func Init(home string, options graphdriver.Options) (graphdriver.Driver, error) 
 		case graphdriver.FsMagicAufs, graphdriver.FsMagicOverlay, graphdriver.FsMagicEcryptfs:
 			return nil, fmt.Errorf("'overlay' is not supported over %s, a mount_program is required: %w", backingFs, graphdriver.ErrIncompatibleFS)
 		}
-		if unshare.IsRootless() && isNetworkFileSystem(fsMagic) {
+		if unshare.IsRootless() && isNonIdmapNetworkFileSystem(fsMagic) {
 			return nil, fmt.Errorf("a network file system with user namespaces is not supported.  Please use a mount_program: %w", graphdriver.ErrIncompatibleFS)
 		}
 	}
