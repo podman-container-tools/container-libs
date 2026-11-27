@@ -7,11 +7,11 @@ MANPAGES ?= $(MANPAGES_MD:%.md=%)
 .PHONY: docs
 docs: $(patsubst %.md,%.1,$(filter-out %.5.md,$(wildcard *.md))) containers-storage.conf.5
 
-%.1: %.md
-	$(GOMD2MAN) -in $^ -out $@
+%.1: %.md ../../hack/md2man-preprocess.sed
+	sed -E -f ../../hack/md2man-preprocess.sed $< | $(GOMD2MAN) -out $@
 
-containers-storage.conf.5: containers-storage.conf.5.md
-	$(GOMD2MAN) -in $^ -out $@
+containers-storage.conf.5: containers-storage.conf.5.md ../../hack/md2man-preprocess.sed
+	sed -E -f ../../hack/md2man-preprocess.sed $< | $(GOMD2MAN) -out $@
 
 .PHONY: install
 install:

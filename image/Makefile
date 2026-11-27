@@ -43,8 +43,8 @@ all: test lint
 build:
 	go build $(BUILDFLAGS) ./...
 
-$(MANPAGES): %: %.md
-	$(GOMD2MAN) -in $< -out $@
+$(MANPAGES): %: %.md ../hack/md2man-preprocess.sed
+	sed -E -f ../hack/md2man-preprocess.sed $< | $(GOMD2MAN) -out $@
 
 docs: $(MANPAGES)
 
