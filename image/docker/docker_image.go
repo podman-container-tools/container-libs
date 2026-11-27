@@ -6,10 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
-	"strings"
 
 	"github.com/opencontainers/go-digest"
+	imgspecv1 "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/sirupsen/logrus"
 	"go.podman.io/image/v5/docker/reference"
 	"go.podman.io/image/v5/internal/digests"
@@ -115,26 +114,44 @@ func GetRepositoryTags(ctx context.Context, sys *types.SystemContext, ref types.
 			tags = append(tags, tag)
 		}
 
-		link := res.Header.Get("Link")
-		if link == "" {
-			break
-		}
-
-		linkURLPart, _, _ := strings.Cut(link, ";")
-		linkURL, err := url.Parse(strings.Trim(linkURLPart, "<>"))
+		path, err = nextPagePath(res)
 		if err != nil {
 			return tags, err
 		}
-
-		// can be relative or absolute, but we only want the path (and I
-		// guess we're in trouble if it forwards to a new place...)
-		path = linkURL.Path
-		if linkURL.RawQuery != "" {
-			path += "?"
-			path += linkURL.RawQuery
+		if path == "" {
+			break
 		}
 	}
 	return tags, nil
+}
+
+// ListReferrers lists artifacts attached to the referenced image.
+// It queries the repository that serves the image
+// Optionally, provide an artifactType, but it's the responsibility of the registry to filter the results.
+func ListReferrers(ctx context.Context, sys *types.SystemContext, ref types.ImageReference, artifactType string) ([]imgspecv1.Descriptor, error) {
+	dr, ok := ref.(dockerReference)
+	if !ok {
+		return nil, errors.New("ref must be a dockerReference")
+	}
+	src, err := newImageSource(ctx, dr, private.NewImageSourceOptions{
+		Sys:     sys,
+		Digests: digests.CanonicalDefault(),
+	})
+	if err != nil {
+		return nil, err
+	}
+	defer src.Close()
+	var subjectDigest digest.Digest
+	if pinned, ok := src.physicalRef.ref.(reference.Digested); ok {
+		// Referrers are indexed by the exact subject digest, even if it is not SHA-256 e.g. SHA-512.
+		subjectDigest = pinned.Digest()
+	} else {
+		subjectDigest, err = src.manifestDigest(ctx, nil)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return src.c.getReferrers(ctx, src.physicalRef, subjectDigest, artifactType)
 }
 
 // GetDigest returns the image's digest
