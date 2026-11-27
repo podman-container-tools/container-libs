@@ -32,4 +32,4 @@ reproduce that diff if asked to.
     containers-storage check -r -f
 
 ## SEE ALSO
-containers-storage(1)
+[containers-storage(1)](containers-storage.md)

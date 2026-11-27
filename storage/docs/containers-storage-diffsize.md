@@ -15,6 +15,6 @@ specified layer.
     containers-storage diffsize my-base-layer
 
 ## SEE ALSO
-containers-storage-applydiff(1)
-containers-storage-changes(1)
-containers-storage-diff(1)
+[containers-storage-applydiff(1)](containers-storage-applydiff.md)
+[containers-storage-changes(1)](containers-storage-changes.md)
+[containers-storage-diff(1)](containers-storage-diff.md)

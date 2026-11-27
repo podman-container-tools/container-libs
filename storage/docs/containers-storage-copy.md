@@ -21,4 +21,4 @@ target layer.
     containers-storage copy layer-with-mapping:/root/config.txt layer-with-different-mapping:/root/config.txt
 
 ## SEE ALSO
-containers-storage(1)
+[containers-storage(1)](containers-storage.md)

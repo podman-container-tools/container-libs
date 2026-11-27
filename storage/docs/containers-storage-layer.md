@@ -16,5 +16,5 @@ its parent, if it has one.
     containers-storage layer my-favorite-layer
 
 ## SEE ALSO
-containers-storage-image(1)
-containers-storage-container(1)
+[containers-storage-image(1)](containers-storage-image.md)
+[containers-storage-container(1)](containers-storage-container.md)

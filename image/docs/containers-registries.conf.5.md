@@ -51,7 +51,7 @@ added.
 If `CONTAINERS_REGISTRIES_CONF_OVERRIDE` is set, it specifies an additional path that is being read last,
 unless overridden by application-specific configuration.
 
-See **containers-config(5)** for a more detailed description on how the files are loaded.
+See **[containers-config(5)](../../common/docs/containers-config.5.md)** for a more detailed description on how the files are loaded.
 
 
 ### GLOBAL SETTINGS
@@ -60,7 +60,7 @@ See **containers-config(5)** for a more detailed description on how the files ar
 : An array of _host_[`:`_port_] registries to try when pulling an unqualified image, in order.
 
 `credential-helpers`
-: An array of default credential helpers used as external credential stores.  Note that "containers-auth.json" is a reserved value to use auth files as specified in containers-auth.json(5).  The credential helpers are set to `["containers-auth.json"]` if none are specified.
+: An array of default credential helpers used as external credential stores.  Note that "containers-auth.json" is a reserved value to use auth files as specified in [containers-auth.json(5)](containers-auth.json.5.md).  The credential helpers are set to `["containers-auth.json"]` if none are specified.
 
 `additional-layer-store-auth-helper`
 : A string containing the helper binary name. This enables passing registry credentials to an
@@ -385,7 +385,7 @@ the destination registry is unambiguous. Pulling by digest
 tags.
 
 # SEE ALSO
-containers-config(5), containers-auth.json(5), containers-certs.d(5)
+[containers-config(5)](../../common/docs/containers-config.5.md), [containers-auth.json(5)](containers-auth.json.5.md), [containers-certs.d(5)](containers-certs.d.5.md)
 
 # HISTORY
 Dec 2019, Warning added for unqualified image names by Tom Sweeney <tsweeney@redhat.com>

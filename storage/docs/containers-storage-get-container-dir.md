@@ -15,4 +15,4 @@ information which should be cleaned up when the container is deleted.
     containers-storage get-container-dir my-container
 
 ## SEE ALSO
-containers-storage-get-container-run-dir(1)
+[containers-storage-get-container-run-dir(1)](containers-storage-get-container-run-dir.md)

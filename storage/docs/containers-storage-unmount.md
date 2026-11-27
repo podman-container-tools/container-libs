@@ -16,5 +16,5 @@ Unmounts a layer or a container's layer from the host's filesystem.
     containers-storage unmount /var/lib/containers/storage/mounts/my-container
 
 ## SEE ALSO
-containers-storage-mount(1)
-containers-storage-mounted(1)
+[containers-storage-mount(1)](containers-storage-mount.md)
+[containers-storage-mounted(1)](containers-storage-mounted.md)

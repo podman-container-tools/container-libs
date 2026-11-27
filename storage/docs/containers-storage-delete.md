@@ -15,6 +15,6 @@ can corrupt data, and may be removed.
     containers-storage delete my-base-layer
 
 ## SEE ALSO
-containers-storage-delete-container(1)
-containers-storage-delete-image(1)
-containers-storage-delete-layer(1)
+[containers-storage-delete-container(1)](containers-storage-delete-container.md)
+[containers-storage-delete-image(1)](containers-storage-delete-image.md)
+[containers-storage-delete-layer(1)](containers-storage-delete-layer.md)

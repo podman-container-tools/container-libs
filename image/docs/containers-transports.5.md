@@ -26,7 +26,7 @@ The format of _docker-reference_ is described in detail in the **docker** transp
 The _storage-specifier_ allows for referencing storage locations on the file system and has the format `[`[_driver_`@`]_root_[`+`_run-root_][`:`_options_]`]` where the optional _driver_ refers to the storage driver (e.g., `overlay` or `btrfs`) and where _root_ is an absolute path to the storage's root directory.
 The optional _run-root_ can be used to specify the run directory of the storage where all temporary writable content is stored.
 The optional _options_ are a comma-separated list of driver-specific options.
-Please refer to containers-storage.conf(5) for further information on the drivers and supported options.
+Please refer to [containers-storage.conf(5)](../../storage/docs/containers-storage.conf.5.md) for further information on the drivers and supported options.
 
 ### **dir:**_path_
 
@@ -38,7 +38,7 @@ This is a non-standardized format, primarily useful for debugging or noninvasive
 An image in a registry implementing the "Docker Registry HTTP API V2".
 By default, uses the authorization state in `$XDG_RUNTIME_DIR/containers/auth.json`, which is set using podman-login(1).
 If the authorization state is not found there, `$HOME/.docker/config.json` is checked, which is set using docker-login(1).
-The containers-registries.conf(5) further allows for configuring various settings of a registry.
+The [containers-registries.conf(5)](containers-registries.conf.5.md) further allows for configuring various settings of a registry.
 
 Note that a _docker-reference_ has the following format: _name_[`:`_tag_ | `@`_digest_].
 While the docker transport does not support both a tag and a digest at the same time some formats like containers-storage do.
@@ -133,7 +133,7 @@ $ skopeo copy docker://docker.io/library/alpine:latest containers-storage:alpine
 
 ## SEE ALSO
 
-docker-login(1), docker-save(1), podman-login(1), skopeo-copy(1), skopeo-inspect(1), tar(1), container-registries.conf(5), containers-storage.conf(5)
+docker-login(1), docker-save(1), podman-login(1), skopeo-copy(1), skopeo-inspect(1), tar(1), [containers-registries.conf(5)](containers-registries.conf.5.md), [containers-storage.conf(5)](../../storage/docs/containers-storage.conf.5.md)
 
 ## AUTHORS
 

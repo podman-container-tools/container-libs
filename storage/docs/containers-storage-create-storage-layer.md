@@ -25,6 +25,6 @@ layer.
     containers-storage create-storage-layer somelayer
 
 ## SEE ALSO
-containers-storage-create-container(1)
-containers-storage-create-image(1)
-containers-storage-delete-layer(1)
+[containers-storage-create-container(1)](containers-storage-create-container.md)
+[containers-storage-create-image(1)](containers-storage-create-image.md)
+[containers-storage-delete-layer(1)](containers-storage-delete-layer.md)

@@ -6,9 +6,9 @@ containers-config - Rules for loading container engine configuration files
 
 # DESCRIPTION
 
-This document describes the loading order of the **containers.conf(5)**,
-**containers-storage.conf(5)** and
-**containers-registries.conf(5)**.
+This document describes the loading order of the **[containers.conf(5)](containers.conf.5.md)**,
+**[containers-storage.conf(5)](../../storage/docs/containers-storage.conf.5.md)** and
+**[containers-registries.conf(5)](../../image/docs/containers-registries.conf.5.md)**.
 Refer to their individual man pages for more details on the file formats.
 
 # Search Locations
@@ -157,6 +157,6 @@ field_6 = f
 
 # SEE ALSO
 
-**containers.conf(5)**,
-**containers-storage.conf(5)**,
-**containers-registries.conf(5)**
+**[containers.conf(5)](containers.conf.5.md)**,
+**[containers-storage.conf(5)](../../storage/docs/containers-storage.conf.5.md)**,
+**[containers-registries.conf(5)](../../image/docs/containers-registries.conf.5.md)**

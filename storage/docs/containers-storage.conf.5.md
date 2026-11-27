@@ -328,13 +328,13 @@ The following search locations are used:
 - `$XDG_CONFIG_HOME/containers/storage.conf` or if `$XDG_CONFIG_HOME` is unset then `$HOME/.config/containers/storage.conf`
 - `$XDG_CONFIG_HOME/containers/storage.conf.d/` or if `$XDG_CONFIG_HOME` is unset then `$HOME/.config/containers/storage.conf.d/`
 
-See **containers-config(5)** for a more detailed description on how the files are loaded.
+See **[containers-config(5)](../../common/docs/containers-config.5.md)** for a more detailed description on how the files are loaded.
 
 /etc/projects - XFS persistent project root definition
 /etc/projid -  XFS project name mapping file
 
 ## SEE ALSO
-**containers-config(5)**, **semanage(8)**, **restorecon(8)**, **mount(8)**, **fuse-overlayfs(1)**, **xfs_quota(8)**, **projects(5)**, **projid(5)**
+**[containers-config(5)](../../common/docs/containers-config.5.md)**, **semanage(8)**, **restorecon(8)**, **mount(8)**, **fuse-overlayfs(1)**, **xfs_quota(8)**, **projects(5)**, **projid(5)**
 
 ## HISTORY
 May 2017, Originally compiled by Dan Walsh <dwalsh@redhat.com>

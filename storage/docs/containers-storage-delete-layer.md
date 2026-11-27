@@ -15,6 +15,6 @@ and is not the parent of any other layers.
     containers-storage delete-layer my-base-layer
 
 ## SEE ALSO
-containers-storage-create-layer(1)
-containers-storage-delete-image(1)
+[containers-storage-create-layer(1)](containers-storage-create-layer.md)
+[containers-storage-delete-image(1)](containers-storage-delete-image.md)
 containers-storage-delete-layer(1)

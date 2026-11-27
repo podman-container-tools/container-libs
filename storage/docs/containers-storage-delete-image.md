@@ -17,6 +17,6 @@ removed, and this will be repeated for each parent's parent.
     containers-storage delete-image my-base-image
 
 ## SEE ALSO
-containers-storage-create-image(1)
-containers-storage-delete-container(1)
-containers-storage-delete-layer(1)
+[containers-storage-create-image(1)](containers-storage-create-image.md)
+[containers-storage-delete-container(1)](containers-storage-delete-container.md)
+[containers-storage-delete-layer(1)](containers-storage-delete-layer.md)

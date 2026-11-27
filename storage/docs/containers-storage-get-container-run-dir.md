@@ -15,4 +15,4 @@ information which should be cleaned up when the host is rebooted.
     containers-storage get-container-run-dir my-container
 
 ## SEE ALSO
-containers-storage-get-container-dir(1)
+[containers-storage-get-container-dir(1)](containers-storage-get-container-dir.md)

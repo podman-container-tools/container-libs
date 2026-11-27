@@ -27,6 +27,6 @@ will be removed from the layer, image, or container.
      f3be6c6134d0d980936b4c894f1613b69a62b79588fdeda744d0be3693bde8ec
 
 ## SEE ALSO
-containers-storage-add-names(1)
-containers-storage-get-names(1)
-containers-storage-remove-names(1)
+[containers-storage-add-names(1)](containers-storage-add-names.md)
+[containers-storage-get-names(1)](containers-storage-get-names.md)
+[containers-storage-remove-names(1)](containers-storage-remove-names.md)

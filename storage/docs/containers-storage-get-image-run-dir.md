@@ -15,4 +15,4 @@ information which should be cleaned up when the host is rebooted.
     containers-storage get-image-run-dir my-image
 
 ## SEE ALSO
-containers-storage-get-image-dir(1)
+[containers-storage-get-image-dir(1)](containers-storage-get-image-dir.md)

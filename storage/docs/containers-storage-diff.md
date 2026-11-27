@@ -33,6 +33,6 @@ and that layer diff was compressed, it will be decompressed for output.
     containers-storage diff my-base-layer
 
 ## SEE ALSO
-containers-storage-applydiff(1)
-containers-storage-changes(1)
-containers-storage-diffsize(1)
+[containers-storage-applydiff(1)](containers-storage-applydiff.md)
+[containers-storage-changes(1)](containers-storage-changes.md)
+[containers-storage-diffsize(1)](containers-storage-diffsize.md)

@@ -24,6 +24,6 @@ containers-storage applydiff-using-staging-dir 5891b5b522 /path/to/diff
 
 ## SEE ALSO
 containers-storage-apply-diff(1)
-containers-storage-changes(1)
-containers-storage-diff(1)
-containers-storage-diffsize(1)
+[containers-storage-changes(1)](containers-storage-changes.md)
+[containers-storage-diff(1)](containers-storage-diff.md)
+[containers-storage-diffsize(1)](containers-storage-diffsize.md)
