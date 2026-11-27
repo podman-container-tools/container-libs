@@ -286,12 +286,13 @@ func Image(ctx context.Context, policyContext *signature.PolicyContext, destRef,
 	}
 	defer safeClose("src", rawSource)
 
-	// If reportWriter is not a TTY (e.g., when piping to a file), do not
-	// print the progress bars to avoid long and hard to parse output.
-	// Instead use printCopyInfo() to print single line "Copying ..." messages.
+	// If reportWriter is not a TTY (e.g., when piping to a file),
+	// Set text-based aggregate progress bar.
 	progressOutput := reportWriter
 	if !isTTY(reportWriter) {
 		progressOutput = io.Discard
+
+		setupNonTTYProgress(reportWriter, options)
 	}
 
 	c := &copier{
