@@ -903,11 +903,9 @@ func updatedBlobInfoFromReuse(inputInfo types.BlobInfo, reusedBlob private.Reuse
 	// Handling of compression, encryption, and the related MIME types and the like are all the responsibility
 	// of the generic code in this package.
 	res := types.BlobInfo{
-		Digest: reusedBlob.Digest,
-		Size:   reusedBlob.Size,
-		URLs:   nil, // This _must_ be cleared if Digest changes; clear it in other cases as well, to preserve previous behavior.
-		// FIXME: This should remove zstd:chunked annotations IF the original was chunked and the new one isn’t
-		// (but those annotations being left with incorrect values should not break pulls).
+		Digest:               reusedBlob.Digest,
+		Size:                 reusedBlob.Size,
+		URLs:                 nil, // This _must_ be cleared if Digest changes; clear it in other cases as well, to preserve previous behavior.
 		Annotations:          maps.Clone(inputInfo.Annotations),
 		MediaType:            inputInfo.MediaType, // Mostly irrelevant, MediaType is updated based on Compression*/CryptoOperation.
 		CompressionOperation: reusedBlob.CompressionOperation,
@@ -924,6 +922,12 @@ func updatedBlobInfoFromReuse(inputInfo types.BlobInfo, reusedBlob private.Reuse
 		if res.CompressionAlgorithm == nil {
 			res.CompressionAlgorithm = inputInfo.CompressionAlgorithm
 		}
+	}
+	// The chunked annotations describe the original blob's TOC; if the
+	// blob is different, the TOC links don't match, so the annotations
+	// must not survive into the result.
+	if reusedBlob.Digest != inputInfo.Digest {
+		res.Annotations = annotationsAfterCompressionChange(res.Annotations)
 	}
 	if len(reusedBlob.CompressionAnnotations) != 0 {
 		if res.Annotations == nil {
